@@ -562,6 +562,11 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         # signed statement link sent to it.
         "ledger:operators:handled_personally",
         "ledger:operators:statement_links_revoke",
+        # PLAN-014 H2: the PORTAL card's invitation, disable, enable and reset.
+        "ledger:operators:portal_invite",
+        "ledger:operators:portal_disable",
+        "ledger:operators:portal_enable",
+        "ledger:operators:portal_reset",
     }
     assert {
         "ledger:operators:list",
@@ -579,6 +584,10 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:new_charge": Role.BILLING,
         "ledger:operators:handled_personally": Role.BILLING,
         "ledger:operators:statement_links_revoke": Role.BILLING,
+        "ledger:operators:portal_invite": Role.BILLING,
+        "ledger:operators:portal_disable": Role.BILLING,
+        "ledger:operators:portal_enable": Role.BILLING,
+        "ledger:operators:portal_reset": Role.BILLING,
         "ledger:operators:archive": Role.ADMIN,
         # PLAN-014 C3: the details, the link and the retry post to the lease's billing.
         "ledger:leases:billing": Role.BILLING,
@@ -1244,6 +1253,19 @@ def test_006c_removing_the_email_of_a_linked_lease_updates_and_stays_linked(
 # --- PLAN-012a D3: SMS phone and consent times ---------------------------------------------
 
 
+#: A fixed instant for the consent tests, away from a daylight-saving change: a local
+#: ``datetime-local`` value in the repeated hour of the fall-back (01:00–02:00 New York, early
+#: November) is ambiguous and reads as its first occurrence, so tests on the real clock failed
+#: in that one hour (gate I-b, 2026-11-01 01:40 EST).
+CONSENT_NOW = datetime(2026, 10, 15, 16, 0, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def consent_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
+    monkeypatch.setattr("django.utils.timezone.now", lambda: CONSENT_NOW)
+    return CONSENT_NOW
+
+
 def _local_input(moment: datetime) -> str:
     """A time as the ``datetime-local`` input sends it, in the project's time zone."""
     return timezone.localtime(moment).strftime(CONSENT_INPUT_FORMAT)
@@ -1261,7 +1283,7 @@ def test_the_form_shows_the_sms_phone_and_consent_fields(billing: Client) -> Non
 
 
 def test_billing_saves_an_sms_phone_and_two_consent_times_without_a_provider_call(
-    billing: Client, fake: FakeProvider
+    billing: Client, fake: FakeProvider, consent_clock: datetime
 ) -> None:
     billing.post(NEW, form_data())
     operator = Operator.objects.get()
@@ -1344,7 +1366,7 @@ def test_a_phone_not_in_international_format_is_refused_with_the_format_named(
 
 
 def test_a_consent_time_one_minute_ahead_is_refused_and_now_is_accepted(
-    billing: Client, fake: FakeProvider
+    billing: Client, fake: FakeProvider, consent_clock: datetime
 ) -> None:
     operator = new_operator(email=None)
     edit = f"{detail(operator)}edit/"

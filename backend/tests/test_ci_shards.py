@@ -87,3 +87,31 @@ def test_the_workflow_runs_the_four_shards_and_deploys_after_all() -> None:
     assert "migrations-complete" in deploy.split("steps:")[0]
     on_block = workflow.split("\non:")[1].split("\npermissions:")[0]
     assert "pull_request:" in on_block and re.search(r"push:\s*\n\s*branches:\s*\[main\]", on_block)
+
+
+def test_the_three_unit_shards_cover_every_file_once_with_headroom() -> None:
+    """2026-11-01 (PR #30): two halves had reached 20 and over 25 minutes; the unit tests run
+    in three shards balanced by measured time. Shards A and B name their files by glob; shard
+    C runs backend/tests ignoring exactly those globs, so every unit test file runs in one
+    shard and only one, and a new file lands in C by default. Each step keeps 25 minutes."""
+    workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+    shards = {
+        name: workflow.split(f"name: Unit tests, shard {name}")[1].split("- name:")[0]
+        for name in "ABC"
+    }
+    glob = r"backend/tests/(test_[^ \n\"]*\*\.py)"
+    a = re.findall(glob, shards["A"])
+    b = re.findall(glob, shards["B"])
+    ignored = re.findall(r'--ignore-glob="' + glob + '"', shards["C"])
+    assert len(a) == 1 and len(b) == 1
+    assert sorted(ignored) == sorted(a + b)
+    assert "--ignore-glob" not in shards["A"] + shards["B"]
+    for shard in shards.values():
+        assert "timeout-minutes: 25" in shard
+    files = sorted(p.name for p in (Path(__file__).parent).glob("test_*.py"))
+    in_a = {f.name for f in Path(__file__).parent.glob(a[0])}
+    in_b = {f.name for f in Path(__file__).parent.glob(b[0])}
+    assert in_a and in_b and not in_a & in_b
+    assert set(files) - in_a - in_b  # shard C is not empty
+    needs = workflow.split("deploy-staging:")[1].split("needs:")[1].split("\n")[0]
+    assert all(job in needs for job in ("unit-a", "unit-b", "unit-c"))

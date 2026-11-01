@@ -58,6 +58,43 @@ PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset(
     }
 )
 
+#: PLAN-014 H1: the operator portal's routes. Their own middleware
+#: (``portal.middleware.PortalAuthMiddleware``) decides who may open them: the staff
+#: authentication, second-factor and role checks exempt the ``portal:`` namespace, and a
+#: staff session opens none of them. Every portal POST is CSRF-protected. Only the
+#: :data:`PORTAL_PUBLIC_ROUTE_NAMES` open without a signed-in portal user.
+PORTAL_NAMESPACE = "portal"
+PORTAL_PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset(
+    {
+        "portal:login",
+        "portal:invite",
+        "portal:reset_request",
+        "portal:reset_confirm",
+        "portal:logout",
+        "portal:not_found",
+    }
+)
+PORTAL_ROUTE_NAMES: frozenset[str] = PORTAL_PUBLIC_ROUTE_NAMES | frozenset(
+    {
+        "portal:home",
+        "portal:store",
+        "portal:invoices",
+        "portal:payments",
+        "portal:statement",
+        "portal:pay",
+        "portal:pay_status",
+        "portal:bank",
+        "portal:account",
+        "portal:password",
+    }
+)
+
+
+def is_portal_route(name: str | None) -> bool:
+    """Whether ``name`` is a route of the portal's namespace."""
+    return name is not None and name.startswith(f"{PORTAL_NAMESPACE}:")
+
+
 #: Public routes that also accept an unsafe method: the login form posts to itself, and
 #: the payment provider posts events to the receiver (CSRF-exempt; 404 without the token).
 PUBLIC_UNSAFE_ROUTE_NAMES: frozenset[str] = frozenset({"two_factor:login", "webhooks:receive"})
@@ -288,6 +325,12 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:operators:handled_personally": RouteRule(min_role=Role.BILLING, methods=POST),
     # PLAN-011b D4: revoke every signed statement link of an operator (billing).
     "ledger:operators:statement_links_revoke": RouteRule(min_role=Role.BILLING, methods=POST),
+    # PLAN-014 H2: the PORTAL card's invitation (and its resend), disable, enable and
+    # password reset (billing; the views check again).
+    "ledger:operators:portal_invite": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:operators:portal_disable": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:operators:portal_enable": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:operators:portal_reset": RouteRule(min_role=Role.BILLING, methods=POST),
     # PLAN-014 D6: "Send a message now" on a charge's page.
     "ledger:charges:send_message": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:send_message": RouteRule(min_role=Role.BILLING, methods=POST),

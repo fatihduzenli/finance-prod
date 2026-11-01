@@ -1,0 +1,12 @@
+{% extends "portal/base.html" %}
+{% block title %}Choose a new password{% endblock %}
+{% block content %}
+<section class="portal-card portal-narrow">
+  <h1>Choose a new password</h1>
+  <p>For <strong id="link-email">{{ email }}</strong>. Every other signed-in browser is signed out.</p>
+  <form method="post" id="reset-confirm-form">{% csrf_token %}
+    {% include "portal/_password_fields.html" %}
+    <button type="submit" class="portal-button">Save and sign in</button>
+  </form>
+</section>
+{% endblock %}

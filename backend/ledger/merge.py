@@ -2,8 +2,11 @@
 
 A template's subject and body may name exactly the placeholders of its code's list, each as
 ``{name}``: :data:`FIELDS` (the closed set of PLAN-014 D4) for every message about a charge,
-:data:`FINAL_STATEMENT_FIELDS` for the template ``final_statement`` (:func:`fields_for`);
-:data:`MERGE_FIELDS` is every placeholder of either list. ``{{`` and ``}}`` write a literal
+:data:`FINAL_STATEMENT_FIELDS` for the template ``final_statement``, and for the two portal
+messages of PLAN-014 H2 :data:`PORTAL_INVITE_FIELDS` (``portal_invite``, whose own placeholder
+``{set_password_link}`` no other template may use) and :data:`PORTAL_RESET_FIELDS`
+(``portal_reset``, with ``{reset_link}``) (:func:`fields_for`); :data:`MERGE_FIELDS` is every
+placeholder of any list. ``{{`` and ``}}`` write a literal
 brace. Nothing else is accepted: no attribute or index access (``{operator_name.__dict__}``,
 ``{amount[0]}``), no conversion (``{amount!r}``), no format specification
 (``{amount:>99999}``), no positional or unknown placeholder (``{}``, ``{0}``,
@@ -51,13 +54,40 @@ FINAL_STATEMENT_FIELDS: tuple[str, ...] = (
     "amount_owed",
     "end_date",
 )
-MERGE_FIELDS: tuple[str, ...] = (
-    *FIELDS,
-    *(name for name in FINAL_STATEMENT_FIELDS if name not in FIELDS),
+#: PLAN-014 H2: the portal invitation (``portal_invite``) and the password reset
+#: (``portal_reset``), each with its one-time link, which only that template may name.
+PORTAL_INVITE_CODE = "portal_invite"
+PORTAL_RESET_CODE = "portal_reset"
+PORTAL_INVITE_FIELDS: tuple[str, ...] = (
+    "operator_name",
+    "company_name",
+    "support_email",
+    "set_password_link",
+)
+PORTAL_RESET_FIELDS: tuple[str, ...] = (
+    "operator_name",
+    "company_name",
+    "support_email",
+    "reset_link",
+)
+PORTAL_CODES: frozenset[str] = frozenset({PORTAL_INVITE_CODE, PORTAL_RESET_CODE})
+_CODE_FIELDS: dict[str, tuple[str, ...]] = {
+    FINAL_STATEMENT_CODE: FINAL_STATEMENT_FIELDS,
+    PORTAL_INVITE_CODE: PORTAL_INVITE_FIELDS,
+    PORTAL_RESET_CODE: PORTAL_RESET_FIELDS,
+}
+MERGE_FIELDS: tuple[str, ...] = tuple(
+    dict.fromkeys((*FIELDS, *FINAL_STATEMENT_FIELDS, *PORTAL_INVITE_FIELDS, *PORTAL_RESET_FIELDS))
 )
 _ALLOWED = frozenset(MERGE_FIELDS)
 #: The exact sets of values :func:`render` accepts.
-_VALUE_SETS = (frozenset(FIELDS), frozenset(FINAL_STATEMENT_FIELDS), _ALLOWED)
+_VALUE_SETS = (
+    frozenset(FIELDS),
+    frozenset(FINAL_STATEMENT_FIELDS),
+    frozenset(PORTAL_INVITE_FIELDS),
+    frozenset(PORTAL_RESET_FIELDS),
+    _ALLOWED,
+)
 UNREADABLE = "Braces must pair: write {{ and }} for a literal brace."
 UNKNOWN = "{{{name}}} is not a placeholder this template can use."
 UNKNOWN_UNNAMED = "A placeholder in this text is not one this template can use."
@@ -77,7 +107,7 @@ def not_allowed(fields: tuple[str, ...] = MERGE_FIELDS) -> str:
 
 def fields_for(code: str) -> tuple[str, ...]:
     """The placeholders a template with this code may use."""
-    return FINAL_STATEMENT_FIELDS if code == FINAL_STATEMENT_CODE else FIELDS
+    return _CODE_FIELDS.get(code, FIELDS)
 
 
 #: The refusal :func:`render` raises.

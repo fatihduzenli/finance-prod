@@ -1,0 +1,17 @@
+{% extends "portal/base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<section class="portal-card portal-narrow">
+  <h1>Sign in</h1>
+  {% if message %}<p class="portal-error" id="login-message" role="alert">{{ message }}</p>{% endif %}
+  <form method="post" action="{% url 'portal:login' %}" id="login-form">{% csrf_token %}
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <label for="login-email">E-mail</label>
+    <input id="login-email" type="email" name="email" value="{{ email }}" autocomplete="username" required maxlength="254">
+    <label for="login-password">Password</label>
+    <input id="login-password" type="password" name="password" autocomplete="current-password" required>
+    <button type="submit" class="portal-button">Sign in</button>
+  </form>
+  <p><a href="{% url 'portal:reset_request' %}" id="forgot-link">Forgot your password?</a></p>
+</section>
+{% endblock %}

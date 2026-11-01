@@ -8,6 +8,11 @@ OTPMiddleware:
 3. MfaRequiredMiddleware    - 403 for a signed-in user who has not passed the second
                               factor, except on enrolment and logout.
 4. RoleEnforcementMiddleware - 403 for an unsafe request the role registry refuses.
+
+The operator portal's routes (the ``portal:`` namespace, PLAN-014 H1) are exempt from 2 to
+4: ``portal.middleware`` signs its own principal in and out, and a staff session opens none
+of them. 1 ignores every path under ``/portal/``: browsing the portal neither reads nor
+refreshes a staff session's idle timer.
 """
 
 from __future__ import annotations
@@ -33,11 +38,13 @@ from accounts.registry import (
     PUBLIC_UNSAFE_ROUTE_NAMES,
     SAFE_METHODS,
     is_allowed,
+    is_portal_route,
     is_public_path,
     rule_for,
     view_name,
 )
 from accounts.roles import role_of
+from portal.middleware import PORTAL_PREFIX
 
 GetResponse = Callable[[HttpRequest], HttpResponseBase]
 
@@ -53,6 +60,11 @@ def _resolved_name(request: HttpRequest) -> str | None:
 
 def _is_public(request: HttpRequest) -> bool:
     return is_public_path(request.path_info) or _resolved_name(request) in PUBLIC_ROUTE_NAMES
+
+
+def _is_portal(request: HttpRequest) -> bool:
+    """A route of the operator portal: its own middleware decides (PLAN-014 H1)."""
+    return is_portal_route(_resolved_name(request))
 
 
 def _is_verified(user: AbstractBaseUser | AnonymousUser) -> bool:
@@ -71,10 +83,13 @@ class SessionPolicyMiddleware(_Middleware):
 
     Expiry flushes the session (logout), so the request continues as anonymous and the
     next middleware answers 401. A signed-in session without a recorded sign-in time is
-    treated as expired: it cannot prove it is within the ceiling.
+    treated as expired: it cannot prove it is within the ceiling. A portal path is left
+    alone (PLAN-014 H1): it is not staff activity.
     """
 
     def __call__(self, request: HttpRequest) -> HttpResponseBase:
+        if request.path_info.startswith(PORTAL_PREFIX):
+            return self.get_response(request)
         if request.user.is_authenticated:
             self._enforce(request)
         return self.get_response(request)
@@ -104,7 +119,11 @@ class AuthRequiredMiddleware(_Middleware):
     """401, never a redirect, for a non-public route without a signed-in user."""
 
     def __call__(self, request: HttpRequest) -> HttpResponseBase:
-        if not request.user.is_authenticated and not _is_public(request):
+        if (
+            not request.user.is_authenticated
+            and not _is_public(request)
+            and not _is_portal(request)
+        ):
             return views.unauthenticated(request)
         return self.get_response(request)
 
@@ -120,7 +139,12 @@ class MfaRequiredMiddleware(_Middleware):
 
     def __call__(self, request: HttpRequest) -> HttpResponseBase:
         user = request.user
-        if not user.is_authenticated or _is_verified(user) or _is_public(request):
+        if (
+            not user.is_authenticated
+            or _is_verified(user)
+            or _is_public(request)
+            or _is_portal(request)
+        ):
             return self.get_response(request)
 
         name = _resolved_name(request)
@@ -149,7 +173,7 @@ class RoleEnforcementMiddleware(_Middleware):
         if method in SAFE_METHODS:
             return None
         name = view_name(request)
-        if name in PUBLIC_UNSAFE_ROUTE_NAMES:
+        if name in PUBLIC_UNSAFE_ROUTE_NAMES or is_portal_route(name):
             return None
         if not request.user.is_authenticated:
             return views.forbidden(request)

@@ -1,0 +1,9 @@
+{% extends "portal/base.html" %}
+{% block title %}Not found{% endblock %}
+{% block content %}
+<section class="portal-card portal-narrow">
+  <h1>Not found</h1>
+  <p id="not-found">That page is not here.</p>
+  <p><a href="{% url 'portal:home' %}">Your stores</a></p>
+</section>
+{% endblock %}

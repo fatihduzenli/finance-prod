@@ -100,6 +100,8 @@ INSTALLED_APPS = [
     # Business ledger and the provider-side tables (docs/qa/PLAN-004-schema.md).
     "ledger",
     "payments",
+    # The operator portal, its own principal and session (PLAN-014 H1).
+    "portal",
     # Project package as an app so its management commands (deploy_migrate) are found.
     # It has no models. Listed last so it changes no template or static resolution.
     "finance",
@@ -132,6 +134,11 @@ MIDDLEWARE = [
     "accounts.middleware.AuthRequiredMiddleware",
     "accounts.middleware.MfaRequiredMiddleware",
     "accounts.middleware.RoleEnforcementMiddleware",
+    # The operator portal (PLAN-014 H1): under /portal/ only, its own cookie and session,
+    # then a signed-in portal user for every portal route but the sign-in flow. The staff
+    # checks above exempt the portal's routes.
+    "portal.middleware.PortalSessionMiddleware",
+    "portal.middleware.PortalAuthMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]

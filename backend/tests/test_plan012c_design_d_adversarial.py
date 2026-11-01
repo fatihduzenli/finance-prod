@@ -48,6 +48,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
         "lease_end",
         "lease_month",
         "one_off_charge",
+        # PLAN-014 H2: a portal account, what a portal message is about.
+        "portal_user",
         "rent_charge",
     ],
     "CollectionMethod": ["autopay_due", "charge_now", "email", "manual", "none"],
@@ -99,11 +101,23 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "LeaseEndStatus": ["confirmed", "draft"],
     "LeaseTransferStatus": ["confirmed", "draft"],
     "LegacyStatus": ["paid", "unpaid"],
-    "MessageKind": ["final_statement", "ladder"],
+    # PLAN-014 H2: the portal's invitation and reset ("portal").
+    "MessageKind": ["final_statement", "ladder", "portal"],
     # PLAN-014 D2: held in the Outbox; D3: the message's channel, rule and held reason.
     "MessageStatus": ["catch_all", "failed", "held", "queued", "sent", "suppressed"],
     "MessageChannel": ["email", "sms"],
-    "MessageRule": ["A", "B", "C", "D", "E", "F", "final_statement", "ladder", "manual"],
+    "MessageRule": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "final_statement",
+        "ladder",
+        "manual",
+        "portal",
+    ],
     "HeldReason": [
         "handled_personally",
         "no_address",
@@ -191,8 +205,10 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: template_preview, ledger:outbox:page and send_now added; send_step became send_message on
 #: both charge pages; the admin:ledger_messagetemplate_* and admin:ledger_collectionstep_*
 #: routes gone with their registrations); 280 since PLAN-014 Batch F
-#: (ledger:one_off_charges:stop_retry).
-FROZEN_ROUTES = (280, "6055009cfa1eac2f18ec2b25ba1333170d0ccfa88c368156c088475b2ba7fb79")
+#: (ledger:one_off_charges:stop_retry); 298 since PLAN-014 H slice 1 (the portal's 14 routes and
+#: ledger:operators:portal_invite, portal_disable, portal_enable, portal_reset); 300 since PLAN-014
+#: H slice 2 (portal:not_found, the slice-1 rework's catch-all, and portal:pay_status).
+FROZEN_ROUTES = (300, "fb1ea2a5b46c9d1291006807449348de4e1b64291a2c3f2d33a015d1f12d1855")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

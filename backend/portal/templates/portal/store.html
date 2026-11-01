@@ -1,0 +1,31 @@
+{% extends "portal/base.html" %}{% load money dates %}
+{% block title %}{% if store.store_number is not None %}#{{ store.store_number }} {% endif %}{{ store.external_label }}{% endblock %}
+{% block content %}
+{% include "portal/_store_title.html" %}
+{% if page.ended %}<p><span class="portal-badge" id="store-ended">ended</span></p>{% endif %}
+{% include "portal/_store_tabs.html" with tab="store" %}
+<section class="portal-card">
+  <dl class="portal-facts">
+    <dt>Open balance</dt><dd id="store-balance">{{ page.balance|money }}</dd>
+    <dt>Automatic debit</dt><dd id="store-autopay">{% if page.autopay %}on{% else %}off{% endif %}</dd>
+    <dt>Bank on file</dt><dd id="store-bank">{% if page.bank_last4 %}····{{ page.bank_last4 }}{% else %}none{% endif %}</dd>
+  </dl>
+  <p><a href="{% url 'portal:bank' pk=store.pk %}" id="store-bank-link">{% if page.bank_last4 %}Replace the bank account{% else %}Add a bank account{% endif %}</a></p>
+  {% if page.open_charges %}<p><a class="portal-button" href="{% url 'portal:pay' pk=store.pk %}" id="pay-whole">Pay the whole balance</a></p>{% endif %}
+</section>
+<section class="portal-card">
+  <h2>Open charges</h2>
+  <div class="portal-scroll">
+  <table id="open-charges">
+    <thead><tr><th>Charge</th><th>Due date</th><th class="portal-money">Balance</th><th><span class="portal-muted">Pay</span></th></tr></thead>
+    <tbody>
+      {% for item in page.open_charges %}
+      <tr class="open-charge{% if item.due_on < today %} overdue{% endif %}"><td>{{ item.description }}</td><td>{{ item.due_on|day }}</td><td class="portal-money">{{ item.balance|money }}</td><td><a href="{% url 'portal:pay' pk=store.pk %}?charge={{ item.charge_id }}" class="pay-charge-link">Pay</a></td></tr>
+      {% empty %}
+      <tr><td colspan="4" class="portal-muted" id="nothing-owed">Nothing is owed.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

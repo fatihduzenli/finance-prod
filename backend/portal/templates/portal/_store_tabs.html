@@ -1,0 +1,7 @@
+<nav class="portal-tabs" aria-label="Store">
+  <a href="{% url 'portal:store' pk=store.pk %}"{% if tab == "store" %} aria-current="page"{% endif %}>Charges</a>
+  <a href="{% url 'portal:invoices' pk=store.pk %}"{% if tab == "invoices" %} aria-current="page"{% endif %}>Invoices</a>
+  <a href="{% url 'portal:payments' pk=store.pk %}"{% if tab == "payments" %} aria-current="page"{% endif %}>Payments</a>
+  <a href="{% url 'portal:pay' pk=store.pk %}"{% if tab == "pay" %} aria-current="page"{% endif %}>Pay</a>
+  <a href="{% url 'portal:bank' pk=store.pk %}"{% if tab == "bank" %} aria-current="page"{% endif %}>Bank account</a>
+</nav>

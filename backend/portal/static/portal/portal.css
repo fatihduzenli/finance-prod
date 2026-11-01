@@ -1,0 +1,48 @@
+/* The operator portal (PLAN-014 H3): phone first, on the 12g tokens (finance/tokens.css), which
+   hold every colour; nothing here is a literal colour. */
+body.portal { margin: 0; font-family: var(--font); font-size: var(--fs-base); color: var(--text); background: var(--bg); line-height: 1.45; }
+.portal a { color: var(--link); }
+.portal-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); background: var(--surface); border-bottom: 1px solid var(--border); }
+.portal-company { font-weight: 600; font-size: var(--fs-md); color: var(--text); text-decoration: none; margin-right: auto; }
+.portal-nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.portal-nav form { margin: 0; }
+.portal-switcher { position: relative; }
+.portal-switcher summary { cursor: pointer; font-weight: 600; }
+.portal-switcher ul { position: absolute; z-index: 2; margin: var(--space-1) 0 0; padding: var(--space-2) 0; list-style: none; min-width: 14rem; max-height: 60vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--popover-border); border-radius: var(--radius-card); box-shadow: var(--popover-shadow); }
+.portal-switcher li a { display: block; padding: var(--space-2) var(--space-4); text-decoration: none; }
+.portal-switcher li a[aria-current="page"] { font-weight: 600; }
+.portal-theme { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-pill); overflow: hidden; background: var(--seg-track); }
+.portal-theme button { border: 0; background: transparent; color: var(--text); padding: var(--space-1) var(--space-3); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.portal-theme button[aria-pressed="true"] { background: var(--seg-thumb); font-weight: 600; }
+.portal-link-button { border: 0; background: transparent; color: var(--link); font: inherit; padding: 0; cursor: pointer; text-decoration: underline; }
+.portal-main { max-width: 960px; margin: 0 auto; padding: var(--space-4); }
+.portal h1 { font-size: var(--fs-h1); margin: var(--space-2) 0 var(--space-3); }
+.portal h2 { font-size: var(--fs-lg); margin: 0 0 var(--space-3); }
+.portal-card { background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius-card); padding: var(--space-4); margin: 0 0 var(--space-4); }
+.portal-narrow { max-width: 26rem; margin: var(--space-6) auto; }
+.portal-card form label { display: block; margin: var(--space-3) 0 var(--space-1); font-weight: 600; }
+.portal-card form input { box-sizing: border-box; width: 100%; padding: var(--space-2) var(--space-3); font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--input-border); border-radius: var(--radius-ctl); }
+.portal-button { margin-top: var(--space-4); padding: var(--space-2) var(--space-4); font: inherit; font-weight: 600; color: var(--btn-primary-text); background: var(--btn-primary-bg); border: 1px solid var(--btn-primary-border); border-radius: var(--radius-ctl); cursor: pointer; }
+/* A link styled as the button (Pay the whole balance) keeps the button's text, not the link colour. */
+.portal a.portal-button { display: inline-block; color: var(--btn-primary-text); text-decoration: none; }
+.portal-error { color: var(--error-text); background: var(--unpaid-bg); border-radius: var(--radius-ctl); padding: var(--space-2) var(--space-3); }
+ul.portal-error { padding-left: var(--space-6); }
+.portal-ok { color: var(--flash-success-text); background: var(--flash-success-bg); border-radius: var(--radius-ctl); padding: var(--space-2) var(--space-3); }
+.portal-muted { color: var(--muted); }
+.portal-badge { display: inline-block; padding: 0 var(--space-2); border-radius: var(--radius-pill); font-size: var(--fs-xs); color: var(--neutral-text); background: var(--neutral-bg); }
+.portal-stores { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
+.portal-store { margin: 0; }
+.portal-store-name { font-weight: 600; font-size: var(--fs-md); }
+.portal-balance { margin: var(--space-2) 0 0; color: var(--text-2); }
+.portal-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 0 0 var(--space-4); }
+.portal-tabs a[aria-current="page"] { font-weight: 600; color: var(--text); text-decoration: none; }
+.portal-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-4); margin: 0; }
+.portal-facts dt { color: var(--muted); }
+.portal-facts dd { margin: 0; font-weight: 600; }
+.portal-scroll { overflow-x: auto; }
+.portal table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+.portal th, .portal td { border-bottom: 1px solid var(--border-soft); padding: var(--space-2); text-align: left; vertical-align: top; }
+.portal th { color: var(--muted); font-weight: 600; }
+.portal-money { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.portal tr.overdue td { color: var(--error-text); }
+@media print { .portal-bar, .portal-tabs { display: none; } .portal-card { border: 0; padding: 0; } }

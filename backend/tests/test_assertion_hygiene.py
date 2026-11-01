@@ -49,7 +49,8 @@ ALLOWED: dict[str, set[int | str]] = {
     # The /healthz JSON body.
     "test_banner_adversarial.py": {85},
     # A fixed validation message.
-    "test_card_number_guard.py": {143},
+    # (144 since PLAN-014 H1 imported the portal's factories above it.)
+    "test_card_number_guard.py": {144},
     # The Mail card after a refused save: the posted lines must appear nowhere on the page.
     "test_plan014_d_messaging.py": {
         'assert "nope" not in page and "not-an-address" not in page and "b@example.com" not in page'

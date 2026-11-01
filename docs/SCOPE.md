@@ -258,7 +258,8 @@ owner signs a new scope.
 - Termination invoices and settlements.
 - Late fees, discounts, "half rent" rules, proration for partial months.
 - Automatic rent escalations or rent change schedules.
-- Reminders, dunning emails, SMS, a customer/operator portal.
+- SMS. (Reminders and the operator portal were built in Step 14 — PLAN-014 D, E and H,
+  ADR-0016 and ADR-0017; owner, 2026-10-29.)
 - Automatic retry of returned ACH payments.
 - Card payments of any kind. The business does not accept cards (owner, 2026-09-29, Q22).
 - Any channel other than Stax ACH, Zelle and wire. Cash and check are not used.

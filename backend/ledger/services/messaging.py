@@ -40,6 +40,19 @@ error's class name. Each outcome is audited (``message.sent``, ``message.held``,
 for (``recipients``; 0 when it stopped before any): an internal message goes to every
 manager, while its row names the first.
 
+**Portal messages (PLAN-014 H2).** :func:`queue_portal` queues the invitation to the operator
+portal or a password reset: kind and rule ``portal``, about the portal account
+(``portal_user``), without a lease, to the account's e-mail (``to_address``), by hand when a
+staff member asked for it. The one-time link is never stored: the stored body carries
+:data:`LINK_ADDED_AT_SEND` in its place, and :func:`send` asks the template's
+:class:`LinkIssuer` (registered in :data:`ONE_TIME_LINKS` by the ``portal`` app) for a fresh
+link just before the delivery, written into the outgoing text only. The issuer keeps the link
+when the message is sent (an older link of the same kind stops working) and drops it when the
+message is held or fails, so a link exists only in a message that left; its ``refusal`` names
+why the message is no longer to go (the account disabled, already activated, gone), and the
+message is then suppressed. An operator handled personally does not hold a portal message:
+that switch is about the collection e-mails.
+
 **By hand.** :func:`send_by_hand` (billing, the charge page's "Send a message now") queues a
 ``manual`` row of an active, not internal template for an open charge, through the same
 queue and window. :func:`send_now` (admin, the Outbox) sends a held message again, only once
@@ -52,7 +65,7 @@ import hashlib
 import html
 import logging
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -100,6 +113,7 @@ from ledger.wording import format_amount
 from mail.base import SUBJECT_MAX_LENGTH
 from payments import jobs, lease_sync
 from payments.models import JobKind
+from portal import links as portal_links
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +181,11 @@ SEND_NOW_NOT_ALLOWED = (
 )
 SEND_NOW_NO_ADDRESS = "The message has no address to send to: it stays held."
 NO_LEASE = "A message belongs to a lease."
+#: PLAN-014 H2: what a portal message's stored body says where its one-time link goes; the
+#: link replaces it in the outgoing text only (:func:`send`).
+LINK_ADDED_AT_SEND = "[your personal link is added when this e-mail is sent]"
+#: A portal message whose template has no registered issuer is not sent.
+LINK_UNAVAILABLE = "LinkUnavailable"
 #: Who an internal message goes to, as the Outbox and the store's timeline show it.
 MANAGERS_TO = "the managers ({count})"
 
@@ -220,6 +239,30 @@ class Disposition:
 
 class Channel(Protocol):
     def send(self, rendered: Rendered) -> Disposition: ...
+
+
+@dataclass(frozen=True, slots=True)
+class OneTimeLink:
+    """A portal message's link, made at its send (PLAN-014 H2): ``keep`` once it was sent,
+    ``drop`` when it was not."""
+
+    url: str
+    keep: Callable[[], None]
+    drop: Callable[[], None]
+
+
+class LinkIssuer(Protocol):
+    """What makes the one-time link of one portal template (registered by ``portal``)."""
+
+    def refusal(self, message: OutboundMessage) -> str:
+        """The class name of why ``message`` is no longer to be sent; ``""`` when it goes."""
+        ...
+
+    def issue(self, message: OutboundMessage) -> OneTimeLink: ...
+
+
+#: Per template code, the issuer of its one-time link (PLAN-014 H2; ``portal.apps``).
+ONE_TIME_LINKS: dict[str, LinkIssuer] = {}
 
 
 def html_part(text: str) -> str:
@@ -380,6 +423,15 @@ def operator_of(lease: Lease | None, charge: Subject | LeaseEnd) -> Operator | N
     return owner.operator if owner is not None else None
 
 
+def pay_link(operator: Operator | None, store_id: uuid.UUID) -> str:
+    """``{pay_link}`` (PLAN-014 H4): the portal's Pay page of the store when the operator has
+    a portal account that can sign in, else a new signed statement link; ``""`` without an
+    operator."""
+    if operator is None:
+        return ""
+    return portal_links.pay_link(operator, store_id) or statement_links.link(operator)
+
+
 def store_link(lease: Lease) -> str:
     """The absolute URL of the staff page of the lease's store."""
     path = reverse("ledger:stores:detail", kwargs={"pk": lease.store_id})
@@ -402,8 +454,9 @@ def context_for(
     """The 15 placeholder values of a message about ``charge`` billed through ``lease``
     (D4). ``amount`` is the charge's balance unless given; ``debit_date`` its due date
     unless given; ``days_late`` counted from the due date (never below zero);
-    ``retry_date`` and ``return_reason`` empty unless given (rule F). ``{pay_link}`` is a
-    new signed statement link until the portal exists (Batch H). ``rule`` is accepted for
+    ``retry_date`` and ``return_reason`` empty unless given (rule F). ``{pay_link}`` is the
+    portal's Pay page of the store when the operator has a portal account that can sign in,
+    else a new signed statement link (:func:`pay_link`, PLAN-014 H4). ``rule`` is accepted for
     the rules that will shape a value of their own. For a :class:`RentMonth` the amount is
     the scheduled one and both dates the scheduled debit (E4)."""
     row = company or CompanySettings.read()
@@ -424,7 +477,7 @@ def context_for(
         "days_late": str(late),
         "bank_last4": last4 or NO_VALUE,
         "return_reason": return_reason,
-        "pay_link": statement_links.link(operator) if operator is not None else "",
+        "pay_link": pay_link(operator, store.pk),
         "store_link": store_link(lease),
         "support_email": str(row.support_email or ""),
         "company_name": str(row.name),
@@ -537,6 +590,55 @@ def queue(
         sent_by=actor,
         scheduled_for=scheduled_for(moment),
     )
+    return _store(message, actor)
+
+
+def queue_portal(
+    template: MessageTemplate,
+    portal_user_id: uuid.UUID,
+    operator: Operator,
+    to_address: str,
+    context: Mapping[str, str],
+    *,
+    actor: User | None = None,
+    now: datetime | None = None,
+) -> OutboundMessage:
+    """Queue a portal message (PLAN-014 H2; see the module docstring) about the portal
+    account ``portal_user_id`` of ``operator`` to ``to_address``: by hand (``manual``, sent by
+    ``actor``) when a staff member asked for it, else (the portal's own reset form) by no one.
+    Raises :class:`ChannelUnavailable` for an SMS template and
+    :class:`~ledger.merge.TemplateRefused` when ``context`` is not the template's
+    placeholders."""
+    channel_for(template.channel)
+    subject = one_line(merge.render(template.subject, context))[:SUBJECT_MAX_LENGTH]
+    body = merge.render(template.body, context)
+    message = OutboundMessage(
+        operator=operator,
+        lease=None,
+        template=template,
+        kind=MessageKind.PORTAL,
+        channel=template.channel,
+        rule=MessageRule.PORTAL,
+        charge_entity_type=ChargeEntityType.PORTAL_USER,
+        charge_entity_id=portal_user_id,
+        to_address=to_address,
+        rendered_subject=subject,
+        rendered_body=body,
+        body_sha256=hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        manual=actor is not None,
+        sent_by=actor,
+        scheduled_for=scheduled_for(now or timezone.now()),
+    )
+    stored = _store(message, actor)
+    if stored is None:  # no unique rule covers a row without a lease: a broken CHECK
+        raise RuntimeError("The portal message was not stored.")
+    return stored
+
+
+def _store(message: OutboundMessage, actor: User | None) -> OutboundMessage | None:
+    """Save a rendered message and its ``message_send`` job, audited; ``None`` when the
+    unique constraint finds the row already there. A text holding payment data is stored as
+    ``failed`` (``PaymentDataRefused``) without its text, and gets no job."""
     try:
         message.check_payment_data()
     except ValidationError:
@@ -627,7 +729,14 @@ def month_closed_reason(message: OutboundMessage) -> str:
 def _suppress_reason(message: OutboundMessage) -> str:
     from ledger.services import lease_end
 
-    if message.charge_entity_type == ChargeEntityType.LEASE_MONTH:
+    if message.kind == MessageKind.PORTAL:
+        issuer = ONE_TIME_LINKS.get(message.template.code)
+        if issuer is None:
+            return LINK_UNAVAILABLE
+        reason = issuer.refusal(message)
+        if reason:
+            return reason
+    elif message.charge_entity_type == ChargeEntityType.LEASE_MONTH:
         reason = month_closed_reason(message)
         if reason:
             return reason
@@ -691,15 +800,27 @@ def _deliver(message: OutboundMessage, recipients: list[str]) -> Disposition:
         except Exception as error:  # a storage or permission failure: its class name only
             return Disposition(MessageStatus.FAILED, error=type(error).__name__)
     channel = channel_for(message.channel)
+    body = message.rendered_body
+    link: OneTimeLink | None = None
+    if message.kind == MessageKind.PORTAL:
+        # PLAN-014 H2: the one-time link goes into the outgoing text only, never the row.
+        link = ONE_TIME_LINKS[message.template.code].issue(message)
+        body = body.replace(LINK_ADDED_AT_SEND, link.url)
     found = [
-        channel.send(Rendered(to, message.rendered_subject, message.rendered_body, attachments))
-        for to in recipients
+        channel.send(Rendered(to, message.rendered_subject, body, attachments)) for to in recipients
     ]
+    chosen = Disposition(MessageStatus.HELD, HeldReason.NO_ADDRESS)
     for status in (MessageStatus.FAILED, MessageStatus.SENT, MessageStatus.HELD):
-        for disposition in found:
-            if disposition.status == status:
-                return disposition
-    return Disposition(MessageStatus.HELD, HeldReason.NO_ADDRESS)
+        match = next((item for item in found if item.status == status), None)
+        if match is not None:
+            chosen = match
+            break
+    if link is not None:
+        if chosen.status == MessageStatus.SENT:
+            link.keep()
+        else:
+            link.drop()
+    return chosen
 
 
 def send(message_id: uuid.UUID, now: datetime | None = None) -> Outcome:
@@ -721,7 +842,8 @@ def send(message_id: uuid.UUID, now: datetime | None = None) -> Outcome:
                 True, _finish(message, Disposition(MessageStatus.SUPPRESSED, error=reason))
             )
         internal = message.template.internal
-        if not internal and message.operator.handled_personally:
+        portal = message.kind == MessageKind.PORTAL
+        if not internal and not portal and message.operator.handled_personally:
             return Outcome(
                 True,
                 _finish(message, Disposition(MessageStatus.HELD, HeldReason.HANDLED_PERSONALLY)),
@@ -743,7 +865,7 @@ def manual_templates() -> list[MessageTemplate]:
     """What "Send a message now" offers: the active e-mail templates for operators."""
     return list(
         MessageTemplate.objects.filter(active=True, internal=False, channel=MessageChannel.EMAIL)
-        .exclude(code=merge.FINAL_STATEMENT_CODE)
+        .exclude(code__in=(merge.FINAL_STATEMENT_CODE, *merge.PORTAL_CODES))
         .order_by("name", "code")
     )
 

@@ -827,3 +827,78 @@ managers' list holds the internal message ("no manager list").
 the class name only); `suppressed` means the charge closed or the operator was archived between
 queueing and sending; `held` means the message waits for a setting. Nothing is ever retried by
 itself: Send now is the only way a held message goes out.
+
+## 22. The operator portal (PLAN-014 H)
+
+**Who signs in where.** Staff sign in at `/` (password and authenticator). Operators sign in at
+`/portal/` with an account of their own: an e-mail and a password, no second factor, a separate
+cookie (`portal_sessionid`, for `/portal/` only) and a separate session. A staff session opens no
+portal page and a portal session opens no staff page. A portal session ends after 30 minutes
+without a click and 12 hours after sign-in, and at the next click once the account is disabled
+or its password changes.
+
+**Inviting an operator** (billing, the operator page's **Portal** card). The operator needs an
+e-mail first. **Invite to the portal** creates the account (not active yet) and queues the
+invitation, the template *H — Portal invitation* (`portal_invite`), to the operator's e-mail,
+not a lease's billing e-mail; the Outbox lists it like any message. The link in it is made when
+the e-mail actually leaves and is never stored: the stored text (Outbox, operator page) reads
+"[your personal link is added when this e-mail is sent]". While mail is not set up (or, on
+staging, while the address is not on the sandbox allowlist) the invitation is held and no link
+exists yet; **Send now** in the Outbox sends it once mail is ready. The link works once, for 7
+days; the operator chooses a password and is signed in. **Resend invitation** sends a new link
+and the older one stops working. An e-mail held by another operator's portal account is refused.
+
+**Resetting a password.** **Reset password** on the card (an active account) sends *H — Portal
+password reset* (`portal_reset`): a link that works once, for one hour. The operator can ask for
+one too ("Forgot your password?" on the sign-in page): the page answers the same sentence for any
+e-mail, and at most one message per account goes every five minutes. A new password signs out
+every other browser of the account.
+
+**Disabling.** **Disable** stops the account at once: it cannot sign in, its open sessions end at
+their next click and its unused links stop working. **Enable** brings it back (an account that
+never accepted its invitation stays invited). The card shows the account's state and its last
+sign-in. Every action is in the activity log (`portal_user.invited`, `disabled`, `enabled`,
+`reset_sent`; `activated` and `password_reset` when the operator uses a link).
+
+**Too many attempts.** Five wrong sign-ins within 15 minutes for one e-mail, or from one address,
+lock that e-mail or that address for 15 minutes ("Too many attempts. Try again in n minutes"),
+the same for an e-mail that has no account. A successful sign-in clears the e-mail's count. There
+is nothing to unlock by hand: wait, or send a password reset.
+
+**What the operator sees.** Their stores (every store a lease of theirs names, an ended one marked
+"ended") with the open balance of each; per store the open charges with due dates and balances,
+whether automatic debit is on (read only), the bank on file as its last four, the invoices sent
+(number, date, amount, Open/Paid/Void; never a draft), the payments (settled, pending, returned,
+with the method and the last four); their statement (every store, the last twelve months; the
+browser's Print saves it as a PDF); and their account (the e-mail, the password, Light/Dark/
+System). A store, charge, payment or page of another operator answers "Not found".
+
+**Paying by bank debit** (PLAN-014 H4). On a store, **Pay** next to an open charge, or **Pay the
+whole balance**, shows the amount and the bank's last four; **Pay** sends one bank debit per
+charge from that account, the same single attempt as an admin's **Charge now** (the worker
+calls the processor; nothing retries by itself). The amount is always what the charge or the
+store owes; any other amount is refused and nothing is written. A charge that cannot be paid
+online says why on the page (a debit already on its way, collected by the lease's automatic
+debit or by installments, above the processor's per-debit limit, insurance, billed to another
+bank account): staff collect it as before. The outcome page refreshes until the bank has the
+debit, then reads "Submitted — bank debits take a few days to settle"; the payment appears as
+pending on the Payments tab and settles, or comes back as a return, like any bank debit. A
+charge whose attempt failed reads Failed; the operator may try again a minute later. Online
+payment is on only where pay-an-invoice is (`STAX_PAY_INVOICE_ENABLED`; off on the sandbox
+and staging, where the page says "Online payment is not available yet"). Without a bank
+account on file, Pay opens the Bank account page first. Reminder e-mails' `{pay_link}` opens
+the store's Pay page when the operator has an active portal account, else the signed statement
+link as before. In the activity log: `portal_payment.requested`, `paid`, `failed`, `refused`
+(a charge changed between the page and the click; nothing was debited).
+
+**The bank account** (PLAN-014 H5). **Bank account** on a store shows the bank on file and the
+processor's own fields to add or replace it, as staff's bank-entry page: the account goes
+straight to the processor, the app receives only a reference, and the worker checks it belongs
+to the lease's processor customer before linking it. The old method is superseded, not deleted
+at the processor (TODO-VERIFY-069). A lease that uses another store's account shows "Shared
+with #1991"; replacing it changes the account of every lease sharing it, and the page says so
+before saving. Automatic debits cannot be changed here ("Automatic debits are set up by our
+staff"): enrolment, pause and resume stay on the staff lease page. Where hosted bank entry is
+not set up (no web payments token: staging) the page says so, and staff connect a method from
+the processor's dashboard as before. In the activity log: `portal_bank.attached` or `replaced`
+(on the portal account), with the lease's own `lease.bank_attached`.

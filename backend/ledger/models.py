@@ -2773,6 +2773,8 @@ class MessageRule(models.TextChoices):
     FINAL_STATEMENT = "final_statement", "Final statement"
     MANUAL = "manual", "Sent by hand"
     LADDER = "ladder", "Old collections ladder"
+    #: PLAN-014 H2: an invitation to the operator portal, or a link to choose a new password.
+    PORTAL = "portal", "Portal access"
 
 
 #: Longest rule code (PLAN-014 D3).
@@ -2792,6 +2794,9 @@ class ChargeEntityType(models.TextChoices):
     #: three days ahead of the debit; the owner's decision of 2026-10-30). The entity is the
     #: lease; the month is the message's ``period_month``.
     LEASE_MONTH = "lease_month", "Rent month"
+    #: PLAN-014 H2: a portal account (``portal.PortalUser``) whose invitation or password
+    #: reset the message carries; the message has no lease and goes to the account's e-mail.
+    PORTAL_USER = "portal_user", "Portal account"
 
 
 #: The charge types a message about a charge (not a lease end) names; a lease month is the
@@ -2813,6 +2818,8 @@ class MessageKind(models.TextChoices):
 
     LADDER = "ladder", "Charge message"
     FINAL_STATEMENT = "final_statement", "Final statement"
+    #: PLAN-014 H2: about a portal account, never a charge (rule ``portal``).
+    PORTAL = "portal", "Portal access"
 
 
 class OutboundMessage(GuardedModel):
@@ -2833,6 +2840,11 @@ class OutboundMessage(GuardedModel):
     month's charge exists) names the lease as its entity and the month in
     ``period_month``; one row per (lease, rule, month). Every other message has no
     ``period_month`` (CHECK).
+
+    A portal message (PLAN-014 H2: kind and rule ``portal``) names a portal account
+    (``portal_user``), has no lease and goes to ``to_address``, the account's e-mail. Its
+    stored body carries :data:`ledger.services.messaging.LINK_ADDED_AT_SEND` where the
+    one-time link goes: the link is made when the message is delivered and never stored.
     """
 
     operator = models.ForeignKey(
@@ -2923,6 +2935,20 @@ class OutboundMessage(GuardedModel):
                     | (
                         ~Q(charge_entity_type=ChargeEntityType.LEASE_MONTH)
                         & Q(period_month__isnull=True)
+                    )
+                )
+                # PLAN-014 H2: a portal message names a portal account under rule ``portal``,
+                # and only a portal message does.
+                & (
+                    Q(
+                        kind=MessageKind.PORTAL,
+                        charge_entity_type=ChargeEntityType.PORTAL_USER,
+                        rule=MessageRule.PORTAL,
+                    )
+                    | (
+                        ~Q(kind=MessageKind.PORTAL)
+                        & ~Q(charge_entity_type=ChargeEntityType.PORTAL_USER)
+                        & ~Q(rule=MessageRule.PORTAL)
                     )
                 ),
                 name="outbound_messages_kind_matches_rule",

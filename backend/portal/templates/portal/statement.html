@@ -1,0 +1,49 @@
+{% extends "portal/base.html" %}{% load money dates %}
+{% block title %}Statement{% endblock %}
+{% block content %}
+<h1>Statement: {{ report.operator.display_name }}</h1>
+<p class="portal-muted">As of {{ report.today|day }}; payment history {{ report.range.from_month|month }} to {{ report.range.to_month|month }}. Every store. Amounts in US dollars. Your browser's Print saves it as a PDF.</p>
+<section class="portal-card">
+  <h2>Open charges</h2>
+  <div class="portal-scroll">
+  <table id="open-charges">
+    <thead><tr><th>Store</th><th>Charge</th><th>Due date</th><th class="portal-money">Balance</th></tr></thead>
+    <tbody>
+      {% for item in report.open_charges %}
+      <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|day }}</td><td class="portal-money">{{ item.balance|money }}</td></tr>
+      {% empty %}
+      <tr><td colspan="4" class="portal-muted">Nothing is owed.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><th scope="row" colspan="3">Open balance</th><th class="portal-money" id="open-total">{{ report.open_total|money }}</th></tr>
+      <tr><th scope="row" colspan="3">of which overdue</th><th class="portal-money" id="overdue-total">{{ report.overdue_total|money }}</th></tr>
+    </tfoot>
+  </table>
+  </div>
+</section>
+<section class="portal-card">
+  <h2>Payment history</h2>
+  <div class="portal-scroll">
+  <table id="payment-history">
+    <thead><tr><th>Date</th><th>Store</th><th>Charge</th><th>Kind</th><th>Status</th><th class="portal-money">Amount</th></tr></thead>
+    <tbody>
+      {% for line in report.history %}
+      <tr class="history-line"><td>{{ line.on|day|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_status_display }}</td><td class="portal-money">{{ line.payment.amount|money }}</td></tr>
+      {% empty %}
+      <tr><td colspan="6" class="portal-muted">No payment in these months.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+<section class="portal-card">
+  <h2>Totals</h2>
+  <dl class="portal-facts">
+    <dt>Paid in these months</dt><dd id="paid-total">{{ report.paid|money }}</dd>
+    <dt>Refunded in these months</dt><dd id="refunded-total">{{ report.refunded|money }}</dd>
+    <dt>Deposits held from these months</dt><dd id="deposits-held">{{ report.deposits_held|money }}</dd>
+    <dt>Pending in these months</dt><dd id="pending-total">{{ report.pending|money }}</dd>
+  </dl>
+</section>
+{% endblock %}

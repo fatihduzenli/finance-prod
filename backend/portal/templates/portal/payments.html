@@ -1,0 +1,21 @@
+{% extends "portal/base.html" %}{% load money dates %}
+{% block title %}Payments{% endblock %}
+{% block content %}
+{% include "portal/_store_title.html" %}
+{% include "portal/_store_tabs.html" with tab="payments" %}
+<section class="portal-card">
+  <h2>Payments</h2>
+  <div class="portal-scroll">
+  <table id="payments">
+    <thead><tr><th>Date</th><th>For</th><th>Method</th><th>Status</th><th class="portal-money">Amount</th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="payment-row"><td>{{ row.on|day|default:"—" }}</td><td>{% if row.is_refund %}Refund: {% endif %}{{ row.description|default:"—" }}</td><td>{{ row.method }}{% if row.last4 %} ····{{ row.last4 }}{% endif %}</td><td>{{ row.status }}</td><td class="portal-money">{{ row.amount|money }}</td></tr>
+      {% empty %}
+      <tr><td colspan="5" class="portal-muted" id="no-payments">No payment yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

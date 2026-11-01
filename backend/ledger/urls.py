@@ -41,6 +41,7 @@ from ledger.views import (
     operators,
     outbox,
     payments,
+    portal_access,
     reconciliation,
     reports,
     returns,
@@ -83,6 +84,11 @@ operator_patterns = (
             statement_links.statement_links_revoke,
             name="statement_links_revoke",
         ),
+        # The PORTAL card (PLAN-014 H2): billing invites, disables, enables, resets.
+        path("<str:pk>/portal/invite/", portal_access.portal_invite, name="portal_invite"),
+        path("<str:pk>/portal/disable/", portal_access.portal_disable, name="portal_disable"),
+        path("<str:pk>/portal/enable/", portal_access.portal_enable, name="portal_enable"),
+        path("<str:pk>/portal/reset/", portal_access.portal_reset, name="portal_reset"),
     ],
     "operators",
 )

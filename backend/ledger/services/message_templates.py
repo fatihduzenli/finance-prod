@@ -34,7 +34,7 @@ from ledger.models import (
     MessageTemplate,
     Store,
 )
-from ledger.services import business_days, messaging, statement_links
+from ledger.services import business_days, messaging
 from ledger.validators import validate_no_payment_data
 from payments import lease_sync
 
@@ -217,7 +217,7 @@ def sample_context(template: MessageTemplate, lease: Lease, today: date) -> dict
         "days_late": SAMPLE_DAYS_LATE,
         "bank_last4": lease_sync.billing_of(lease).bank_last4 or messaging.NO_VALUE,
         "return_reason": SAMPLE_RETURN_REASON,
-        "pay_link": statement_links.link(operator) if operator is not None else "",
+        "pay_link": messaging.pay_link(operator, store.pk),
         "store_link": messaging.store_link(lease),
         "support_email": str(company.support_email or ""),
         "company_name": str(company.name),
