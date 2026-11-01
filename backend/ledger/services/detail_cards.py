@@ -340,13 +340,17 @@ class LeaseCollections:
     """The LEASE card's rows under Deposit: the sign fee, with "Bill now" while it is not
     billed (the invoice builder with the sign fee preselected); the insurance of the current
     policy year (``insurance_label`` "" when the store has no open date) and the note about
-    the previous year ("" when it was collected, or the lease did not hold the store then)."""
+    the previous year ("" when it was collected, or the lease did not hold the store then);
+    ``insurance_billable`` (PLAN-014 I-b): the insurance row offers "Bill now", only while the
+    year is not billed and the lease owes it (:func:`ledger.services.insurance.bill_now`'s
+    rule, from what was read already)."""
 
     sign_fee: CollectionState
     sign_fee_bill_url: str
     insurance_label: str = ""
     insurance: CollectionState | None = None
     insurance_note: str = ""
+    insurance_billable: bool = False
 
 
 def _sign_fee_bill_url(lease: Lease) -> str:
@@ -395,6 +399,7 @@ def lease_collections(lease: Lease, today: date) -> LeaseCollections:
         found,
         insurance_label=policy_label(year),
         insurance=collection_state(current, balance=owed.get(current.pk) if current else None),
+        insurance_billable=current is None and insurance.owes(lease, year, today),
         insurance_note=(
             _previous_year_note(
                 lease, year - 1, previous, owed.get(previous.pk) if previous else None, today

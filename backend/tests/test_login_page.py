@@ -214,3 +214,16 @@ def test_the_password_step_reads_sign_in_and_the_token_step_keeps_next_and_cance
     assert '<button type="submit" class="btn btn-primary">Next</button>' in actions
     assert 'class="link-action auth-cancel">Cancel</a>' in actions
     assert "auth-remember" not in token.split('id="sign-in-form"', 1)[1]
+
+
+def test_the_credentials_box_alone_shows_the_focus() -> None:
+    # Review of I-b: one focus indicator, the box's 2 px --link ring; the fields inside are
+    # borderless and draw no ring of their own (the global :focus-visible ring is taken back).
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    assert (
+        ".auth-credentials:focus-within { border-color: var(--link); "
+        "box-shadow: 0 0 0 1px var(--link); }"
+    ) in css
+    assert ".auth-main .auth-credential input:focus-visible { box-shadow: none; }" in css
+    inner = css.split(".auth-main .auth-credential input[type=text], ", 1)[1].split("}", 1)[0]
+    assert "border: 0;" in inner

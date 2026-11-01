@@ -79,9 +79,7 @@ BILL_NEEDS_PREMIUM = (
 BILL_NO_OPEN_DATE = (
     "The store has no open date, so its policy year is not known. Nothing was billed."
 )
-BILL_NOT_OWED = (
-    "This lease did not hold the store on this policy year's anniversary. Nothing was billed."
-)
+BILL_NOT_OWED = "This lease owes no insurance for that policy year. Nothing was billed."
 BILL_ALREADY = "This policy year's insurance is already billed. Nothing was billed."
 #: The run screen lists insurance due within this many days (owner's algorithm).
 DUE_SOON_DAYS = 7
@@ -129,6 +127,16 @@ def in_scope(lease: Lease, year: int, today: date) -> date | None:
     if due > today or (store.closed_at is not None and due >= store.closed_at):
         return None
     return due if holds_on(lease, due) else None
+
+
+def owes(lease: Lease, year: int, today: date) -> bool:
+    """Whether ``lease`` owes ``year`` as of ``today`` (no query: the lease's store is read
+    with it): in scope (:func:`in_scope`) and not prospective, the rule of
+    :func:`generate_insurance_charges` and :func:`bill_now`."""
+    return (
+        lease.collection_status != CollectionStatus.PROSPECTIVE
+        and in_scope(lease, year, today) is not None
+    )
 
 
 def _leases() -> list[Lease]:
@@ -221,7 +229,7 @@ def bill_now(lease: Lease, today: date, *, actor: User | None) -> Outcome:
         return Outcome(False, BILL_NO_OPEN_DATE)
     year = policy_year(store.open_date, today)
     due = in_scope(lease, year, today)
-    if due is None or lease.collection_status == CollectionStatus.PROSPECTIVE:
+    if due is None or not owes(lease, year, today):
         return Outcome(False, BILL_NOT_OWED)
     premium = InsurancePremium.objects.filter(policy_year=year).values_list("amount", flat=True)
     charge, made = _create(lease, year, due, premium.first(), actor=actor)
