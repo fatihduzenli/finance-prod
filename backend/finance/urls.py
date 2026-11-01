@@ -15,6 +15,7 @@ from django.http import HttpRequest, JsonResponse
 from django.urls import include, path
 from two_factor.urls import urlpatterns as two_factor_urlpatterns
 
+from accounts.views import StaffLoginView
 from finance import help as help_pages
 from finance import pwa
 from finance import theme as theme_views
@@ -74,8 +75,21 @@ urlpatterns = [
     ),
     # Public, CSRF-exempt, token in the path; answers 404 to anything but a valid POST.
     path("api/webhooks/", include("payments.webhooks.urls")),
-    # Login, enrolment, QR code, backup tokens, profile: all under /account/.
-    path("", include(two_factor_urlpatterns)),
+    # Login, enrolment, QR code, backup tokens, profile: all under /account/. The login is the
+    # package's wizard with "Keep me signed in" (accounts.views.StaffLoginView, PLAN-014 I-b),
+    # under the package's own name and path.
+    path(
+        "",
+        include(
+            (
+                [
+                    path("account/login/", StaffLoginView.as_view(), name="login"),
+                    *(p for p in two_factor_urlpatterns[0] if getattr(p, "name", "") != "login"),
+                ],
+                two_factor_urlpatterns[1],
+            )
+        ),
+    ),
     # POST only; Django's LogoutView answers GET with 405.
     path("account/logout/", LogoutView.as_view(), name="logout"),
     path("account/", include("accounts.urls")),

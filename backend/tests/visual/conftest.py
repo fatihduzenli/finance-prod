@@ -157,7 +157,7 @@ def sign_in(page: Page, site: Site, user: world.SignIn) -> None:
     page.goto(f"{site.url}/account/login/")
     page.fill("#id_auth-username", user.username)
     page.fill("#id_auth-password", TEST_PASSWORD)
-    page.get_by_role("button", name="Next").click()
+    page.get_by_role("button", name="Sign in").click()
     token = page.locator("#id_token-otp_token")
     token.wait_for(state="visible")
     token.fill(current_code(user.device))

@@ -24,7 +24,7 @@ def test_password_and_totp_lead_to_admin_index(live_server: LiveServer, page: Pa
 
     page.fill("#id_auth-username", "e2e-viewer")
     page.fill("#id_auth-password", TEST_PASSWORD)
-    page.get_by_role("button", name="Next").click()
+    page.get_by_role("button", name="Sign in").click()
 
     token_field = page.locator("#id_token-otp_token")
     token_field.wait_for(state="visible")

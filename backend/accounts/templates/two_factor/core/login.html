@@ -1,30 +1,38 @@
 {% extends "two_factor/_base_focus.html" %}
-{% load i18n two_factor_tags %}
+{% load i18n icons static two_factor_tags %}
 {% comment %}
-The sign-in page (docs/qa/PLAN-012f-approved-design.md D13; login-laptop.png): the package's
-login wizard in the right panel of two_factor/_base.html. "Sign in" 26/700 and the muted
-sub-line ("Use your <company> account." on the password step; the package's sentence on the
-token and backup steps); the wizard's fields one per row (the label, without the package's
-colon, over the field at 12/14 padding and radius 10; the fields keep their names, ids and
-autocomplete attributes: the first is labelled "Username", the owner's decision); the
-full-width primary button (Next, as the package words it; Back on a later step); "Access is by
-invitation. Ask an admin if you need an account." No "Forgot password?" and no "Keep me
-signed in" (the owner's decision). The same form, fields, names and flow as the package's
-template: the hidden submit for the Enter key, the other devices, the backup-token form. The tab
-title stays "Login".
+The sign-in page (PLAN-014 I-b, the owner's redesign; docs/design/login-dark-laptop.png): the
+package's login wizard in the right panel of two_factor/_base.html. A lock in a teal-tinted
+square, "Sign in to Monvera" and the muted sub-line ("Staff of <company> only." on the password
+step; the package's sentence on the token and backup steps).
+
+The password step: the username and the password in one rounded box with a divider, small
+upper-case labels (the fields keep their names, ids and autocomplete attributes; the first is
+labelled "Username", the owner's decision), a "Show" button for the password
+(finance/password_toggle.js switches the field's type; without the script the button stays
+hidden); "Keep me signed in" (accounts.views.StaffLoginView: it never lengthens a session, see
+there) and "Forgot password?" (a mailto: link to the support e-mail with the subject "Password
+reset", only when one is set: there is no self-service reset) on one row; the full-width
+"Sign in" button, no Cancel. The token and backup steps keep the package's fields one per row and
+the wizard's buttons (Next, Back, Cancel; two_factor/_wizard_actions.html). Under the form a rule
+and "Access is by invitation. Ask an admin if you need an account." The same form, names and flow
+as the package's template: the hidden submit for the Enter key, the other devices, the
+backup-token form. The tab title stays "Login".
 {% endcomment %}
 
 {% block extra_media %}
   {{ form.media }}
+  <script src="{% static 'finance/password_toggle.js' %}" defer></script>
 {% endblock %}
 
 {% block title %}Login{% endblock %}
 
 {% block content %}
-  <h1 id="sign-in-heading">Sign in</h1>
+  <span class="auth-lock" aria-hidden="true">{% icon "lock" 20 %}</span>
+  <h1 id="sign-in-heading">Sign in to Monvera</h1>
 
   {% if wizard.steps.current == 'auth' %}
-    <p class="auth-sub" id="auth-sub">Use your {{ company.name }} account.</p>
+    <p class="auth-sub" id="auth-sub">Staff of {{ company.name }} only.</p>
   {% elif wizard.steps.current == 'token' %}
     <p class="auth-sub" id="auth-sub">{{ device|as_verbose_action }}</p>
   {% elif wizard.steps.current == 'backup' %}
@@ -38,13 +46,34 @@ title stays "Login".
     {{ wizard.management_form }}
     {% if wizard.form.non_field_errors %}<ul class="errorlist nonfield">{% for error in wizard.form.non_field_errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
     {% for field in wizard.form.hidden_fields %}{{ field }}{% endfor %}
-    {% for field in wizard.form.visible_fields %}
-      <div class="field{% if field.errors %} has-error{% endif %}">
-        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-        {{ field }}
-        {{ field.errors }}
+    {% if wizard.steps.current == 'auth' %}
+      {% with username=wizard.form.username password=wizard.form.password remember=wizard.form.remember %}
+      <div class="auth-credentials" id="auth-credentials">
+        <div class="auth-credential{% if username.errors %} has-error{% endif %}">
+          <label for="{{ username.id_for_label }}">{{ username.label }}</label>
+          {{ username }}
+          {{ username.errors }}
+        </div>
+        <div class="auth-credential{% if password.errors %} has-error{% endif %}">
+          <label for="{{ password.id_for_label }}">{{ password.label }}</label>
+          <div class="auth-password">{{ password }}<button type="button" class="link-action auth-show" id="auth-show-password" aria-controls="{{ password.id_for_label }}" aria-pressed="false" aria-label="Show password" data-password-toggle hidden>Show</button></div>
+          {{ password.errors }}
+        </div>
       </div>
-    {% endfor %}
+      <div class="auth-options">
+        <label class="inline" for="{{ remember.id_for_label }}">{{ remember }} {{ remember.label }}</label>
+        {% if support_email %}<a href="mailto:{{ support_email }}?subject=Password%20reset" id="auth-forgot">Forgot password?</a>{% endif %}
+      </div>
+      {% endwith %}
+    {% else %}
+      {% for field in wizard.form.visible_fields %}
+        <div class="field{% if field.errors %} has-error{% endif %}">
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {{ field.errors }}
+        </div>
+      {% endfor %}
+    {% endif %}
 
     {# hidden submit button to enable [enter] key #}
     <input type="submit" value="" hidden />
@@ -59,7 +88,11 @@ title stays "Login".
       {% endfor %}</p>
     {% endif %}
 
-    {% include "two_factor/_wizard_actions.html" %}
+    {% if wizard.steps.current == 'auth' %}
+      <div class="auth-actions"><button type="submit" class="btn btn-primary" id="sign-in-button">Sign in</button></div>
+    {% else %}
+      {% include "two_factor/_wizard_actions.html" %}
+    {% endif %}
   </form>
 
   {% if backup_tokens %}

@@ -96,6 +96,13 @@ ICONS: dict[str, str] = {
     "inbox": (
         '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 12h5l1.5 2h5l1.5-2h5"/>'
     ),
+    # PLAN-014 I-b: the sign-in page's lock and its Reminders and Promises cards.
+    "lock": '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    "bell": '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>',
+    "handshake": (
+        '<path d="M2 11l4-4 4 2 3-2 4 1 5 4"/><path d="M6 7v7l5 5 2-2"/>'
+        '<path d="M18 9v6l-4 4M10 13l2 2M12 11l3 3"/>'
+    ),
 }
 
 

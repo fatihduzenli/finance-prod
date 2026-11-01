@@ -198,7 +198,9 @@ def test_login_page_carries_the_banner(client: Client) -> None:
     assert "<title>[SANDBOX] " in html
     # The package default base loads Bootstrap/jQuery from a CDN; ours loads nothing.
     assert not has_token(html, "cdnjs")
-    assert "<script" not in html
+    # PLAN-014 I-b: one script, the app's own static "Show" toggle; nothing inline.
+    assert html.count("<script") == 1
+    assert '<script src="/static/finance/password_toggle.js" defer></script>' in html
 
 
 def test_remember_device_cookie_is_off() -> None:
@@ -222,4 +224,6 @@ def test_session_cookie_flags() -> None:
     cookie = client.cookies[settings.SESSION_COOKIE_NAME]
     assert cookie["httponly"]
     assert cookie["samesite"] == "Strict"
-    assert int(cookie["max-age"]) == 30 * 60
+    # PLAN-014 I-b: without "Keep me signed in" the cookie ends with the browser session
+    # (test_login_page.py pins the ticked box's 30-minute persistent cookie).
+    assert cookie["max-age"] == "" and cookie["expires"] == ""

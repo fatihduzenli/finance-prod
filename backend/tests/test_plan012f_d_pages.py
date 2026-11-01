@@ -76,7 +76,6 @@ from tests.test_plan012f_components import OLD_COMPONENT
 from tests.test_pnl import a_cost
 from tests.test_store_workspace import a_draft
 from tests.test_transfer import begin
-from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -906,21 +905,20 @@ def login_page() -> str:
 
 
 def test_the_login_page_has_the_two_panels_of_the_reference(login_page: str) -> None:
+    # Re-pinned for PLAN-014 I-b (the owner's redesign; tests/test_login_page.py holds the rest).
     assert '<body class="auth">' in login_page
     brand = login_page[login_page.index('id="auth-brand"') : login_page.index('id="auth-main"')]
-    assert brand.count('class="auth-shape') == 2 and brand.count('aria-hidden="true"') >= 2
-    assert 'alt="Monvera" height="52"' in brand
+    assert 'class="auth-mosaic" id="auth-mosaic" aria-hidden="true"' in brand
+    assert "auth-shape" not in login_page
+    assert 'alt="Monvera" height="36"' in brand
     assert ">Rent collection for every store, in one place.</p>" in brand
-    points = re.findall(r"<li>(.*?)</li>", brand, re.S)
-    assert [re.sub(r"<[^>]+>", "", item).strip() for item in points] == [
-        "Monthly rent overview for all stores",
-        "Bank debits and invoices through Stax",
-        "Promises, returned payments and lease ends, tracked",
-    ]
+    cards = re.findall(r"<strong>([^<]+)</strong>", brand)
+    assert cards == ["Monthly overview", "Bank debits", "Reminders", "Promises"]
+    assert "Autopay and one-off debits through Stax." in brand
     assert f'<p class="auth-company" id="auth-company">{COMPANY} · Monvera</p>' in brand
     main = login_page[login_page.index('id="auth-main"') :]
-    assert '<h1 id="sign-in-heading">Sign in</h1>' in main
-    assert f'<p class="auth-sub" id="auth-sub">Use your {COMPANY} account.</p>' in main
+    assert '<h1 id="sign-in-heading">Sign in to Monvera</h1>' in main
+    assert f'<p class="auth-sub" id="auth-sub">Staff of {COMPANY} only.</p>' in main
     assert (
         '<p class="auth-note" id="auth-note">Access is by invitation. Ask an admin if you need '
         "an account.</p>"
@@ -937,15 +935,14 @@ def test_the_login_form_keeps_its_fields_names_and_flow(login_page: str) -> None
     assert 'name="login_view-current_step" value="auth"' in login_page
     assert '<input type="submit" value="" hidden />' in login_page  # the Enter key
     actions = login_page.split('<div class="auth-actions">', 1)[1].split("</div>", 1)[0]
-    assert actions.count("<button") == 1  # no disabled Back on the first step
-    assert '<button type="submit" class="btn btn-primary">Next</button>' in actions
-    lowered = login_page.lower()
+    # PLAN-014 I-b: the password step's one button reads "Sign in"; no Next, no Cancel.
     assert (
-        not has_token(lowered, "forgot")
-        and "keep me" not in lowered
-        and not has_token(lowered, "remember")
+        actions
+        == '<button type="submit" class="btn btn-primary" id="sign-in-button">Sign in</button>'
     )
-    assert "<script" not in lowered and "http://" not in lowered.replace("http://www.w3.org", "")
+    assert ">Cancel<" not in login_page and ">Next<" not in login_page
+    lowered = login_page.lower()
+    assert "<script" in lowered and "http://" not in lowered.replace("http://www.w3.org", "")
 
 
 def test_the_company_name_on_the_login_page_is_escaped() -> None:
@@ -958,40 +955,36 @@ def test_the_company_name_on_the_login_page_is_escaped() -> None:
 
 
 def test_the_login_layout_rules() -> None:
+    # Re-pinned for PLAN-014 I-b: the navy panel the same in both themes, the mosaic, the cards,
+    # the 440 px form area, the credentials box and the pill banner.
     css = APP_CSS.read_text(encoding="utf-8")
     assert ".auth-brand { grid-column: 1; grid-row: 1 / -1;" in css
-    assert "background: var(--login-gradient);" in css
-    assert "color-mix(in srgb, var(--teal) 12%, transparent)" in css
-    assert "color-mix(in srgb, var(--teal) 10%, transparent)" in css
-    assert ".auth-logo img { display: block; height: 52px;" in css
+    assert "background: var(--navy); color: var(--login-text); }" in css
+    assert "transform: rotate(-8deg);" in css
+    assert ".auth-logo img { display: block; height: 36px;" in css
     headline = css.split(".auth-headline {", 1)[1].split("}", 1)[0]
-    assert "font-size: 34px; font-weight: 700;" in headline
+    assert "font-size: 36px; font-weight: 700;" in headline
+    feature = css.split(".auth-feature {", 1)[1].split("}", 1)[0]
+    assert "border: 1px solid var(--login-card-border); border-radius: 14px;" in feature
+    assert "backdrop-filter: blur(6px);" in feature
     main = css.split(".auth-main {", 1)[1].split("}", 1)[0]
-    assert (
-        "grid-column: 2; grid-row: 3;" in main and "width: min(400px, calc(100% - 32px));" in main
-    )
-    title = css.split(".auth-main h1 {", 1)[1].split("}", 1)[0]
-    assert "font-size: 26px; font-weight: 700;" in title
-    # PLAN-012g B1 (DESIGN-SPEC §7.4): the fields and the button are pills.
-    assert "padding: 12px 16px; border-radius: var(--radius-pill);" in css
-    assert ".auth-main .btn { padding: 13px; border-radius: var(--radius-pill);" in css
-    # The banner as a rounded strip over the form, never the fixed full-width bar.
+    assert "grid-row: 2;" in main and "width: min(440px, calc(100% - 32px));" in main
+    assert ".auth-main .btn { padding: 13px; border-radius: 12px;" in css
     banner = css.split("body.auth > #sandbox-banner {", 1)[1].split("}", 1)[0]
-    assert (
-        "position: static !important;" in banner and "border-radius: var(--radius-ctl);" in banner
-    )
-    assert "width: min(400px, calc(100% - 32px)) !important;" in banner
+    assert "position: static !important;" in banner
+    assert "border-radius: var(--radius-pill);" in banner
     tokens = (BACKEND / "finance" / "static" / "finance" / "tokens.css").read_text()
-    assert "--login-gradient: linear-gradient(160deg, #0B2545 0%, #0E4A5C 100%);" in tokens
+    assert "--login-gradient" not in tokens.split("*/", 1)[1]
+    assert "auth-shape" not in css
 
 
 def test_the_login_page_on_a_phone_is_a_short_header_over_the_form() -> None:
     block = phone_block(APP_CSS.read_text(encoding="utf-8"))
-    assert "body.auth { grid-template-columns: minmax(0, 1fr);" in block
-    assert ".auth-brand { grid-column: 1; grid-row: 1; min-height: 0;" in block
-    assert ".auth-shape, .auth-sentence, .auth-points, .auth-company { display: none; }" in block
-    assert ".auth-headline { margin: 0; font-size: 20px; }" in block
-    assert ".auth-main { grid-column: 1; grid-row: 3;" in block
+    assert "body.auth { grid-template-columns: minmax(0, 1fr) auto;" in block
+    assert ".auth-brand { grid-column: 1 / -1; grid-row: 1; min-height: 0;" in block
+    assert ".auth-sentence, .auth-features, .auth-company { display: none; }" in block
+    assert ".auth-headline { margin: 0; font-size: 22px; }" in block
+    assert ".auth-main { grid-column: 1 / -1; grid-row: 3;" in block
 
 
 def test_the_token_step_takes_the_same_right_panel() -> None:
@@ -1012,10 +1005,11 @@ def test_the_token_step_takes_the_same_right_panel() -> None:
     )
     assert 'id="id_token-otp_token"' in body and 'autocomplete="one-time-code"' in body
     assert '<body class="auth">' in body and 'id="auth-brand"' in body
-    assert '<h1 id="sign-in-heading">Sign in</h1>' in body
+    assert '<h1 id="sign-in-heading">Sign in to Monvera</h1>' in body
     actions = body.split('<div class="auth-actions">', 1)[1].split("</div>", 1)[0]
     assert 'value="auth"' in actions and ">Back</button>" in actions  # the way back to step 1
     assert '<button type="submit" class="btn btn-primary">Next</button>' in actions
+    assert ">Cancel</a>" in actions  # PLAN-014 I-b: the token step keeps Next and Cancel
 
 
 # --- The error pages wear the shell -------------------------------------------------------------

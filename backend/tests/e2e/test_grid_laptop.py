@@ -43,7 +43,7 @@ def test_twelve_months_are_reachable_with_the_store_column_fixed(
     page.goto(f"{live_server.url}/account/login/")
     page.fill("#id_auth-username", "e2e-laptop")
     page.fill("#id_auth-password", TEST_PASSWORD)
-    page.get_by_role("button", name="Next").click()
+    page.get_by_role("button", name="Sign in").click()
     page.locator("#id_token-otp_token").fill(current_code(device))
     page.get_by_role("button", name="Next").click()
     page.wait_for_url(f"{live_server.url}/")

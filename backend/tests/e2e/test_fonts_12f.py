@@ -29,7 +29,7 @@ def test_every_font_request_goes_to_the_app_itself(live_server, browser) -> None
     page.goto(f"{live_server.url}/account/login/")
     page.fill("#id_auth-username", "fonts-viewer")
     page.fill("#id_auth-password", TEST_PASSWORD)
-    page.get_by_role("button", name="Next").click()
+    page.get_by_role("button", name="Sign in").click()
     page.locator("#id_token-otp_token").fill(current_code(device))
     page.get_by_role("button", name="Next").click()
     page.wait_for_url(f"{live_server.url}/")

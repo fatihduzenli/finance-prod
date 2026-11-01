@@ -118,7 +118,20 @@ BATCH_B_TOKENS = {"--month-current": "#EEF6F5"}
 BATCH_C_TOKENS = {"--progress-pending": "#E5B800", "--progress-partial": "#F08A24"}
 #: The token Batch D adds (PLAN-012f D13): the sign-in pages' brand panel, the sidebar
 #: gradient's two stops at the 160 degrees DESIGN-SPEC §4 Login writes.
-BATCH_D_TOKENS = {"--login-gradient": "linear-gradient(160deg, #0B2545 0%, #0E4A5C 100%)"}
+#: PLAN-014 I-b (the owner's sign-in redesign) replaced it with the --login-* names: the brand
+#: panel's text, its cards and their icon square, and the mosaic's tile colours (decoration).
+BATCH_D_TOKENS = {
+    "--login-text": "#C9D6E8",
+    "--login-heading": "#FFFFFF",
+    "--login-card-bg": "rgba(11,37,69,.55)",
+    "--login-card-border": "rgba(255,255,255,.10)",
+    "--login-icon-bg": "rgba(46,196,166,.16)",
+    "--login-tile-paid": "#2E9E5B",
+    "--login-tile-teal": "#13A89E",
+    "--login-tile-late": "#C2413A",
+    "--login-tile-pending": "#D9A521",
+    "--login-tile-neutral": "#3A5578",
+}
 #: The token Batch E adds (PLAN-012f-b E-4): the error flash message's text, DESIGN-SPEC §4
 #: States' #8A1C14.
 BATCH_E_TOKENS = {"--error-text": "#8A1C14"}
@@ -626,6 +639,9 @@ ICON_NAMES = (
     "dot",  # PLAN-012f-b E-4: the error flash message
     "info",  # PLAN-012f-b E-4: the information flash message
     "inbox",  # PLAN-012f-b E-4: the empty state's default icon
+    "lock",  # PLAN-014 I-b: the sign-in page's lock
+    "bell",  # PLAN-014 I-b: the sign-in page's Reminders card
+    "handshake",  # PLAN-014 I-b: the sign-in page's Promises card
 )
 
 

@@ -35,7 +35,7 @@ def test_double_click_on_save_creates_one_operator_and_no_provider_call(
     page.goto(f"{live_server.url}/account/login/")
     page.fill("#id_auth-username", "e2e-billing")
     page.fill("#id_auth-password", TEST_PASSWORD)
-    page.get_by_role("button", name="Next").click()
+    page.get_by_role("button", name="Sign in").click()
     token_field = page.locator("#id_token-otp_token")
     token_field.wait_for(state="visible")
     token_field.fill(current_code(device))
