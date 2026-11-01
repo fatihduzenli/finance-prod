@@ -81,6 +81,7 @@ GUARD_MODULES = (
     "ledger.migrations.0062_rent_month_messages",
     "ledger.migrations.0063_returned_debits",
     "ledger.migrations.0064_portal_messages",
+    "ledger.migrations.0065_bank_deposit_settings",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",
@@ -89,6 +90,7 @@ GUARD_MODULES = (
     "payments.migrations.0021_job_run_after",
     "payments.migrations.0022_portal_pay_job",
     "portal.migrations.0001_initial",
+    "banking.migrations.0001_initial",
     "portal.migrations.0002_portal_payments",
 )
 
@@ -180,8 +182,9 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0022_portal_pay_job",
             ]
         if step == len(ROUND_TRIP) - 1:
-            # PLAN-014 H1: the portal's migrations come back with the ledger's.
-            for label in ("ledger", "payments", "portal"):
+            # PLAN-014 H1, I1: the portal's and the bank deposits' migrations come back with the
+            # ledger's.
+            for label in ("ledger", "payments", "portal", "banking"):
                 applied = _applied(repo_root, database_url, label)
                 assert applied and all(line.startswith("[X]") for line in applied), applied
 
@@ -1844,9 +1847,10 @@ def test_the_company_settings_migration_over_existing_rows_on_sqlite(
             scratch.execute(
                 "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
                 "logo, processor_name, updated_at, sender_email, reply_to_email, "
-                "manager_emails, sandbox_allowlist) VALUES "
+                "manager_emails, sandbox_allowlist, bank_deposits_enabled, "
+                "bank_auto_confirm_exact) VALUES "
                 "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', '2026-10-16', "
-                "'', '', '', '')"
+                "'', '', '', '', 0, 0)"
             )
 
 
@@ -1862,8 +1866,9 @@ def test_the_company_settings_migration_over_existing_rows_on_postgresql(
         scratch.execute(
             "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
             "logo, processor_name, updated_at, sender_email, reply_to_email, manager_emails, "
-            "sandbox_allowlist) VALUES "
-            "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', now(), '', '', '', '')"
+            "sandbox_allowlist, bank_deposits_enabled, bank_auto_confirm_exact) VALUES "
+            "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', now(), '', '', '', '', "
+            "false, false)"
         )
     with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
         scratch.execute("UPDATE company_settings SET logo = 'https://example.com/logo.svg'")

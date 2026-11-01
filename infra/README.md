@@ -532,6 +532,21 @@ the line commented out, as the USPS pair: the owner stores the secret in the vau
 then uncomments it, and the redeploy is a Publish action (root `CLAUDE.md` section 6). The
 sandbox cannot tokenize a bank account (`docs/STATUS.md`), so staging stays without it.
 
+### Bank deposits: the Plaid keys (PLAN-014 I1)
+
+The Bank deposits module reads the business's bank account through Plaid with three secrets,
+all set or none: `PLAID_CLIENT_ID`, `PLAID_SECRET` and `PLAID_TOKEN_KEY` (the Fernet key that
+encrypts the linked bank's access token at rest), and the non-secret `PLAID_ENV` (sandbox when
+empty; never production on a local run). The Key Vault secrets are named **`plaid-client-id`**,
+**`plaid-secret`** and **`plaid-token-key`**. **Nothing in `infra/` sets them yet**: while they
+are absent the Admin › Settings › Bank deposits card says "Plaid keys: missing in this
+environment" and nothing connects to a bank or fetches deposits. Step 16 adds the parameters
+(the web app for Connect and Fetch now, the daily job for the daily fetch) as the USPS pair
+above, the owner stores the secrets first, and the redeploy is a Publish action (root
+`CLAUDE.md` section 6). The connector adds one outbound host on 443 through the NAT gateway:
+`sandbox.plaid.com`, `development.plaid.com` or `production.plaid.com`, as `PLAID_ENV` says;
+and the settings page loads Plaid Link's script from `cdn.plaid.com` in the admin's browser.
+
 ### Mail: the sender and the sandbox allowlist moved to Admin › Settings (PLAN-014 D1)
 
 Mail is sent through the Gmail API with the service-account key referenced from the vault

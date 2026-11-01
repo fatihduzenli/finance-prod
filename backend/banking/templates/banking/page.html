@@ -1,0 +1,55 @@
+{% extends "finance/base.html" %}
+{% load filters dates money responsive %}
+{% block title %}Bank deposits{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Bank deposits</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} deposit{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><form method="post" action="{% url 'banking:fetch_now' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="fetch-now"{% if readiness %} disabled{% endif %}>Fetch now</button></form></div></div>{% endblock %}
+{% block content %}
+  {% comment %}Admin › Bank deposits (docs/qa/PLAN-014 I4; banking.views.page): the credits read from the business's bank account, new ones first by default, 50 a page. A new deposit shows the suggestion (store, charge, confidence) made over what is owed now, with Confirm (records it through the store page's payment entry), Choose another, Split and Ignore; a recorded or ignored one shows what it became and Undo. When nothing can be fetched, the one sentence says why.{% endcomment %}
+  {% if readiness %}<p class="side-note warning" id="bank-readiness">{{ readiness }}</p>{% endif %}
+  <div class="card filter-card">{% filters active=active_filters %}
+      <span class="filter-field"><label for="status">State</label>
+      <select name="status" id="status">
+        {% for value, label in status_choices %}<option value="{{ value }}"{% if value == status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select></span>
+  {% endfilters %}</div>
+  <div id="results">
+  <div class="card table-card list-card">
+  {% responsive_table %}
+  <table id="deposits">
+    <thead><tr><th>Date</th><th class="money">Amount</th><th>Description</th><th>Suggestion</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+      {% for row in rows %}{% with txn=row.txn s=row.suggestion %}
+        <tr id="deposit-{{ txn.pk }}">
+          <td>{{ txn.posted_on|day }}</td>
+          <td class="money">{{ txn.amount|money }}</td>
+          <td><span class="deposit-description">{{ txn.description|default:"—" }}</span>{% if txn.counterparty %}<br><span class="muted">From {{ txn.counterparty }}</span>{% endif %}<br><span class="badge">{{ txn.get_kind_display }}</span></td>
+          {% if txn.status == "new" %}
+            <td>{% if s.lease %}<span class="badge{% if s.confidence == 'exact' %} badge-paid{% elif s.confidence == 'strong' %} badge-pending{% elif s.confidence == 'weak' %} badge-partial{% endif %}">{{ s.confidence|capfirst }}</span> {{ row.store }}<br><span class="muted">{{ row.charge }}</span>{% elif row.candidates %}<span class="badge">No match</span><br><span class="muted">Could be: {{ row.candidates|join:", " }}</span>{% else %}<span class="badge">No match</span>{% endif %}</td>
+            <td class="deposit-actions">
+              {% if s.lease %}<form method="post" action="{% url 'banking:confirm' pk=txn.pk %}" class="js-single-submit">{% csrf_token %}<input type="hidden" name="return_status" value="{{ status }}"><input type="hidden" name="lease" value="{{ s.lease }}"><input type="hidden" name="charge_type" value="{{ s.charge_type }}"><input type="hidden" name="charge" value="{% if s.charge_id %}{{ s.charge_id }}{% else %}whole{% endif %}">
+                {% if row.alias %}<label class="inline"><input type="checkbox" name="remember" value="1" checked> Remember {{ row.alias }} for {{ row.store }}</label><br>{% endif %}
+                <label class="inline"><input type="checkbox" name="keep_credit" value="1"> Keep any rest as a credit on the lease</label><br>
+                <button class="btn btn-primary btn-sm" type="submit">Confirm</button></form>{% endif %}
+              <a class="btn btn-sm" href="{% url 'banking:choose' pk=txn.pk %}">Choose another</a>
+              <a class="btn btn-sm" href="{% url 'banking:split' pk=txn.pk %}">Split</a>
+              <details class="deposit-ignore"><summary class="btn btn-sm">Ignore</summary>
+                <form method="post" action="{% url 'banking:ignore' pk=txn.pk %}" class="js-single-submit">{% csrf_token %}<input type="hidden" name="return_status" value="{{ status }}">
+                  <label for="reason-{{ txn.pk }}">Why</label><select name="reason" id="reason-{{ txn.pk }}" required><option value="">Choose…</option>{% for value, label in ignore_reasons %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+                  <label for="note-{{ txn.pk }}">Note</label><input type="text" name="note" id="note-{{ txn.pk }}" maxlength="500"><span class="help">Required with Other.</span>
+                  <button class="btn btn-sm" type="submit">Ignore</button>
+                </form></details>
+            </td>
+          {% else %}
+            <td>{% if txn.status == "ignored" %}Ignored: {{ txn.get_ignore_reason_display }}{% if txn.ignore_note %} — {{ txn.ignore_note }}{% endif %}{% if txn.ignored_by %}<br><span class="muted">by {{ txn.ignored_by.get_full_name|default:txn.ignored_by.username }}, {{ txn.ignored_at|moment }}</span>{% endif %}{% else %}{{ txn.get_status_display }}{% if txn.confirmed_by %} by {{ txn.confirmed_by.get_full_name|default:txn.confirmed_by.username }}{% else %} automatically{% endif %}, {{ txn.confirmed_at|moment }}{% for store, what, amount, voided in row.lines %}<br><span class="muted">{{ store }}: {{ what }} {{ amount|money }}{% if voided %} (voided){% endif %}</span>{% endfor %}{% endif %}</td>
+            <td><form method="post" action="{% url 'banking:undo' pk=txn.pk %}" class="js-single-submit">{% csrf_token %}<input type="hidden" name="return_status" value="{{ status }}"><button class="btn btn-sm" type="submit">Undo</button></form></td>
+          {% endif %}
+        </tr>
+      {% endwith %}{% empty %}
+        <tr><td colspan="5" class="muted empty">No deposits here.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  {% include "ledger/_list_footer.html" with page=page pager_query=query %}
+  </div>
+  </div>
+{% endblock %}

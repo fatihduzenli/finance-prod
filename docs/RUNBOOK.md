@@ -902,3 +902,83 @@ staff"): enrolment, pause and resume stay on the staff lease page. Where hosted 
 not set up (no web payments token: staging) the page says so, and staff connect a method from
 the processor's dashboard as before. In the activity log: `portal_bank.attached` or `replaced`
 (on the portal account), with the lease's own `lease.bank_attached`.
+
+## 23. Bank deposits (PLAN-014 I)
+
+**What it is.** Admin › **Bank deposits** lists the credits that arrived in the business's own
+bank account (wires, Zelle, ACH credits, checks), read through Plaid, and records each one as a
+payment on the charge it pays, through the same entry as the store page's "Record payment".
+Debits are never read into the app. The only account digits the app keeps are Plaid's last four
+of the business's account (the "mask"); no operator's account number is ever entered or stored.
+
+**Enabling** (admin, Admin › Settings › **Bank deposits**). The card says whether the Plaid keys
+are in this environment ("Plaid keys: present / missing in this environment"; names only, never
+a value). The keys are three secrets, all or none: `PLAID_CLIENT_ID`, `PLAID_SECRET` and
+`PLAID_TOKEN_KEY` (the Fernet key that encrypts the bank's access token at rest), from the Key
+Vault secrets `plaid-client-id`, `plaid-secret` and `plaid-token-key`; `PLAID_ENV` names
+Plaid's environment (sandbox by default). Nothing in `infra/` sets them yet (Step 16; adding them
+is the owner's Publish action). Tick **Bank deposits on** and Save. **Confirm exact matches
+automatically** is a second switch, off by default: only a deposit that names an open invoice
+for exactly its balance is then recorded without a click.
+
+**Connecting the bank account** (admin, once the module is on and the keys are present).
+**Connect a bank account** opens Plaid's own window: sign in to the business's bank there and
+choose one checking or savings account. The app receives only a one-time public token, which the
+server exchanges; the long-lived access token is stored encrypted and never shown, logged or
+exported. The card then reads "Connected: {bank} ending {last four}". **Disconnect** ends the
+connection and deletes the stored token (the item stays at Plaid until removed in Plaid's
+dashboard). One account is connected at a time. Both actions are in the activity log
+(`bank_connection.linked`, `bank_connection.disconnected`). Locally without keys, the fake bank
+source connects with one click and its deposits come from a fixture.
+
+**Fetching.** The daily job (09:00 New York, after the automatic re-debits) fetches what is new
+since the last fetch; **Fetch now** on the Bank deposits page (billing) does the same at once. A
+second fetch never adds a deposit already read. When nothing can be fetched the page says why in
+one sentence (the module is off, the keys are missing, or no account is connected). A failed
+fetch keeps only the error's name ("The bank could not be read (PlaidItemLoginRequiredError)"):
+for that one, disconnect and connect the account again. The daily job's log line reads "Bank
+deposits fetched: 3 (new 2)." after a fetch, "Bank deposits: off." with why when nothing could
+be fetched, and "Bank deposits: not fetched." with the error's name after a failed one.
+
+**Suggestions.** Each new deposit shows a suggestion over what is owed today, with its confidence:
+**Exact** (the description names an invoice number, `INV-2026-0001`, whose open charge has
+exactly the deposit's amount), **Strong** (the sender is a remembered alias of a lease, and the
+amount is one of its open charges or its whole balance), **Weak** (exactly one open charge
+anywhere has that amount), or **No match** (nothing, or several candidates, which are listed).
+
+**Confirm** (billing) records the deposit on the suggested charge (or the lease's whole balance)
+as a payment by its kind: a wire as wire, Zelle as Zelle, a check as check, an ACH credit or
+anything else as "other" with the kind in the note. The note reads "Bank deposit matched:
+{description}", the reference is the deposit's id and the date is the day the bank posted it. A
+deposit smaller than the charge is a partial payment; a larger one needs **Keep any rest as a
+credit on the lease** ticked. When the sender is not yet an alias of that lease, **Remember
+{sender} for #{number} {store}** is ticked: the next deposit from that sender is a strong match.
+A deposit is recorded once: a second Confirm is refused.
+
+**Choose another** lists a store's open charges (type its number): choose one charge or the
+whole balance, then Confirm. **Split** records one deposit over several charges of one or more
+stores (for example three checks deposited together): type the store numbers, enter an amount on
+each charge; the amounts must add up to the deposit, or tick to keep the rest as a credit on the
+first store's lease. **Ignore** sets a deposit aside with a reason: internal transfer, not rent,
+or other (words required).
+
+**Undo** on a recorded deposit voids each of its payments through the payment's own manual void
+(reason "Bank deposit match undone"), and the deposit is new again; on an ignored one it is simply
+new again. Undo is refused while the deposit kept a credit on a lease, or when one of its payments
+cannot be voided by hand (an insurance payment): void those on their own pages. Every action is in
+the activity log (`bank_transaction.confirmed`, `auto_confirmed`, `ignored`, `undone`).
+
+**Sender names** (billing). The lease page's **Edit billing details** dialog lists, under the
+payment provider's section, the names the bank shows for that lease's deposits (the aliases a
+strong match reads), each with **Remove**, and an **Add a sender name** field. A name is one
+line, compared in capitals with its spaces collapsed ("Fatih  trading llc" and "FATIH TRADING
+LLC" are the same name), at least three characters; a name the lease already has, or one holding
+a card or account number, is refused with a sentence and nothing is saved. A name remembered at
+Confirm appears here too. Adding and removing are in the activity log (`sender_alias.added`,
+`sender_alias.removed`); an archived operator's lease cannot be changed.
+
+**The memo line.** A sent invoice (its preview and print view) and the operator portal's
+**Invoices** page (under each open invoice) and **Pay** page (under the amount, one line per
+invoice of the charges being paid) read "Paying by wire or Zelle? Put INV-2026-0012 in the
+memo." with the invoice's real number, so that the deposit's description names it and the
+suggestion is exact. A draft (no number yet) and a void invoice show no memo line.

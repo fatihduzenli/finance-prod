@@ -150,6 +150,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # Edit billing details (PLAN-014 C3): billing. The details, the link of the provider
     # IDs and the retry post here; the view refuses the dialog's GET below billing too.
     "ledger:leases:billing": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The dialog's sender names (PLAN-014 I4): billing; the views and the service check again.
+    "ledger:leases:alias_add": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:leases:alias_remove": RouteRule(min_role=Role.BILLING, methods=POST),
     # The bank-entry page's attach (PLAN-014 C7): billing; only the payment-method id.
     "ledger:leases:bank_attach": RouteRule(min_role=Role.BILLING, methods=POST),
     # The LEASE card's "Switch to own account" (PLAN-014 C9): billing; the view checks again.
@@ -308,6 +311,20 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:settings:template_preview": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Admin › Outbox (PLAN-014 D5): "Send now" on a held message.
     "ledger:outbox:send_now": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Admin › Settings › Bank deposits' switches (PLAN-014 I2).
+    "ledger:settings:bank_save": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Admin › Bank deposits (PLAN-014 I2, I4): recording a deposit and Fetch now need billing;
+    # Choose and Split open their page on GET (the views refuse below billing too). Connecting
+    # and disconnecting the bank account need admin. Every view checks again.
+    "banking:confirm": RouteRule(min_role=Role.BILLING, methods=POST),
+    "banking:choose": RouteRule(min_role=Role.BILLING, methods=POST),
+    "banking:split": RouteRule(min_role=Role.BILLING, methods=POST),
+    "banking:ignore": RouteRule(min_role=Role.BILLING, methods=POST),
+    "banking:undo": RouteRule(min_role=Role.BILLING, methods=POST),
+    "banking:fetch_now": RouteRule(min_role=Role.BILLING, methods=POST),
+    "banking:link_token": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "banking:link_exchange": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "banking:disconnect": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -393,6 +410,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:settings:index",
         "ledger:settings:templates",
         "ledger:outbox:page",
+        # Admin › Bank deposits (PLAN-014 I4); the view refuses below billing.
+        "banking:page",
         # Lease screens that only read (PLAN-007 §4.1).
         "ledger:leases:list",
         "ledger:leases:detail",

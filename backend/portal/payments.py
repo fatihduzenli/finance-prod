@@ -13,7 +13,10 @@ debit in flight, not collected by the lease's autopay or by a plan, within the p
 limit) and billed to the bank account the page shows. With the pay-an-invoice flag off
 (:func:`payments.pay_invoice_enabled`; off on the sandbox and staging) the page says
 :data:`PAY_UNAVAILABLE` and nothing is created; without a usable bank method on file the user
-is sent to the Bank account page first.
+is sent to the Bank account page first. Under the amount (with the flag off, under its
+sentence), the memo line names each sent invoice of the charges paid ("Paying by wire or
+Zelle? Put INV-2026-0012 in the memo.", PLAN-014 I5), so a payer who wires instead is matched
+by the Bank deposits module.
 
 A request writes, in one transaction, a :class:`portal.models.PortalPayment` (the page's
 one-time ``creation_key``: a replay answers the first request and queues nothing), one
@@ -50,12 +53,16 @@ from typing import Any
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.http import QueryDict
 
 from finance.dates import day_text
 from ledger.models import (
     AuditLog,
     CompanySettings,
+    Invoice,
+    InvoiceLineItem,
+    InvoiceStatus,
     Lease,
     OneOffCharge,
     RentCharge,
@@ -63,7 +70,7 @@ from ledger.models import (
 )
 from ledger.services import installments, leases, receivables
 from ledger.services import one_off_charges as debits
-from ledger.wording import format_amount
+from ledger.wording import format_amount, memo_line
 from payments import jobs, lease_sync
 from payments.hosted_fields import HostedFieldsConfig, get_hosted_fields
 from payments.models import Job, JobKind, JobStatus
@@ -192,6 +199,8 @@ class PayPage:
     shared_with: str
     #: Why this payment cannot be made (``""``: it can).
     refusal: str
+    #: PLAN-014 I5: the memo line of each sent invoice of the charges paid, once each.
+    memo_lines: tuple[str, ...] = ()
 
     @property
     def payable(self) -> bool:
@@ -221,6 +230,55 @@ def _refusal_text(code: str, row: receivables.OpenBalance) -> str:
         limit: Decimal | None = settings.PROVIDER_MAX_TXN_AMOUNT
         return _support(CHARGE_LIMIT, limit=format_amount(limit) if limit is not None else "")
     return _support(CHARGE_NOT_HERE)
+
+
+#: A sent invoice the memo line names (never a draft, one not sent yet or a void one).
+MEMO_INVOICE_STATUSES = (InvoiceStatus.SENT, InvoiceStatus.CLOSED)
+#: The invoice's column that names each kind of charge.
+_INVOICE_COLUMNS = {
+    receivables.KIND_RENT: "rent_charge_id",
+    receivables.KIND_ONE_OFF: "one_off_charge_id",
+    receivables.KIND_INSURANCE: "insurance_charge_id",
+}
+
+
+def _memo_lines(user: PortalUser, rows: list[receivables.OpenBalance]) -> tuple[str, ...]:
+    """The memo line of every sent invoice to the user's operator that bills one of ``rows``
+    (as its charge, or by a line of a builder invoice), in the rows' order, each number once
+    (two queries)."""
+    wanted = {(row.kind, row.charge_id) for row in rows}
+    found: dict[tuple[str, uuid.UUID], set[str]] = {}
+    invoices = Invoice.objects.filter(
+        operator_id=user.operator_id, internal_status__in=MEMO_INVOICE_STATUSES
+    )
+    by_kind: dict[str, list[uuid.UUID]] = {}
+    for kind, charge_id in wanted:
+        by_kind.setdefault(kind, []).append(charge_id)
+    direct = Q()
+    for kind, ids in by_kind.items():
+        direct |= Q(**{f"{_INVOICE_COLUMNS[kind]}__in": ids})
+    for number, *columns in invoices.filter(direct).values_list(
+        "invoice_number", *_INVOICE_COLUMNS.values()
+    ):
+        for kind, charge_id in zip(_INVOICE_COLUMNS, columns, strict=True):
+            if (kind, charge_id) in wanted:
+                found.setdefault((kind, charge_id), set()).add(number)
+    lines = InvoiceLineItem.objects.filter(invoice__in=invoices).filter(
+        Q(rent_charge_id__in=by_kind.get(receivables.KIND_RENT, []))
+        | Q(one_off_charge_id__in=by_kind.get(receivables.KIND_ONE_OFF, []))
+    )
+    for number, rent, one_off in lines.values_list(
+        "invoice__invoice_number", "rent_charge_id", "one_off_charge_id"
+    ):
+        for key in ((receivables.KIND_RENT, rent), (receivables.KIND_ONE_OFF, one_off)):
+            if key in wanted:
+                found.setdefault(key, set()).add(number)
+    numbers: list[str] = []
+    for row in rows:
+        for number in sorted(found.get((row.kind, row.charge_id), ())):
+            if number not in numbers:
+                numbers.append(number)
+    return tuple(memo_line(number) for number in numbers)
 
 
 def _billing_account(charge: RentCharge | OneOffCharge) -> Lease | None:
@@ -293,6 +351,7 @@ def pay_page(user: PortalUser, store: Store, charge_raw: object, today: date) ->
         last4=last4,
         shared_with=_shared_with(lease),
         refusal=refusal,
+        memo_lines=_memo_lines(user, rows) if rows else (),
     )
 
 

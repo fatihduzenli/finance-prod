@@ -1,0 +1,34 @@
+[
+  {
+    "external_id": "fake-txn-0001",
+    "posted_on": "2026-10-01",
+    "amount": "1200.00",
+    "description": "WIRE IN EXAMPLE TRADING LLC INV-2026-0001",
+    "counterparty": "EXAMPLE TRADING LLC",
+    "kind": "wire"
+  },
+  {
+    "external_id": "fake-txn-0002",
+    "posted_on": "2026-10-02",
+    "amount": "850.00",
+    "description": "ZELLE FROM SAMPLE STORES INC",
+    "counterparty": "SAMPLE STORES INC",
+    "kind": "zelle"
+  },
+  {
+    "external_id": "fake-txn-0003",
+    "posted_on": "2026-10-03",
+    "amount": "-45.10",
+    "description": "MONTHLY SERVICE FEE",
+    "counterparty": "",
+    "kind": "other"
+  },
+  {
+    "external_id": "fake-txn-0004",
+    "posted_on": "2026-10-05",
+    "amount": "3100.00",
+    "description": "MOBILE DEPOSIT 3 CHECKS",
+    "counterparty": "",
+    "kind": "check"
+  }
+]

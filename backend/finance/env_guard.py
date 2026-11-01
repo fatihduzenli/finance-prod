@@ -11,6 +11,8 @@ read from the environment is ever echoed (root ``CLAUDE.md`` §5.2).
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 from collections.abc import Mapping
@@ -101,6 +103,15 @@ DEFAULT_USPS_API_BASE_URL = "https://apis.usps.com"
 #: only these characters are accepted; it is a secret everywhere else.
 _WEB_PAYMENTS_TOKEN = re.compile(r"[A-Za-z0-9._-]{1,255}")
 
+#: PLAN-014 I1: the bank-deposits connector's environment. ``PLAID_ENV`` names Plaid's host
+#: (empty: sandbox); production is refused when APP_ENV is local. The client ID, the secret
+#: and the access tokens' encryption key are optional as a set of three: all set or none.
+PLAID_ENVS: tuple[str, ...] = ("sandbox", "development", "production")
+DEFAULT_PLAID_ENV = "sandbox"
+PLAID_SECRET_NAMES: tuple[str, ...] = ("PLAID_CLIENT_ID", "PLAID_SECRET", "PLAID_TOKEN_KEY")
+#: A Fernet key is 32 bytes in URL-safe base64 (44 characters with its padding).
+_FERNET_KEY_BYTES = 32
+
 _SQLITE_SCHEME_PREFIX = "sqlite"
 _WEB_URL_SCHEMES: tuple[str, ...] = ("http", "https")
 
@@ -164,6 +175,12 @@ class Config:
     usps_api_base_url: str = DEFAULT_USPS_API_BASE_URL
     #: PLAN-014 C7: empty means the hosted bank-account fields are not set up.
     stax_web_payments_token: str = field(default="", repr=False)
+    #: PLAN-014 I1: the bank-deposits connector. The three below are credentials (the client
+    #: ID too, as Plaid issues it with the secret): kept out of ``repr``. All empty: no keys.
+    plaid_env: str = DEFAULT_PLAID_ENV
+    plaid_client_id: str = field(default="", repr=False)
+    plaid_secret: str = field(default="", repr=False)
+    plaid_token_key: str = field(default="", repr=False)
 
 
 def _positive_amount(value: str) -> Decimal | None:
@@ -261,6 +278,36 @@ def _usps_problems(env: Mapping[str, str], is_local: bool) -> tuple[list[str], s
         elif parsed.scheme.lower() not in _WEB_URL_SCHEMES or not parsed.hostname:
             problems.append("USPS_API_BASE_URL must be an absolute http(s) URL including a host")
     return problems, client_id, client_secret, base_url
+
+
+def _is_fernet_key(value: str) -> bool:
+    try:
+        decoded = base64.urlsafe_b64decode(value.encode("ascii"))
+    except (binascii.Error, ValueError, UnicodeEncodeError):
+        return False
+    return len(decoded) == _FERNET_KEY_BYTES
+
+
+def _plaid_problems(env: Mapping[str, str], is_local: bool) -> tuple[list[str], str, str, str, str]:
+    """PLAN-014 I1: the Plaid environment and its three secrets, all set or none; the key a
+    Fernet key. Only variable names are reported, never a value."""
+    problems: list[str] = []
+    plaid_env = env.get("PLAID_ENV", "") or DEFAULT_PLAID_ENV
+    if plaid_env not in PLAID_ENVS:
+        problems.append(f"PLAID_ENV is not one of: {', '.join(PLAID_ENVS)}")
+    elif plaid_env == "production" and is_local:
+        problems.append("PLAID_ENV may not be 'production' when APP_ENV is 'local'")
+    client_id, secret, token_key = (env.get(name, "") for name in PLAID_SECRET_NAMES)
+    present = [bool(client_id), bool(secret), bool(token_key)]
+    if any(present) and not all(present):
+        problems.append(
+            "PLAID_CLIENT_ID, PLAID_SECRET and PLAID_TOKEN_KEY must be set together or all "
+            "left empty"
+        )
+        client_id = secret = token_key = ""
+    if token_key and not _is_fernet_key(token_key):
+        problems.append("PLAID_TOKEN_KEY must be a Fernet key (32 bytes in URL-safe base64)")
+    return problems, plaid_env, client_id, secret, token_key
 
 
 def validate(env: Mapping[str, str]) -> Config:
@@ -438,6 +485,11 @@ def validate(env: Mapping[str, str]) -> Config:
         if stax_provider == "fake":
             problems.append("STAX_WEB_PAYMENTS_TOKEN must be empty when STAX_PROVIDER is 'fake'")
 
+    plaid_problems, plaid_env, plaid_client_id, plaid_secret, plaid_token_key = _plaid_problems(
+        env, is_local
+    )
+    problems.extend(plaid_problems)
+
     if (
         problems
         or large_debit_warning_amount is None
@@ -483,4 +535,8 @@ def validate(env: Mapping[str, str]) -> Config:
         usps_client_secret=usps_client_secret,
         usps_api_base_url=usps_api_base_url,
         stax_web_payments_token=stax_web_payments_token,
+        plaid_env=plaid_env,
+        plaid_client_id=plaid_client_id,
+        plaid_secret=plaid_secret,
+        plaid_token_key=plaid_token_key,
     )

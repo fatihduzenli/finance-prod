@@ -81,6 +81,8 @@ urlpatterns = [
     path("account/", include("accounts.urls")),
     # The operator portal (PLAN-014 H1): its own sign-in, session and pages.
     path("portal/", include("portal.urls")),
+    # Admin › Bank deposits (PLAN-014 I4): before the ledger's admin-settings/ routes.
+    path("admin-settings/bank-deposits/", include("banking.urls")),
     # Staff screens: /operators/ (docs/qa/PLAN-006-operators.md §4.1).
     path("", include("ledger.urls")),
 ]

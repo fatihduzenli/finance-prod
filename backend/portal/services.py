@@ -13,7 +13,8 @@ of the operator not ended) marked, with what is open on it. :func:`store_page`: 
 charges with their due dates and balances, autopay "on"/"off" (the rent schedule of the
 operator's current lease, read only) and the bank on file ("····4821", the lease's or the one
 it shares; "none"). :func:`invoices`: the invoices sent (number, date, amount, status: Open,
-Paid or Void; drafts and invoices not sent are not shown). :func:`payments`: settled, pending
+Paid or Void; drafts and invoices not sent are not shown; an Open one carries the memo line,
+:func:`ledger.wording.memo_line`, PLAN-014 I5). :func:`payments`: settled, pending
 and returned payments, with the method and, for a bank debit, the last four of the bank on
 file. :func:`statement`: the operator's statement, as the signed statement link shows it.
 :func:`set_theme` and :func:`change_password` are the Account page's.
@@ -55,6 +56,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services import messaging, receivables, reports, statement_links, workspace
+from ledger.wording import memo_line
 from payments import lease_sync
 from portal import tokens
 from portal.models import PortalToken, PortalUser, TokenKind
@@ -179,6 +181,8 @@ class InvoiceRow:
     issued: date
     total: Decimal
     status: str
+    #: PLAN-014 I5: the memo line on an Open invoice, else ``""``.
+    pay_memo: str = ""
 
 
 def invoice_status(invoice: Invoice) -> str:
@@ -192,10 +196,13 @@ def invoices(user: PortalUser, store: Store) -> list[InvoiceRow]:
     found = workspace.store_invoices(store).filter(
         operator_id=user.operator_id, internal_status__in=SHOWN_INVOICE_STATUSES
     )
-    return [
-        InvoiceRow(str(item.invoice_number), item.issue_date, item.total, invoice_status(item))
-        for item in found
-    ]
+    rows = []
+    for item in found:
+        status = invoice_status(item)
+        number = str(item.invoice_number)
+        memo = memo_line(number) if status == "Open" else ""
+        rows.append(InvoiceRow(number, item.issue_date, item.total, status, memo))
+    return rows
 
 
 @dataclass(frozen=True, slots=True)

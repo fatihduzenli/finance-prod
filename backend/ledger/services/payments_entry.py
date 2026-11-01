@@ -12,7 +12,8 @@ the lease's row lock:
   (:func:`ledger.services.rent_run.record_manual_payment`,
   :func:`ledger.services.one_off_charges.record_payment`,
   :func:`ledger.services.insurance.record_manual_payment`), each with the creation key
-  ``uuid5(entry key, str(charge id))``, all sharing a new ``allocation_group`` and the
+  ``uuid5(entry key, str(charge id))``, all sharing a new ``allocation_group`` (or the entry's
+  own, PLAN-014 I4) and the
   entry's method, date, reference and note; the per-charge rules apply as on the
   per-charge forms (the balance, the provider's paid-as-cash marking when the charge's invoice
   is fully covered, a builder invoice once every line is covered, partial coverage
@@ -153,6 +154,9 @@ class EntryInput:
     #: The form named an allocation or credit input of a charge it does not list (a
     #: forged or stale id): refused after the replay check.
     unlisted: bool = False
+    #: The group the entry's payments and kept credit share; a new one when ``None``. A bank
+    #: deposit recorded over several stores (PLAN-014 I4) gives each store's entry the same.
+    allocation_group: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,7 +394,7 @@ def _record(lease: Lease, entry: EntryInput, actor: User | None, day: date) -> E
     held_credits = credits.locked(lease, entry.paid_on)
     held = sum((Decimal(credit.remaining) for credit in held_credits), ZERO)
     allocations, applied, remainder = _check(entry, listed, held, entry.paid_on)
-    group = uuid.uuid4()
+    group = entry.allocation_group or uuid.uuid4()
     note = visible_text(entry.note)
     reference = (entry.reference or "").strip()
     written: list[Payment] = []

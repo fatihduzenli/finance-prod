@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load static responsive dates %}
 {% block title %}Settings{% endblock %}
 {% block header %}<div class="page-header"><h1>Settings</h1></div>{% endblock %}
 {% block content %}
@@ -39,12 +39,39 @@
       <div class="field"><label for="mail-reply-to">Reply-To</label><input type="email" name="reply_to_email" id="mail-reply-to" value="{{ mail.reply_to_email }}" maxlength="254" autocomplete="off"><span class="help">Where replies go; empty: to the Send as address.</span></div>
       <div class="field"><label for="mail-managers">Managers</label><textarea name="manager_emails" id="mail-managers" rows="3">{{ mail.manager_emails }}</textarea><span class="help">One address per line: they receive the internal 30-days-overdue message.</span></div>
       <div class="field"><label for="mail-allowlist">Sandbox allowlist</label><textarea name="sandbox_allowlist" id="mail-allowlist" rows="3">{{ mail.sandbox_allowlist }}</textarea><span class="help">One address per line. On the sandbox, mail goes only to these addresses; every other message is held in the Outbox.</span></div>
-      <p class="help" id="mail-pay-link">Until the operator portal exists, the {pay_link} placeholder is a signed link to the operator's statement.</p>
+      <p class="help" id="mail-pay-link">The {pay_link} placeholder is the operator portal's Pay page when the operator has a portal account; otherwise a signed link to the operator's statement.</p>
       <button class="btn btn-primary" type="submit">Save</button>
     </form>
+  </section>
+  {% comment %}PLAN-014 I2: the Bank deposits card. Whether the Plaid keys are here reads their presence, never a value. The switches turn the module on and the automatic confirmation of exact matches. Connect a bank account (admin, once the module is on and a bank source exists) asks the server for a link token, opens Plaid Link (Plaid's script, loaded only here and only then, banking/static/banking/link.js) and posts back only the public token, the chosen account's id and the institution's name; the server exchanges the token and keeps the access token encrypted. Locally without keys the fake source connects a fake account with one click (no script). The mask is Plaid's last four of the business's own account.{% endcomment %}
+  <section class="card settings-card" id="bank-deposits-card">
+    <div class="card-header"><h2 id="bank-deposits">Bank deposits</h2></div>
+    <p id="bank-keys">{{ bank.keys }}</p>
+    {% if bank.fake %}<p class="help" id="bank-fake">Here the fake bank source is used: deposits come from a fixture and nothing reaches Plaid.</p>{% endif %}
+    <form method="post" action="{% url 'ledger:settings:bank_save' %}" id="bank-form">{% csrf_token %}
+      <p><label><input type="checkbox" name="bank_deposits_enabled" value="1" id="bank-enabled"{% if bank.enabled %} checked{% endif %}> Bank deposits on</label></p>
+      <p><label><input type="checkbox" name="bank_auto_confirm_exact" value="1" id="bank-auto-confirm"{% if bank.auto_confirm %} checked{% endif %}> Confirm exact matches automatically (the deposit names an open invoice and pays exactly its balance)</label></p>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+    {% if bank.connection %}
+      <p id="bank-connection">Connected: {{ bank.connection }}, since {{ bank.connection.linked_at|moment }}.{% if bank.connection.last_error %} The last fetch failed ({{ bank.connection.last_error }}).{% endif %}</p>
+      <form method="post" action="{% url 'banking:disconnect' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="bank-disconnect">Disconnect</button></form>
+    {% elif bank.can_connect %}
+      <form method="post" action="{% url 'banking:link_exchange' %}" id="bank-link-form"{% if not bank.fake %} data-token-url="{% url 'banking:link_token' %}"{% endif %}>{% csrf_token %}
+        <input type="hidden" name="public_token" id="bank-public-token" value="{% if bank.fake %}fake-public-token{% endif %}">
+        <input type="hidden" name="account_id" id="bank-account-id" value="">
+        <input type="hidden" name="institution" id="bank-institution" value="">
+        <button class="btn btn-primary" type="{% if bank.fake %}submit{% else %}button{% endif %}" id="bank-connect">Connect a bank account</button>
+        <p class="field-error" id="bank-link-error" hidden>Plaid's window could not open. Nothing was connected.</p>
+      </form>
+    {% else %}
+      <p id="bank-not-connected">No bank account is connected.{% if bank.readiness %} {{ bank.readiness }}{% endif %}</p>
+    {% endif %}
   </section>
   <section class="card settings-card" id="templates-card">
     <div class="card-header"><h2 id="message-templates">Message templates</h2></div>
     <p>The subject and text of every message, with the placeholders each may use. <a href="{% url 'ledger:settings:templates' %}" id="templates-link">Edit message templates</a> · <a href="{% url 'ledger:outbox:page' %}" id="outbox-link">Outbox</a></p>
   </section>
 {% endblock %}
+{% comment %}Plaid Link's script from Plaid's documented CDN URL (https://plaid.com/docs/link/web/: https://cdn.plaid.com/link/v2/stable/link-initialize.js), only while Connect is offered with the real source.{% endcomment %}
+{% block scripts %}{% if bank.can_connect and not bank.fake %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script><script src="{% static 'banking/link.js' %}" defer></script>{% endif %}{% endblock %}

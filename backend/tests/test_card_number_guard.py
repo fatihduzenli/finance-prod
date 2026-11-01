@@ -35,6 +35,7 @@ from ledger.validators import (
     validate_no_payment_data,
 )
 from payments.sync_writer import provider_write
+from tests.test_banking import BANKING_FACTORIES
 from tests.test_ledger_models import (
     LEDGER_FACTORIES,
     LOGO_PATH,
@@ -317,9 +318,11 @@ FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     **LEDGER_FACTORIES,
     **PAYMENTS_FACTORIES,
     **PORTAL_FACTORIES,
+    **BANKING_FACTORIES,
 }
-#: The apps whose tables hold business text: the operator portal's since PLAN-014 H1.
-GUARDED_APPS = ("ledger", "payments", "portal")
+#: The apps whose tables hold business text: the operator portal's since PLAN-014 H1, the bank
+#: deposits' since I1.
+GUARDED_APPS = ("ledger", "payments", "portal", "banking")
 
 
 def guarded_fields() -> list[tuple[type[models.Model], models.Field[Any, Any]]]:
@@ -387,6 +390,7 @@ GUARD_MODULES = (
     "ledger.migrations.0062_rent_month_messages",
     "ledger.migrations.0063_returned_debits",
     "ledger.migrations.0064_portal_messages",
+    "ledger.migrations.0065_bank_deposit_settings",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0003_webhook_event_processing",
     "payments.migrations.0005_jobs",
@@ -397,6 +401,7 @@ GUARD_MODULES = (
     "payments.migrations.0021_job_run_after",
     "payments.migrations.0022_portal_pay_job",
     "portal.migrations.0001_initial",
+    "banking.migrations.0001_initial",
     "portal.migrations.0002_portal_payments",
 )
 
@@ -437,6 +442,12 @@ IDENTIFIER_COLUMNS = {
     "portal_users.password",
     "portal_tokens.token_hash",
     "portal_login_attempts.email_hash",
+    # PLAN-014 I1: Plaid's identifiers, the sync cursor and the access token's ciphertext.
+    "bank_connections.item_id",
+    "bank_connections.account_id",
+    "bank_connections.access_token_encrypted",
+    "bank_connections.cursor",
+    "bank_transactions.external_id",
 }
 
 
@@ -850,7 +861,12 @@ def test_the_trigger_refuses_a_card_number_split_by_bidi_marks() -> None:
 
 # --- The two guard lists stay complete ----------------------------------------------------------
 
-FIRST_LISTED_WITHOUT_EXCEPTION = {"ledger": "0041", "payments": "0018", "portal": "0001"}
+FIRST_LISTED_WITHOUT_EXCEPTION = {
+    "ledger": "0041",
+    "payments": "0018",
+    "portal": "0001",
+    "banking": "0001",
+}
 
 
 def every_migration() -> list[str]:

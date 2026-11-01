@@ -1,0 +1,22 @@
+{% extends "finance/base.html" %}
+{% load dates money %}
+{% block title %}Split a deposit{% endblock %}
+{% block header %}<div class="page-header"><h1>Split the deposit of {{ txn.amount|money }}</h1></div>{% endblock %}
+{% block content %}
+  {% comment %}Split (docs/qa/PLAN-014 I4; banking.views.split): the open charges of one or more stores (their numbers typed, up to ten), an amount on each, the total fixed to the deposit's amount; the rest may be kept as a credit on the first store's lease. One deposit of several checks is recorded this way.{% endcomment %}
+  <section class="card">
+    <p id="deposit-text">{{ txn.posted_on|day }} · {{ txn.description|default:"—" }}{% if txn.counterparty %} · From {{ txn.counterparty }}{% endif %}</p>
+    <form method="get" action="{% url 'banking:split' pk=txn.pk %}" class="settings-inline" id="stores-search"><label for="stores">Store numbers</label><input type="text" name="stores" id="stores" value="{{ stores_query }}" maxlength="120"><button class="btn btn-sm" type="submit">Show their charges</button><span class="help">Separate the numbers with spaces or commas.</span></form>
+    {% if groups %}
+    <form method="post" action="{% url 'banking:split' pk=txn.pk %}" class="js-single-submit" id="split-form">{% csrf_token %}<input type="hidden" name="stores" value="{{ stores_query }}">
+      {% for group in groups %}
+        <h2>{{ group.title }}</h2>
+        {% for charge in group.charges %}<p><label for="amount-{{ group.store.pk }}-{{ charge.charge_id }}">{{ charge.description }} — due {{ charge.due_on|day }} — {{ charge.balance|money }}</label> <input type="text" inputmode="decimal" name="amount_{{ group.store.pk }}_{{ charge.charge_id }}" id="amount-{{ group.store.pk }}-{{ charge.charge_id }}" maxlength="15" size="10"></p>{% empty %}<p class="muted">{% if group.lease %}The lease owes nothing now.{% else %}No current lease.{% endif %}</p>{% endfor %}
+      {% endfor %}
+      <p>The amounts must add up to <strong>{{ amount|money }}</strong>.</p>
+      <p><label><input type="checkbox" name="keep_credit" value="1"> Keep the rest as a credit on the first store's lease</label></p>
+      <button class="btn btn-primary" type="submit">Record the split</button> <a class="btn" href="{% url 'banking:page' %}">Back</a>
+    </form>
+    {% elif searched %}<p id="no-store">No store has those numbers.</p>{% endif %}
+  </section>
+{% endblock %}

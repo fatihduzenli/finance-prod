@@ -207,8 +207,11 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: routes gone with their registrations); 280 since PLAN-014 Batch F
 #: (ledger:one_off_charges:stop_retry); 298 since PLAN-014 H slice 1 (the portal's 14 routes and
 #: ledger:operators:portal_invite, portal_disable, portal_enable, portal_reset); 300 since PLAN-014
-#: H slice 2 (portal:not_found, the slice-1 rework's catch-all, and portal:pay_status).
-FROZEN_ROUTES = (300, "fb1ea2a5b46c9d1291006807449348de4e1b64291a2c3f2d33a015d1f12d1855")
+#: H slice 2 (portal:not_found, the slice-1 rework's catch-all, and portal:pay_status); 311 since
+#: PLAN-014 I slice 1 (banking:page, confirm, choose, split, ignore, undo, fetch_now, link_token,
+#: link_exchange, disconnect and ledger:settings:bank_save); 313 since PLAN-014 I slice 2
+#: (ledger:leases:alias_add and alias_remove, the billing details dialog's sender names).
+FROZEN_ROUTES = (313, "a097b1775b2439f714e4c1dd60d4010728caf5cd42620a811d29492436e582af")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

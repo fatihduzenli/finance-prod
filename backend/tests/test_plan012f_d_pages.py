@@ -253,6 +253,8 @@ def path_of(world: World, name: str) -> str:
         "outcome": "kept",
         "slug": "promises-to-pay",
         "rest": "no-such-token",
+        # PLAN-014 I4: a sender name's id (none exists: the POST-only route answers 405 to a GET).
+        "alias": "00000000-0000-0000-0000-000000000000",
     }
     kwargs: dict[str, Any] = {}
     for first, second in re.findall(r"<(?:\w+:)?(\w+)>|\(\?P<(\w+)>", raw):
@@ -476,6 +478,11 @@ for _name in (
     "ledger:settings:mail_save",
     "ledger:settings:template_preview",
     "ledger:outbox:send_now",
+    # PLAN-014 I2: the Bank deposits card's switches.
+    "ledger:settings:bank_save",
+    # PLAN-014 I4: the billing details dialog's sender names (add, remove).
+    "ledger:leases:alias_add",
+    "ledger:leases:alias_remove",
 ):
     NOT_PAGES[_name] = POST_ONLY
 

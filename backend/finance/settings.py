@@ -102,6 +102,8 @@ INSTALLED_APPS = [
     "payments",
     # The operator portal, its own principal and session (PLAN-014 H1).
     "portal",
+    # Bank deposits matched to open charges, with the Plaid connector (PLAN-014 I1).
+    "banking",
     # Project package as an app so its management commands (deploy_migrate) are found.
     # It has no models. Listed last so it changes no template or static resolution.
     "finance",
@@ -254,6 +256,18 @@ USPS_CLIENT_SECRET = _config.usps_client_secret
 #: https://apis.usps.com; another value is accepted only when APP_ENV is local (a fake).
 USPS_API_BASE_URL = _config.usps_api_base_url
 
+# --- Bank deposits (docs/qa/PLAN-014-per-lease-billing-messaging-portal-deposits.md I1) ------
+#: Plaid's environment: sandbox (default), development or production (never on local).
+PLAID_ENV = _config.plaid_env
+#: Server-side only: Plaid's client ID and secret, and the Fernet key that encrypts the
+#: linked bank's access token at rest, from the vault secrets plaid-client-id, plaid-secret
+#: and plaid-token-key. All three or none; none: the module cannot connect or fetch. Read by
+#: ``banking`` alone (the Bank deposits card says only whether they are there); never
+#: rendered, logged or exported.
+PLAID_CLIENT_ID = _config.plaid_client_id
+PLAID_SECRET = _config.plaid_secret
+PLAID_TOKEN_KEY = _config.plaid_token_key
+
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SESSION_COOKIE_HTTPONLY = True
@@ -329,6 +343,9 @@ LOGGING = {
                     *log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
                     USPS_CLIENT_SECRET,
                     STAX_WEB_PAYMENTS_TOKEN,
+                    PLAID_CLIENT_ID,
+                    PLAID_SECRET,
+                    PLAID_TOKEN_KEY,
                 ),
             ),
         },
@@ -360,6 +377,9 @@ LOGGING = {
         # The address check at INFO: one line per USPS request, the host, the status and the
         # latency only (PLAN-012f-b D13).
         "finance.usps": {"handlers": [], "level": "INFO", "propagate": True},
+        # The bank connector at INFO: one line per Plaid request, the host, the status and the
+        # latency only (PLAN-014 I1).
+        "banking": {"handlers": [], "level": "INFO", "propagate": True},
         # The PDF reader's own warnings about a malformed file are dropped: a document's
         # text must never reach a log line (PLAN-010c D6). The service logs a refusal's
         # class name instead.
@@ -377,5 +397,8 @@ sentry.init(
         *log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
         USPS_CLIENT_SECRET,
         STAX_WEB_PAYMENTS_TOKEN,
+        PLAID_CLIENT_ID,
+        PLAID_SECRET,
+        PLAID_TOKEN_KEY,
     ),
 )

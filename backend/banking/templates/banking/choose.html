@@ -1,0 +1,23 @@
+{% extends "finance/base.html" %}
+{% load dates money %}
+{% block title %}Choose a charge{% endblock %}
+{% block header %}<div class="page-header"><h1>Deposit of {{ txn.amount|money }} on {{ txn.posted_on|day }}</h1></div>{% endblock %}
+{% block content %}
+  {% comment %}Choose another (docs/qa/PLAN-014 I4; banking.views.choose): the open charges of a store's current lease (the suggested store's first, or the store number typed), one to choose or the whole balance; the POST records it as Confirm does.{% endcomment %}
+  <section class="card">
+    <p id="deposit-text">{{ txn.description|default:"—" }}{% if txn.counterparty %} · From {{ txn.counterparty }}{% endif %}</p>
+    <form method="get" action="{% url 'banking:choose' pk=txn.pk %}" class="settings-inline" id="store-search"><label for="store">Store number</label><input type="text" name="store" id="store" value="{{ store_query }}" inputmode="numeric" maxlength="12"><button class="btn btn-sm" type="submit">Show its charges</button></form>
+    {% if store and lease %}
+      <h2 id="store-title">{{ store_title }}</h2>
+      {% if charges %}
+      <form method="post" action="{% url 'banking:choose' pk=txn.pk %}" class="js-single-submit" id="choose-form">{% csrf_token %}<input type="hidden" name="lease" value="{{ lease.pk }}">
+        {% for charge in charges %}<p><label><input type="radio" name="charge" value="{{ charge.kind }}:{{ charge.charge_id }}" required{% if forloop.first %} checked{% endif %}> {{ charge.description }} — due {{ charge.due_on|day }} — {{ charge.balance|money }}</label></p>{% endfor %}
+        <p><label><input type="radio" name="charge" value="whole"> The whole balance</label></p>
+        {% if alias %}<p><label><input type="checkbox" name="remember" value="1" checked> Remember {{ alias }} for {{ store_title }}</label></p>{% endif %}
+        <p><label><input type="checkbox" name="keep_credit" value="1"> Keep any rest as a credit on the lease</label></p>
+        <button class="btn btn-primary" type="submit">Confirm</button> <a class="btn" href="{% url 'banking:page' %}">Back</a>
+      </form>
+      {% else %}<p id="no-charges">The store's lease owes nothing now.</p>{% endif %}
+    {% elif searched or store %}<p id="no-store">No store with a current lease has that number.</p>{% endif %}
+  </section>
+{% endblock %}

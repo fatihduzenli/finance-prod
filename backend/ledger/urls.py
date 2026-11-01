@@ -185,6 +185,12 @@ lease_patterns = (
         path("<str:pk>/resume/", leases.lease_resume, name="resume"),
         path("<str:pk>/stop-autopay/", leases.lease_stop_autopay, name="stop_autopay"),
         path("<str:pk>/billing/", leases.lease_billing, name="billing"),
+        path("<str:pk>/aliases/add/", leases.lease_alias_add, name="alias_add"),
+        path(
+            "<str:pk>/aliases/<str:alias>/remove/",
+            leases.lease_alias_remove,
+            name="alias_remove",
+        ),
         path("<str:pk>/bank/", leases.lease_bank, name="bank"),
         path("<str:pk>/bank/attach/", leases.lease_bank_attach, name="bank_attach"),
         path("<str:pk>/bank/switch-own/", leases.lease_switch_own, name="switch_own"),
@@ -449,6 +455,7 @@ settings_patterns = (
         path("brands/<str:pk>/move/", settings.brand_move, name="brand_move"),
         # PLAN-014 D1, D4: the Mail card and the message templates.
         path("mail/", settings.mail_save, name="mail_save"),
+        path("bank-deposit-settings/", settings.bank_save, name="bank_save"),
         path("templates/", settings.templates_list, name="templates"),
         path("templates/<str:pk>/", settings.template_edit, name="template_edit"),
         path("templates/<str:pk>/preview/", settings.template_preview, name="template_preview"),

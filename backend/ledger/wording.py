@@ -21,6 +21,11 @@ shown, compared or formatted, never at import.
 §4.5), read through ``get_<field>_display`` or the class's ``choices``; a label never names
 the processor (it is fixed at import), so a page that needs the name writes
 ``company.provider_name`` next to it.
+
+**The memo line** (PLAN-014 I5). :func:`memo_line` is the sentence under a sent invoice (the
+staff preview and print view, the portal's Invoices and Pay pages) asking a payer by wire or
+Zelle to write the invoice number in the memo, which the Bank deposits match reads
+(``banking.matching``, exact). A draft has no number yet and shows nothing.
 """
 
 from __future__ import annotations
@@ -36,6 +41,15 @@ from django.utils.functional import lazy
 PROVIDER = "{provider}"
 
 _reader: ContextVar[Callable[[], str] | None] = ContextVar("provider_name_reader", default=None)
+
+
+#: PLAN-014 I5: the memo line, with the invoice's real number.
+MEMO_LINE = "Paying by wire or Zelle? Put {number} in the memo."
+
+
+def memo_line(number: str) -> str:
+    """:data:`MEMO_LINE` for the invoice ``number``."""
+    return MEMO_LINE.format(number=number)
 
 
 def format_amount(amount: Decimal) -> str:

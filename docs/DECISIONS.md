@@ -1097,3 +1097,66 @@ them, so Rule 1's substance holds while its old wording ("do not embed Stax.js")
   public set is pinned so the portal can never widen it.
 - The Nacha authorisation text on the bank-entry page is the processor's (TODO-VERIFY-006
   stays open).
+
+---
+
+## ADR-0018 — Bank deposit matching with a pluggable transaction source and a Plaid connector, dark by default
+
+**Date:** 2026-10-31
+**Status:** Accepted (owner, 2026-10-29: Step 14 Batch I as written in the prompt; built by
+PLAN-014 I; a real Plaid connection is TODO-VERIFY-071)
+**Deciders:** Project owner; plan and record by Fable; built by Opus
+
+### Context
+
+Rent that arrives by wire, Zelle, ACH credit or cheque lands in the company's bank account and is
+recorded by hand on the payment entry page. The owner asked for the bank's credits to be read and
+matched to open charges, with staff confirming each match, so that nothing is typed twice and a
+deposit cannot be forgotten. The bank is reached through an aggregator (Plaid); its access token is
+a long-lived credential to the business's own account, which no earlier decision covered.
+
+### Decision
+
+1. **A module with a pluggable source.** `banking.BankTransactionSource` (`sync` adds credits
+   idempotently by their external id); `PlaidSource` over `httpx` as the USPS client (one client
+   per call, 10 s timeouts, no redirects, one retry on 5xx, logs host, status and latency only);
+   `FakeSource` for tests and local use. Debits are never kept.
+2. **Off until the owner turns it on.** `CompanySettings.bank_deposits_enabled` and
+   `bank_auto_confirm_exact` (both false) on Admin › Settings › Bank deposits; the card says only
+   whether the Plaid keys exist in the environment. The daily job and "Fetch now" sync only when
+   enabled, with keys and an active connection. Nothing in the infrastructure sets the Plaid
+   names until Step 16.
+3. **The credential.** The Plaid access token is stored encrypted (Fernet) with a key from Key
+   Vault (`plaid-token-key`), beside `plaid-client-id` and `plaid-secret`; the three come from the
+   environment at runtime, all or none, never logged, never in the Django admin or on a page. The
+   connection keeps Plaid's mask (the last four of the business's account), the institution, the
+   cursor and the last error's class name only.
+4. **Matching with four confidence levels.** Exact (an invoice number in the description and the
+   amount equal to that charge's balance), strong (a remembered sender alias of a lease and the
+   amount equal to one of its charges or its whole balance), weak (the amount equals exactly one
+   open charge anywhere), none (with candidates listed on a tie). Only an exact match may be
+   auto-confirmed, and only when the setting says so.
+5. **Staff confirm; the ledger stays the ledger.** Confirm records the deposit through the existing
+   payment entry (method from the bank's kind, the reference the bank transaction id, partials with
+   the remainder kept as credit), Choose another, Split across charges or cheques, Ignore with a
+   reason, Undo through the existing void of a manual payment. A transaction is applied once.
+   Aliases are offered at confirmation and live on the lease's billing details.
+6. **The memo line.** Invoices and the portal's pay and invoice pages ask the payer to put the
+   invoice number in the memo, which is what makes an exact match.
+
+### Alternatives rejected
+
+- A bank CSV import: kept as a possible second source behind the same Protocol, not built.
+- The processor's deposit report: a different thing (the processor's settlements to the
+  company), not the bank's credits from operators.
+- Automatic confirmation of strong and weak matches: a wrong allocation moves money between
+  operators; staff confirm, and only an exact match with the invoice number may go by itself.
+
+### Consequences
+
+- A long-lived bank credential at rest, encrypted with a vault key; three new secret names in
+  `.env.example` and the secrets table of `docs/CLAUDE.md`; the module is dark until the owner
+  enables it and connects the account (a Publish Request for the keys and the Link).
+- Plaid's sandbox serves the tests of the client; a real linked account is TODO-VERIFY-071.
+- The page is called "Bank deposits" (the owner's word); the existing "Bank account check" report
+  keeps its name.

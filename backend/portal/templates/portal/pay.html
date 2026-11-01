@@ -1,5 +1,5 @@
 {% extends "portal/base.html" %}{% load money dates %}
-{% comment %}Pay (PLAN-014 H4; portal.views.pay): the confirmation of one open charge or of the store's whole open balance: the charges, the amount and the bank's last four. The form posts the amount shown and the page's one-time key; the server takes the amount from its own records and refuses any other. With the pay-an-invoice flag off one sentence says online payment is not available yet and no form is shown.{% endcomment %}
+{% comment %}Pay (PLAN-014 H4; portal.views.pay): the confirmation of one open charge or of the store's whole open balance: the charges, the amount and the bank's last four. The form posts the amount shown and the page's one-time key; the server takes the amount from its own records and refuses any other. With the pay-an-invoice flag off one sentence says online payment is not available yet and no form is shown. Under the amount (with the flag off, under its sentence), the memo line of each sent invoice of the charges paid (PLAN-014 I5).{% endcomment %}
 {% block title %}Pay{% endblock %}
 {% block content %}
 {% include "portal/_store_title.html" %}
@@ -7,6 +7,7 @@
 <section class="portal-card">
   {% if not page.enabled %}
   <p id="pay-unavailable">{{ unavailable }}</p>
+  {% for line in page.memo_lines %}<p class="portal-muted pay-memo">{{ line }}</p>{% endfor %}
   {% else %}
   <h2>{% if page.whole %}Pay the whole balance{% else %}Pay this charge{% endif %}</h2>
   {% if problem %}<p class="portal-error" id="pay-problem" role="alert">{{ problem }}</p>{% endif %}
@@ -26,6 +27,7 @@
     <dt>Amount</dt><dd id="pay-amount">{{ page.amount|money }}</dd>
     <dt>From the bank account</dt><dd id="pay-bank">····{{ page.last4 }}{% if page.shared_with %} <span class="portal-muted" id="pay-shared">Shared with {{ page.shared_with }}</span>{% endif %}</dd>
   </dl>
+  {% for line in page.memo_lines %}<p class="portal-muted pay-memo">{{ line }}</p>{% endfor %}
   {% if page.refusal %}
   <p id="pay-refusal">{{ page.refusal }}</p>
   {% elif page.payable %}

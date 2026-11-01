@@ -164,6 +164,9 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             "bank",
             "bank_attach",
             "switch_own",
+            # PLAN-014 I4 (slice 2): the billing details dialog's sender names.
+            "alias_add",
+            "alias_remove",
             *POST_ROUTES,
         )
     }
@@ -199,6 +202,10 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     # PLAN-014 C9: the LEASE card's "Switch to own account" needs billing.
     rule = registry.rule_for("ledger:leases:switch_own")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-014 I4: adding and removing a sender name need billing.
+    for name in ("alias_add", "alias_remove"):
+        rule = registry.rule_for(f"ledger:leases:{name}")
+        assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
 
 
 @pytest.mark.parametrize("role", [Role.VIEWER, Role.BILLING])
@@ -977,3 +984,167 @@ def test_the_switch_below_billing_is_forbidden_and_queues_nothing(
     assert client.get(_switch_path(sharer)).status_code in (403, 405)
     assert _switch_jobs() == []
     assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id is not None
+
+
+# --- PLAN-014 I4: the sender names on the billing details dialog ------------------------------
+
+
+def _alias_add(lease: Lease) -> str:
+    return f"/leases/{lease.pk}/aliases/add/"
+
+
+def _alias_remove(lease: Lease, alias: Any) -> str:
+    return f"/leases/{lease.pk}/aliases/{alias.pk}/remove/"
+
+
+def _dialog(client: Client, lease: Lease) -> str:
+    return html.unescape(client.get(f"/leases/{lease.pk}/billing/").content.decode())
+
+
+def test_a_sender_name_is_added_normalised_listed_and_audited(fake: FakeProvider) -> None:
+    from banking.models import SenderAlias
+
+    lease = make_lease()
+    billing, user = client_for(Role.BILLING, "billing-alias")
+    page = _dialog(billing, lease)
+    assert 'id="billing-aliases"' in page and 'id="no-aliases"' in page
+    assert page.index('id="billing-provider"') < page.index('id="billing-aliases"')
+    response = billing.post(_alias_add(lease), {"text": "  Fatih   trading\tllc "}, follow=True)
+    assert response.redirect_chain[-1][0] == f"/leases/{lease.pk}/billing/"
+    alias = SenderAlias.objects.get()
+    assert (alias.lease_id, alias.text, alias.normalised) == (
+        lease.pk,
+        "Fatih trading llc",
+        "FATIH TRADING LLC",
+    )
+    assert alias.created_by == user
+    page = html.unescape(response.content.decode())
+    assert "Fatih trading llc is remembered for" in page
+    assert '<span class="alias-text">Fatih trading llc</span>' in page
+    assert 'id="no-aliases"' not in page
+    audit = AuditLog.objects.get(action="sender_alias.added")
+    assert audit.actor == user and audit.entity_id == str(alias.pk)
+    assert audit.after == {
+        "lease": str(lease.pk),
+        "text": "Fatih trading llc",
+        "normalised": "FATIH TRADING LLC",
+    }
+
+
+def test_a_sender_name_already_on_the_lease_is_refused_in_any_case_or_spacing(
+    fake: FakeProvider,
+) -> None:
+    from banking.models import SenderAlias
+
+    lease = make_lease()
+    other = make_lease(
+        store=Store.objects.create(external_label="Other store", status=StoreStatus.ACTIVE),
+        operator=make_operator("other@example.com"),
+    )
+    billing, _ = client_for(Role.BILLING, "billing-alias")
+    billing.post(_alias_add(lease), {"text": "ACME LLC"})
+    response = billing.post(_alias_add(lease), {"text": " acme   llc"}, follow=True)
+    assert "acme llc is already a sender name of this lease. Nothing was saved." in (
+        html.unescape(response.content.decode())
+    )
+    assert SenderAlias.objects.filter(lease=lease).count() == 1
+    # The same name on another lease is another lease's alias.
+    billing.post(_alias_add(other), {"text": "acme llc"})
+    assert SenderAlias.objects.filter(lease=other).count() == 1
+    assert AuditLog.objects.filter(action="sender_alias.added").count() == 2
+
+
+@pytest.mark.parametrize(
+    ("text", "sentence"),
+    [
+        ("ACME 4111 1111 1111 1111", "may not contain card or account numbers"),
+        ("Routing 021000021 account 123456789", "may not contain card or account numbers"),
+        ("ab", "at least 3 characters"),
+        ("   ", "at least 3 characters"),
+        ("x" * 201, "under 200 characters"),
+    ],
+)
+def test_a_card_number_a_short_or_a_long_sender_name_is_refused(
+    fake: FakeProvider, text: str, sentence: str
+) -> None:
+    from banking.models import SenderAlias
+
+    lease = make_lease()
+    billing, _ = client_for(Role.BILLING, "billing-alias")
+    response = billing.post(_alias_add(lease), {"text": text}, follow=True)
+    assert sentence in html.unescape(response.content.decode())
+    assert not SenderAlias.objects.exists()
+    assert not AuditLog.objects.filter(action__startswith="sender_alias.").exists()
+
+
+def test_a_sender_name_is_removed_and_audited(fake: FakeProvider) -> None:
+    from banking.models import SenderAlias
+
+    lease = make_lease()
+    billing, user = client_for(Role.BILLING, "billing-alias")
+    billing.post(_alias_add(lease), {"text": "ACME LLC"})
+    alias = SenderAlias.objects.get()
+    page = _dialog(billing, lease)
+    assert f'action="{_alias_remove(lease, alias)}"' in page
+    response = billing.post(_alias_remove(lease, alias), follow=True)
+    assert "ACME LLC is no longer a sender name of" in html.unescape(response.content.decode())
+    assert not SenderAlias.objects.exists()
+    audit = AuditLog.objects.get(action="sender_alias.removed")
+    assert audit.actor == user and audit.entity_id == str(alias.pk) and audit.after is None
+    assert audit.before == {"lease": str(lease.pk), "text": "ACME LLC", "normalised": "ACME LLC"}
+    # A second Remove finds nothing and changes nothing.
+    response = billing.post(_alias_remove(lease, alias), follow=True)
+    assert "That sender name was already removed." in html.unescape(response.content.decode())
+    assert AuditLog.objects.filter(action="sender_alias.removed").count() == 1
+
+
+def test_another_leases_sender_name_cannot_be_removed_through_this_lease(
+    fake: FakeProvider,
+) -> None:
+    from banking.models import SenderAlias
+
+    lease = make_lease()
+    other = make_lease(
+        store=Store.objects.create(external_label="Other store", status=StoreStatus.ACTIVE),
+        operator=make_operator("other@example.com"),
+    )
+    alias = SenderAlias.objects.create(lease=other, text="ACME", normalised="ACME")
+    billing, _ = client_for(Role.BILLING, "billing-alias")
+    billing.post(_alias_remove(lease, alias))
+    assert SenderAlias.objects.filter(pk=alias.pk).exists()
+    assert billing.post(f"/leases/{lease.pk}/aliases/not-a-uuid/remove/").status_code == 404
+
+
+def test_a_viewer_cannot_add_or_remove_a_sender_name(fake: FakeProvider) -> None:
+    from banking.models import SenderAlias
+
+    lease = make_lease()
+    alias = SenderAlias.objects.create(lease=lease, text="ACME", normalised="ACME")
+    viewer, _ = client_for(Role.VIEWER, "viewer-alias")
+    assert viewer.post(_alias_add(lease), {"text": "Someone else"}).status_code == 403
+    assert viewer.post(_alias_remove(lease, alias)).status_code == 403
+    assert list(SenderAlias.objects.values_list("text", flat=True)) == ["ACME"]
+    assert not AuditLog.objects.filter(action__startswith="sender_alias.").exists()
+    # The service refuses on its own too.
+    from banking import services as banking
+
+    viewer_user = client_for(Role.VIEWER)[1]
+    assert not banking.add_alias(lease, "Someone else", actor=viewer_user).ok
+    assert not banking.remove_alias(lease, alias.pk, actor=viewer_user).ok
+    assert SenderAlias.objects.count() == 1
+
+
+def test_an_archived_operators_lease_keeps_its_sender_names(fake: FakeProvider) -> None:
+    from banking.models import SenderAlias
+
+    lease = make_lease(operator=make_operator())
+    alias = SenderAlias.objects.create(lease=lease, text="ACME", normalised="ACME")
+    assert lease.operator is not None
+    Operator.objects.filter(pk=lease.operator.pk).update(archived_at=timezone.now())
+    billing, _ = client_for(Role.BILLING, "billing-alias")
+    billing.post(_alias_add(lease), {"text": "Someone else"})
+    billing.post(_alias_remove(lease, alias))
+    assert list(SenderAlias.objects.values_list("text", flat=True)) == ["ACME"]
+    page = _dialog(billing, lease)
+    assert '<span class="alias-text">ACME</span>' in page
+    assert 'id="alias-add-form"' not in page and f"/leases/{lease.pk}/aliases/" not in page

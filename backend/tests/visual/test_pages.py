@@ -102,6 +102,8 @@ PAGES: dict[str, Callable[[Site], str]] = {
     # PLAN-014 D4, D5: the message templates and the Outbox (one held message), admins only.
     "message-templates": lambda site: "/admin-settings/templates/",
     "outbox": lambda site: "/admin-settings/outbox/",
+    # PLAN-014 I4: the Bank deposits page (billing): one deposit with a suggestion, one without.
+    "bank-deposits": lambda site: "/admin-settings/bank-deposits/",
 }
 
 
