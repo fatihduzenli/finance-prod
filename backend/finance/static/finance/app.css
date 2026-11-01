@@ -159,7 +159,7 @@ img, iframe { max-width: 100%; }
    a text area keeps 9/12 and radius 8 (no pill text area in the mock); a search field on
    --surface-2. The focus ring is --link's (the :focus-visible rule above),
    and the border takes --link too. */
-input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=tel], input[type=url], select, textarea { box-sizing: border-box; max-width: 100%; padding: 9px 14px; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-md); }
+input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=datetime-local], input[type=month], input[type=tel], input[type=url], select, textarea { box-sizing: border-box; max-width: 100%; padding: 9px 14px; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-md); }
 input[type=text], input[type=email], input[type=search], textarea { width: 100%; }
 textarea { padding: 9px 12px; border-radius: var(--radius-ctl); }
 input[type=search] { background: var(--surface-2); }
@@ -508,6 +508,8 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .side-list dd.side-partial { color: var(--partial-text); }
 .side-list dd.side-unpaid { color: var(--unpaid-text); }
 .side-list dd.side-muted { color: var(--muted); }
+/* A one-button form inside a row (the insurance row's "Bill now", PLAN-014 I-b) stays on the line. */
+.side-list dd form.side-inline-form { display: inline; margin: 0; }
 .side-list dd[class^="side-"] > a:not(.card-link) { color: inherit; }
 .side-list dd > .card-link { margin-left: var(--space-1); font-size: var(--fs-sm); }
 .side-note.warning { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-ctl); background: var(--flash-warning-bg); color: var(--flash-warning-text); font-size: var(--fs-sm); }
@@ -1604,7 +1606,7 @@ p.detail-more-notes { padding-left: 0; }
 
 /* --- Tablet and phone: touch targets ---------------------------------------------------- */
 @media (max-width: 1023.98px), (pointer: coarse) {
-  .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=file] { min-height: var(--tap); }
+  .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=datetime-local], input[type=month], input[type=file] { min-height: var(--tap); }
   input[type=checkbox], input[type=radio] { min-width: 24px; min-height: 24px; }
   td a, li a, .pagination a, .pager a, .segmented a, .tab { display: inline-flex; align-items: center; min-height: var(--tap); }
   /* A grid cell's block keeps its amount over its status line. */
@@ -1633,7 +1635,7 @@ p.detail-more-notes { padding-left: 0; }
   main, main.wide { margin: 0; padding: var(--space-4); border: 0; border-radius: 0; max-width: none; }
   dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 10px; }
   /* A 16 px field keeps a phone from zooming in on focus. */
-  input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=tel], input[type=url], select, textarea { font-size: 16px; }
+  input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=datetime-local], input[type=month], input[type=tel], input[type=url], select, textarea { font-size: 16px; }
   /* One form column: labels above full-width fields, inline widths overridden. */
   form .actions { flex-direction: column; align-items: stretch; }
   form .actions label { margin: .5rem 0 0; }

@@ -5,7 +5,8 @@ rows (no "Since", the open balance's tone, Sign fee and Insurance in four states
 year's note); "Notes & follow-ups" everywhere; store notes (author or admin, "edited", pinning,
 the NOTES card, deletions audited, payment data refused); the timeline's four-way filter — and
 the adversarial cases of plan §5 B (a 2,001-character note, a duplicate brand name in another
-case, a viewer's POSTs, a deleted note's trail)."""
+case, a viewer's POSTs, a deleted note's trail). PLAN-014 I-b: the insurance row's "Bill now"
+(billing, while not billed) and the Deposit row's colour in each state."""
 
 from __future__ import annotations
 
@@ -411,7 +412,7 @@ def test_the_insurance_row_not_billed_and_the_previous_year_notes() -> None:
     store, lease, _ = a_store_with_lease()
     card = lease_card(store)
     row = section(card, "header-insurance-state", "</dd>")
-    assert "not billed" in row  # no per-lease insurance creation route: no "Bill now" (QA-014)
+    assert "not billed" in row  # PLAN-014 I-b: with "Bill now" (the tests below)
     assert "Insurance 2025–26 never billed" in card
     an_insurance_charge(lease, 2025, date(2025, 7, 1), "300.00")
     card = lease_card(store)
@@ -425,6 +426,65 @@ def test_no_previous_year_note_when_the_lease_did_not_hold_the_store_then() -> N
     a_lease(store, an_operator("New Co"), started=date(2026, 8, 1))
     card = lease_card(store)
     assert "Insurance 2025–26" not in card
+
+
+# --- PLAN-014 I-b: the insurance row's "Bill now" and the Deposit row's colour ---------------
+
+
+def test_the_insurance_row_offers_bill_now_to_billing_only_while_not_billed() -> None:
+    store, lease, _ = a_store_with_lease()
+    row = section(lease_card(store), "header-insurance-state", "</dd>")
+    assert 'id="insurance-bill"' in row and ">Bill now</button>" in row
+    form = section(row, "insurance-bill-form", "</form>")
+    assert f'action="/leases/{lease.pk}/insurance/bill/"' in row and 'method="post"' in row
+    assert "js-single-submit" in row and "csrfmiddlewaretoken" in form
+    viewer = page(client_for(Role.VIEWER)[0], f"/stores/{store.pk}/")
+    assert "not billed" in section(viewer, "header-insurance-state", "</dd>")
+    assert 'id="insurance-bill"' not in viewer
+    an_insurance_charge(lease, 2026, date(2026, 7, 1), "695.00")
+    assert 'id="insurance-bill"' not in lease_card(store)
+
+
+def test_bill_now_on_the_card_bills_the_year_and_the_row_turns_red() -> None:
+    store, lease, _ = a_store_with_lease()
+    client, _ = a_user(Role.BILLING)
+    response = client.post(f"/leases/{lease.pk}/insurance/bill/")
+    assert response.status_code == 302 and response["Location"] == f"/stores/{store.pk}/"
+    card = lease_card(store)
+    assert 'id="insurance-bill"' not in card
+    assert '<dd class="side-unpaid" id="header-insurance-state">not collected</dd>' in card
+
+
+def _deposit(lease: Any, operator: Any, paid: str) -> None:
+    fee, _ = FeeType.objects.get_or_create(
+        code="deposit-i-b", defaults={"name": "Security deposit", "refundable": True}
+    )
+    a_one_off_charge(
+        operator,
+        "3000.00",
+        date(2026, 9, 1),
+        lease=lease,
+        paid=paid,
+        category=OneOffCategory.SETUP,
+        fee_type=fee,
+        description="",
+        collection="none",
+        status="paid" if paid == "3000.00" else "owed",
+    )
+
+
+@pytest.mark.parametrize(
+    ("paid", "text", "tone"),
+    [
+        ("3000.00", "$3,000.00 · collected", "side-paid"),
+        ("1000.00", "$3,000.00 · $1,000.00 collected", "side-partial"),
+        ("0.00", "$3,000.00 · not collected", "side-unpaid"),
+    ],
+)
+def test_the_deposit_row_is_coloured_by_its_state(paid: str, text: str, tone: str) -> None:
+    store, lease, operator = a_store_with_lease()
+    _deposit(lease, operator, paid)
+    assert f'<dd class="{tone}" id="header-deposit">{text}</dd>' in lease_card(store)
 
 
 # --- B4: the rename -------------------------------------------------------------------------

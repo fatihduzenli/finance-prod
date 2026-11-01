@@ -466,7 +466,8 @@ def test_the_bank_line_is_the_cached_last_four_and_a_sharer_names_the_account_it
     LeaseBilling.objects.filter(lease=first).update(bank_last4="")
     card = by_id(page(viewer, operator_page(operator)), "payment-card")
     assert f"{lease_line(first)}no bank account on file</dd>" in card
-    assert f"{lease_line(second)}no bank account on file " in card
+    # PLAN-014 I-b: without a bank on file, nothing names the shared account.
+    assert f"{lease_line(second)}no bank account on file</dd>" in card
 
 
 def test_returns_count_this_calendar_year_in_local_time_this_operator_only() -> None:

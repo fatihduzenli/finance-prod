@@ -126,7 +126,7 @@
     <section class="card" id="payment-card" aria-labelledby="payment-card-heading">
       <h2 class="section-label" id="payment-card-heading">Payment</h2>
       <dl class="side-list">
-        {% for account in lease_accounts %}<dt>{{ account.lease.store.external_label }}</dt><dd class="side-lease-account" id="side-account-{{ account.lease.pk }}">{% if account.company %}{{ account.company }}<br>{% endif %}{{ account.bank }}{% if account.shares %} <span class="muted">(the account of {{ account.shares.store.external_label }})</span>{% endif %}</dd>{% empty %}<dt>Billing</dt><dd id="side-no-lease">No current lease</dd>{% endfor %}
+        {% for account in lease_accounts %}<dt>{{ account.lease.store.external_label }}</dt><dd class="side-lease-account" id="side-account-{{ account.lease.pk }}">{% if account.company %}{{ account.company }}<br>{% endif %}{{ account.bank }}{% if account.has_bank and account.shares %} <span class="muted">(the account of {{ account.shares.store.external_label }})</span>{% endif %}</dd>{% empty %}<dt>Billing</dt><dd id="side-no-lease">No current lease</dd>{% endfor %}
         <dt>Returns</dt><dd id="side-returns"{% if returns_this_year %} class="side-strong tone-unpaid"{% endif %}>{{ returns_this_year }} this year</dd>
         <dt>Promise</dt><dd id="side-promise">{% if open_promise %}{{ open_promise.promised_amount|money }} by {{ open_promise.promised_date|day }} <span class="badge promise-status promise-open">Open</span>{% else %}—{% endif %}</dd>
       </dl>

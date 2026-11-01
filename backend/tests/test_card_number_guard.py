@@ -391,6 +391,7 @@ GUARD_MODULES = (
     "ledger.migrations.0063_returned_debits",
     "ledger.migrations.0064_portal_messages",
     "ledger.migrations.0065_bank_deposit_settings",
+    "ledger.migrations.0066_operator_state_codes",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0003_webhook_event_processing",
     "payments.migrations.0005_jobs",

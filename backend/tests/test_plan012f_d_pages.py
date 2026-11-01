@@ -483,6 +483,8 @@ for _name in (
     # PLAN-014 I4: the billing details dialog's sender names (add, remove).
     "ledger:leases:alias_add",
     "ledger:leases:alias_remove",
+    # PLAN-014 I-b: the LEASE card's insurance "Bill now" posts here.
+    "ledger:leases:insurance_bill",
 ):
     NOT_PAGES[_name] = POST_ONLY
 

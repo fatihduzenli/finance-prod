@@ -167,6 +167,8 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             # PLAN-014 I4 (slice 2): the billing details dialog's sender names.
             "alias_add",
             "alias_remove",
+            # PLAN-014 I-b: the LEASE card's insurance "Bill now".
+            "insurance_bill",
             *POST_ROUTES,
         )
     }
@@ -206,6 +208,9 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     for name in ("alias_add", "alias_remove"):
         rule = registry.rule_for(f"ledger:leases:{name}")
         assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-014 I-b: the insurance row's "Bill now" needs billing.
+    rule = registry.rule_for("ledger:leases:insurance_bill")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
 
 
 @pytest.mark.parametrize("role", [Role.VIEWER, Role.BILLING])
@@ -861,7 +866,11 @@ def test_the_lease_card_offers_the_bank_entry_and_names_a_shared_account(
     )
     LeaseBilling.objects.filter(lease=sharer).update(shares_account_of=holder)
     page = _store_page(admin, sharer)
-    assert f"Shared with #{holder.store.external_label}" in page
+    # PLAN-014 I-b: "· shared with" and a link to the store (no number: its label alone).
+    assert (
+        f'· shared with <a href="/stores/{holder.store_id}/">{holder.store.external_label}</a>'
+        in page
+    )
     assert 'id="lease-bank-entry"' not in page
 
 
