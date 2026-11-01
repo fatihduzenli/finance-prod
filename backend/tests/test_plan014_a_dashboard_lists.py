@@ -30,8 +30,10 @@ TODAY = date(2026, 10, 6)  # a Tuesday
 @pytest.fixture(autouse=True)
 def today(monkeypatch: pytest.MonkeyPatch) -> date:
     monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: TODAY)
-    monkeypatch.setattr("ledger.views.dashboard.today", lambda: TODAY, raising=False)
-    monkeypatch.setattr("ledger.services.dashboard.today", lambda: TODAY, raising=False)
+    # The dashboard reads django.utils.timezone.localdate (there is no ``today`` name to patch:
+    # the earlier raising=False patches pinned nothing, and the tests passed only while the
+    # real month was October 2026).
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: TODAY)
     return TODAY
 
 
