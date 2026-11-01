@@ -1,7 +1,11 @@
-"""Annual insurance charges (PLAN-007 §6 row 8; the owner's algorithm, ADR-0005)."""
+"""Annual insurance charges (PLAN-007 §6 row 8; the owner's algorithm, ADR-0005), and the LEASE
+card's "Bill now" on the insurance row (PLAN-014 I-b: once, audited with the actor, refused for
+a viewer, a GET, an archived operator, a store without an open date and a lease that does not
+owe the year)."""
 
 from __future__ import annotations
 
+import html
 from datetime import date
 from decimal import Decimal
 from io import StringIO
@@ -9,7 +13,9 @@ from typing import Any
 
 import pytest
 from django.core.management import call_command
+from django.utils import timezone
 
+from accounts.roles import Role
 from ledger.models import (
     AuditLog,
     CollectionStatus,
@@ -21,6 +27,9 @@ from ledger.models import (
     StoreStatus,
 )
 from ledger.services import insurance
+from payments import lease_sync
+from tests.receivables_helpers import an_operator
+from tests.test_operator_views import client_for
 
 pytestmark = pytest.mark.django_db
 
@@ -200,3 +209,125 @@ def test_the_command_is_idempotent_and_prints_the_counts(monkeypatch: pytest.Mon
     )
     assert second.getvalue().startswith("created 0, already existed 2,")
     assert InsuranceCharge.objects.count() == 2
+
+
+# --- PLAN-014 I-b: the LEASE card's "Bill now" on the insurance row ----------------------
+
+
+def _billable_lease(open_date: date = date(2025, 3, 10)) -> Lease:
+    return lease_on(store(open_date), operator=an_operator("Bill Now Co"))
+
+
+def test_bill_now_creates_the_current_years_charge_once_audited_with_the_actor() -> None:
+    lease = _billable_lease()
+    _, user = client_for(Role.BILLING)
+    first = insurance.bill_now(lease, TODAY, actor=user)
+    assert first.ok and first.message == insurance.BILL_CREATED and first.charge is not None
+    assert years(lease) == [(2026, date(2026, 3, 10), D("695.00"), False)]
+    [entry] = AuditLog.objects.filter(action="insurance_charge.created")
+    assert entry.actor_id == user.pk and entry.entity_id == str(first.charge.pk)
+    assert entry.after["policy_year"] == 2026 and entry.after["amount"] == "695.00"
+    again = insurance.bill_now(lease, TODAY, actor=user)
+    assert (again.ok, again.message, again.charge) == (False, insurance.BILL_ALREADY, None)
+    assert InsuranceCharge.objects.count() == 1
+    assert AuditLog.objects.filter(action="insurance_charge.created").count() == 1
+
+
+def test_bill_now_before_this_years_anniversary_bills_last_policy_year() -> None:
+    lease = _billable_lease(date(2025, 11, 20))
+    outcome = insurance.bill_now(lease, TODAY, actor=None)
+    assert outcome.ok and years(lease) == [(2025, date(2025, 11, 20), D("595.00"), False)]
+
+
+def test_bill_now_without_a_premium_creates_a_charge_that_waits_for_it() -> None:
+    InsurancePremium.objects.filter(policy_year=2026).delete()
+    lease = _billable_lease()
+    outcome = insurance.bill_now(lease, TODAY, actor=None)
+    assert (outcome.ok, outcome.message) == (True, insurance.BILL_NEEDS_PREMIUM)
+    assert years(lease) == [(2026, date(2026, 3, 10), None, True)]
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("no open date", "BILL_NO_OPEN_DATE"),
+        ("started after the anniversary", "BILL_NOT_OWED"),
+        ("ended before the anniversary", "BILL_NOT_OWED"),
+        ("store closed before the anniversary", "BILL_NOT_OWED"),
+        ("prospective", "BILL_NOT_OWED"),
+    ],
+)
+def test_bill_now_refuses_with_one_sentence_and_writes_nothing(case: str, message: str) -> None:
+    operator = an_operator("Refused Co")
+    if case == "no open date":
+        lease = lease_on(store(None), operator=operator)
+    elif case == "started after the anniversary":
+        lease = lease_on(store(date(2025, 3, 10)), operator=operator, started_on=date(2026, 4, 1))
+    elif case == "ended before the anniversary":
+        lease = lease_on(
+            store(date(2025, 3, 10)),
+            operator=operator,
+            started_on=date(2025, 3, 1),
+            ended_on=date(2026, 3, 1),
+            collection_status=CollectionStatus.ENDED,
+        )
+    elif case == "store closed before the anniversary":
+        lease = lease_on(store(date(2025, 3, 10), closed_at=date(2026, 3, 1)), operator=operator)
+    else:
+        lease = lease_on(
+            store(date(2025, 3, 10)),
+            operator=operator,
+            collection_status=CollectionStatus.PROSPECTIVE,
+        )
+    outcome = insurance.bill_now(lease, TODAY, actor=None)
+    assert (outcome.ok, outcome.message) == (False, getattr(insurance, message))
+    assert outcome.message.endswith(" Nothing was billed.")
+    assert not InsuranceCharge.objects.exists() and not AuditLog.objects.exists()
+
+
+def _bill_url(lease: Lease) -> str:
+    return f"/leases/{lease.pk}/insurance/bill/"
+
+
+def test_the_route_bills_for_billing_and_returns_to_the_store_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: TODAY)
+    lease = _billable_lease()
+    client, user = client_for(Role.BILLING)
+    response = client.post(_bill_url(lease), follow=True)
+    assert response.redirect_chain[0] == (f"/stores/{lease.store_id}/", 302)
+    assert html.escape(insurance.BILL_CREATED) in response.content.decode()
+    [entry] = AuditLog.objects.filter(action="insurance_charge.created")
+    assert entry.actor_id == user.pk
+    second = client.post(_bill_url(lease), follow=True)
+    assert "already billed" in second.content.decode()
+    assert InsuranceCharge.objects.count() == 1
+
+
+def test_the_route_refuses_a_viewer_a_get_and_an_archived_operator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: TODAY)
+    lease = _billable_lease()
+    viewer, _ = client_for(Role.VIEWER)
+    assert viewer.post(_bill_url(lease)).status_code in (302, 403)
+    billing, _ = client_for(Role.BILLING)
+    assert billing.get(_bill_url(lease)).status_code == 405
+    assert not InsuranceCharge.objects.exists()
+    assert lease.operator is not None
+    lease.operator.archived_at = timezone.now()
+    lease.operator.save()
+    response = billing.post(_bill_url(lease), follow=True)
+    assert lease_sync.MESSAGES[lease_sync.ARCHIVED] in response.content.decode()
+    assert not InsuranceCharge.objects.exists()
+    assert not AuditLog.objects.filter(action="insurance_charge.created").exists()
+
+
+def test_the_route_refuses_a_store_without_an_open_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: TODAY)
+    lease = lease_on(store(None), operator=an_operator("No Date Co"))
+    client, _ = client_for(Role.BILLING)
+    response = client.post(_bill_url(lease), follow=True)
+    assert insurance.BILL_NO_OPEN_DATE in response.content.decode()
+    assert not InsuranceCharge.objects.exists()

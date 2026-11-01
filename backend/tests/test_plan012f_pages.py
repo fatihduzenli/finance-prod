@@ -364,7 +364,8 @@ def test_the_four_side_cards_read_the_lease() -> None:
     assert '<dd id="header-rent"><strong>$2,000.00</strong> / month</dd>' in side
     assert 'id="header-since"' not in side  # PLAN-014 B3: the Lease link carries the date
     assert '<dd id="header-debit-day">1st</dd>' in side
-    assert '<dd id="header-deposit">$3,000.00 · not collected</dd>' in side
+    # PLAN-014 I-b: the Deposit row is coloured by its state, as the Sign fee row.
+    assert '<dd class="side-unpaid" id="header-deposit">$3,000.00 · not collected</dd>' in side
     assert re.search(
         r'<dd id="header-autopay"><span class="badge">Not set up</span> '
         r'<a href="[^"]*tab=schedules',

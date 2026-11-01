@@ -146,6 +146,12 @@ def _quiet_formfield(db_field: models.Field[Any, Any], **kwargs: Any) -> forms.F
     return db_field.formfield(**kwargs)
 
 
+#: The State select of the store and operator forms (PLAN-012f-b D11, PLAN-014 I-b): "—" for
+#: none, then the full names; the values are the two-letter codes stored.
+STATE_CHOICES: tuple[tuple[str, str], ...] = (("", "\u2014"), *US_STATES)
+STATE_REFUSED = "Choose a state from the list."
+
+
 #: The contact detail each consent needs on the operator form (PLAN-012c D8).
 CONSENT_SHOWN_WHEN = {"sms_consent_at": "id_sms_phone|id_phone", "email_consent_at": "id_email"}
 
@@ -154,7 +160,8 @@ class OperatorForm(_OperatorFormBase):
     """Create and edit (PLAN-014 C1: an operator is a person). The fields are the Full name
     (required; stored as the display name), the e-mail, the phone, the address, the notes
     and the SMS phone and consents. The e-mail is lower-cased and stripped; empty means
-    none. The phone must pass the payment provider's rule, as before.
+    none. The phone must pass the payment provider's rule, as before. The State is the store
+    form's select of the 50 states and DC, the code stored (PLAN-014 I-b).
 
     The type, company name, contact person, first and last name and legal name left the
     form (the columns stay, unwritten); a post that still sends them is not refused: the
@@ -162,6 +169,13 @@ class OperatorForm(_OperatorFormBase):
     """
 
     email = forms.EmailField(required=False, max_length=254)
+    # PLAN-014 I-b: the store form's State select; the refusal never repeats the posted value.
+    state = _QuietChoiceField(
+        choices=STATE_CHOICES,
+        required=False,
+        label="State",
+        error_messages={"invalid_choice": STATE_REFUSED},
+    )
 
     class Meta:
         model = Operator
@@ -741,10 +755,6 @@ LANDLORD_RENT_HELP = (
 CLOSED_BEFORE_OPEN = "The closed date cannot be before the open date."
 
 
-#: The State select (PLAN-012f-b D11): "—" for none, then the full names; the values are
-#: the two-letter codes stored.
-STATE_CHOICES: tuple[tuple[str, str], ...] = (("", "\u2014"), *US_STATES)
-STATE_REFUSED = "Choose a state from the list."
 BRAND_REFUSED = "Choose a brand from the list."
 
 

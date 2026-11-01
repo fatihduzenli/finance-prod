@@ -210,8 +210,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: H slice 2 (portal:not_found, the slice-1 rework's catch-all, and portal:pay_status); 311 since
 #: PLAN-014 I slice 1 (banking:page, confirm, choose, split, ignore, undo, fetch_now, link_token,
 #: link_exchange, disconnect and ledger:settings:bank_save); 313 since PLAN-014 I slice 2
-#: (ledger:leases:alias_add and alias_remove, the billing details dialog's sender names).
-FROZEN_ROUTES = (313, "a097b1775b2439f714e4c1dd60d4010728caf5cd42620a811d29492436e582af")
+#: (ledger:leases:alias_add and alias_remove, the billing details dialog's sender names); 314
+#: since PLAN-014 I-b (ledger:leases:insurance_bill, the LEASE card's insurance "Bill now").
+FROZEN_ROUTES = (314, "e384de0be2ea090e52b1c2f36f9661ee9723b28ce3b726a2a1205e74545014fd")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

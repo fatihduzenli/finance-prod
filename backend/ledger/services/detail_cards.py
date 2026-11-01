@@ -330,13 +330,6 @@ def collection_state(
     return CollectionState(code, text, TONES[code], paid, due, url)
 
 
-def policy_year(open_date: date, today: date) -> int:
-    """The policy year ``today`` is in: the latest year whose anniversary (the store's open
-    date, :func:`ledger.services.insurance.anniversary`) is on or before ``today``."""
-    year = today.year
-    return year if insurance.anniversary(open_date, year) <= today else year - 1
-
-
 def policy_label(year: int) -> str:
     """``Insurance 2026–27``."""
     return f"Insurance {year}–{(year + 1) % 100:02d}"
@@ -347,13 +340,17 @@ class LeaseCollections:
     """The LEASE card's rows under Deposit: the sign fee, with "Bill now" while it is not
     billed (the invoice builder with the sign fee preselected); the insurance of the current
     policy year (``insurance_label`` "" when the store has no open date) and the note about
-    the previous year ("" when it was collected, or the lease did not hold the store then)."""
+    the previous year ("" when it was collected, or the lease did not hold the store then);
+    ``insurance_billable`` (PLAN-014 I-b): the insurance row offers "Bill now", only while the
+    year is not billed and the lease owes it (:func:`ledger.services.insurance.bill_now`'s
+    rule, from what was read already)."""
 
     sign_fee: CollectionState
     sign_fee_bill_url: str
     insurance_label: str = ""
     insurance: CollectionState | None = None
     insurance_note: str = ""
+    insurance_billable: bool = False
 
 
 def _sign_fee_bill_url(lease: Lease) -> str:
@@ -391,7 +388,7 @@ def lease_collections(lease: Lease, today: date) -> LeaseCollections:
     store = lease.store
     if store.open_date is None:
         return found
-    year = policy_year(store.open_date, today)
+    year = insurance.policy_year(store.open_date, today)
     charges = {
         charge.policy_year: charge
         for charge in InsuranceCharge.objects.filter(lease=lease, policy_year__in=(year, year - 1))
@@ -402,6 +399,7 @@ def lease_collections(lease: Lease, today: date) -> LeaseCollections:
         found,
         insurance_label=policy_label(year),
         insurance=collection_state(current, balance=owed.get(current.pk) if current else None),
+        insurance_billable=current is None and insurance.owes(lease, year, today),
         insurance_note=(
             _previous_year_note(
                 lease, year - 1, previous, owed.get(previous.pk) if previous else None, today
@@ -435,6 +433,18 @@ class LeaseAccount:
     def has_bank(self) -> bool:
         """Whether the bank line names a method (the LEASE card's "Replace", PLAN-014 C4)."""
         return self.bank != NO_BANK_ON_FILE
+
+    @property
+    def shares_label(self) -> str:
+        """The LEASE card's link text for the store whose account this lease shares
+        (PLAN-014 I-b): "#1999 fatih", or the store's label alone without a number; "" when
+        the lease uses its own account."""
+        if self.shares is None:
+            return ""
+        store = self.shares.store
+        if store.store_number is None:
+            return store.external_label
+        return f"#{store.store_number} {store.external_label}"
 
     @property
     def switchable(self) -> bool:

@@ -3,7 +3,9 @@ select of active types, the grey pill after the name on the store page, the Stor
 Monthly rent overview and the operator's store cards, nothing when empty), the State select
 (codes stored, names shown, anything else refused without echo; ledger migration 0051's
 mapping of the free-text values), "State needs choosing", and the optional landlord rent
-(empty is no cost row and unknown in the P&L and the Cashflow card; 0.00 is a row)."""
+(empty is no cost row and unknown in the P&L and the Cashflow card; 0.00 is a row). PLAN-014
+I-b: ledger migration 0066 maps the operators' states the same way (unmatched: "" and Needs
+review, audited) and back."""
 
 from __future__ import annotations
 
@@ -16,6 +18,8 @@ from typing import Any
 import pytest
 from django import forms
 from django.apps import apps as django_apps
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 
 from accounts.roles import Role
 from finance.us_states import US_STATES, state_name
@@ -32,6 +36,8 @@ pytestmark = pytest.mark.django_db
 
 NEW = "/stores/new/"
 MIGRATION = importlib.import_module("ledger.migrations.0051_store_type_and_state_codes")
+MIGRATION_0066 = importlib.import_module("ledger.migrations.0066_operator_state_codes")
+BEFORE_0066 = ("ledger", "0065_bank_deposit_settings")
 PILL = '<span class="pill pill-type">Kiosk</span>'
 
 
@@ -255,6 +261,73 @@ def test_the_migration_mapping_writes_codes_and_audits_what_it_cannot_match() ->
     MIGRATION.unmap_states(django_apps, None)
     assert Store.objects.get(pk=rows["tx"].pk).state == "Texas"
     assert Store.objects.get(pk=rows["Tejas"].pk).state == ""
+
+
+# --- PLAN-014 I-b: ledger migration 0066, the operators' states -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "code"),
+    [("Texas", "TX"), ("tx", "TX"), (" TX ", "TX"), ("new  york", "NY"), ("Tejas", ""), ("", "")],
+)
+def test_0066_maps_a_code_or_a_full_name_as_0051_does(raw: str, code: str) -> None:
+    assert MIGRATION_0066.state_code(raw) == code == MIGRATION.state_code(raw)
+
+
+def _migrate(*targets: tuple[str, str]) -> Any:
+    executor = MigrationExecutor(connection)
+    executor.loader.build_graph()
+    executor.migrate(list(targets))
+    return MigrationExecutor(connection).loader.project_state(list(targets)).apps
+
+
+@pytest.mark.django_db(transaction=True)
+def test_0066_writes_operator_codes_flags_the_unmatched_and_reverses_to_names() -> None:
+    leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
+    try:
+        old = _migrate(BEFORE_0066)
+        operator = old.get_model("ledger", "Operator")
+        raws = ("Texas", "tx", " TX ", "new  york", "Tejas", "GA", "")
+        ids = {
+            raw: operator.objects.create(display_name=f"Operator {index}", state=raw).pk
+            for index, raw in enumerate(raws)
+        }
+        new = _migrate(("ledger", MIGRATION_0066.__name__.rsplit(".", 1)[1]))
+        rows = {
+            raw: new.get_model("ledger", "Operator").objects.get(pk=pk) for raw, pk in ids.items()
+        }
+        assert {raw: row.state for raw, row in rows.items()} == {
+            "Texas": "TX",
+            "tx": "TX",
+            " TX ": "TX",
+            "new  york": "NY",
+            "Tejas": "",
+            "GA": "GA",
+            "": "",
+        }
+        assert [raw for raw, row in rows.items() if row.needs_review] == ["Tejas"]
+        [entry] = new.get_model("ledger", "AuditLog").objects.filter(
+            action=MIGRATION_0066.UNMAPPED_ACTION
+        )
+        assert (entry.entity_type, entry.entity_id, entry.actor_id, entry.before) == (
+            "operator",
+            str(ids["Tejas"]),
+            None,
+            {"state": "Tejas"},
+        )
+        back = _migrate(BEFORE_0066)
+        states = dict(back.get_model("ledger", "Operator").objects.values_list("pk", "state"))
+        assert {raw: states[pk] for raw, pk in ids.items()} == {
+            "Texas": "Texas",
+            "tx": "Texas",
+            " TX ": "Texas",
+            "new  york": "New York",
+            "Tejas": "",
+            "GA": "Georgia",
+            "": "",
+        }
+    finally:
+        _migrate(*leaves)
 
 
 def test_a_blank_state_needs_choosing_and_a_closed_store_does_not() -> None:

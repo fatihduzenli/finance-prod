@@ -4,19 +4,22 @@ third-party CDN and shows a "provide a template" notice. Self-contained: no exte
 asset and no script on the login or enrolment pages. The accounts/ pages (401, the second
 factor's 403, signed out everywhere) extend it too.
 
-The approved design's sign-in layout (docs/qa/PLAN-012f-approved-design.md D13;
-docs/design/DESIGN-SPEC.md §4 Login, login-laptop.png): body.auth holds two panels. Left, the
-brand panel (the sidebar's gradient at 160 degrees, two soft teal shapes as decoration, the
-brand logo at 52 px, the headline, one sentence, three check-marked lines and the company's
-name · Monvera at the bottom). Right, on --bg: the SANDBOX banner, injected first in the body
-by finance.middleware.SandboxBannerMiddleware, which app.css sets as a rounded strip over the
-form, then the 400 px form area (main#auth-main: {% block content %}). The token and setup steps
-of the two-factor flow take the same right panel. At 768 px and under the left panel is a
-short gradient header (the logo and the headline) and the form takes the width. The logo is the
-brand's own file, never the company row's override (a stored document needs a session). The
-colours and sizes are app.css's (tokens.css first); the forms and their flow are the
-package's own. The tab title is "<short name> · <page>" from the company settings (PLAN-012c
-D2).
+The sign-in layout (PLAN-014 I-b, the owner's redesign; docs/design/login-dark-laptop.png), the
+same in both themes: body.auth holds two panels. Left, the brand panel on the navy: behind it a
+mosaic of small rounded tiles in the grid's status colours (a fixed pattern, so every render and
+the visual baseline are the same; decoration, aria-hidden), turned about -8 degrees and fading
+under a navy gradient towards the bottom; over it the brand logo, the headline, one line, four
+feature cards in a 2 x 2 grid (Monthly overview, Bank debits through the processor named in the
+company settings, Reminders, Promises) and the company's name · Monvera at the bottom. Right, on
+--bg: at the top the SANDBOX banner (injected first in the body by
+finance.middleware.SandboxBannerMiddleware; app.css sets it as a pill) and "Need help?" (a
+mailto: link to the support e-mail, when one is set and the view passes it), then the form area
+(main#auth-main: {% block content %}). The token and setup steps of the two-factor flow take
+the same right panel. At 768 px and under the left panel is a short header (the logo and the
+headline over the mosaic) and the form takes the width. The logo is the brand's own file, never
+the company row's override (a stored document needs a session). The colours and sizes are
+app.css's (tokens.css first); the forms and their flow are the package's own. The tab title is
+"<short name> · <page>" from the company settings (PLAN-012c D2).
 The theme (PLAN-012g A2; DESIGN-SPEC §7.1): no user yet, so the pages follow the device
 (data-theme="system", resolved by tokens.css through prefers-color-scheme, with no script) and
 carry the two System theme-color metas.
@@ -35,19 +38,21 @@ carry the two System theme-color metas.
 </head>
 <body class="auth">
   <div class="auth-brand" id="auth-brand">
-    <span class="auth-shape auth-shape-1" aria-hidden="true"></span><span class="auth-shape auth-shape-2" aria-hidden="true"></span>
-    <div class="auth-logo"><img src="{% static 'finance/brand/monvera_logo_dark_transparent.svg' %}" alt="Monvera" height="52"></div>
+    <div class="auth-mosaic" id="auth-mosaic" aria-hidden="true"><div class="auth-tiles">{% for tile in "lppppwppnppppptttppnppptpptppnpnppppplpplppppptptpnpttppntptwtpppnttttnwwpwpnpltpntpttpptppnpptwpwlnppppppwpptpppttpppnpplltttptnptttltpptnpnntwtpnpnppppttwpnpnplpppptt"|make_list %}<i class="tile-{{ tile }}"></i>{% endfor %}</div></div>
+    <div class="auth-logo"><img src="{% static 'finance/brand/monvera_logo_dark_transparent.svg' %}" alt="Monvera" height="36"></div>
     <div class="auth-pitch">
       <p class="auth-headline" id="auth-headline">Rent collection for every store, in one place.</p>
-      <p class="auth-sentence">Charges, autopay, payments and promises for every store — with nothing to chase in a spreadsheet.</p>
-      <ul class="auth-points" id="auth-points">
-        <li><span class="auth-check">{% icon "check" 14 %}</span>Monthly rent overview for all stores</li>
-        <li><span class="auth-check">{% icon "check" 14 %}</span>Bank debits and invoices through {{ company.provider_name }}</li>
-        <li><span class="auth-check">{% icon "check" 14 %}</span>Promises, returned payments and lease ends, tracked</li>
+      <p class="auth-sentence">Every square is a store's month: paid, pending or late. Monvera keeps them all in view.</p>
+      <ul class="auth-features" id="auth-features">
+        <li class="auth-feature"><span class="auth-feature-icon">{% icon "dashboard" 18 %}</span><strong>Monthly overview</strong><span>Every store and month in one colour-coded grid.</span></li>
+        <li class="auth-feature"><span class="auth-feature-icon">{% icon "banknote" 18 %}</span><strong>Bank debits</strong><span>Autopay and one-off debits through {{ company.provider_name }}.</span></li>
+        <li class="auth-feature"><span class="auth-feature-icon">{% icon "bell" 18 %}</span><strong>Reminders</strong><span>Due, late and returned-payment notices sent for you.</span></li>
+        <li class="auth-feature"><span class="auth-feature-icon">{% icon "handshake" 18 %}</span><strong>Promises</strong><span>Track who promised what, and when.</span></li>
       </ul>
     </div>
     <p class="auth-company" id="auth-company">{{ company.name }} · Monvera</p>
   </div>
+  <div class="auth-top" id="auth-top">{% if support_email %}<a href="mailto:{{ support_email }}" id="auth-help">Need help?</a>{% endif %}</div>
   {% block content_wrapper %}
     <main class="auth-main" id="auth-main">
       {% block content %}{% endblock %}

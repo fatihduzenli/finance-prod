@@ -505,7 +505,8 @@ def test_the_card_buttons_and_inputs_follow_the_spec() -> None:
     assert rule(".btn-danger").strip() == "color: var(--unpaid-text);"
     field = rule(
         "input[type=text], input[type=email], input[type=search], input[type=number], "
-        "input[type=password], input[type=date], input[type=month], input[type=tel], "
+        "input[type=password], input[type=date], input[type=datetime-local], "
+        "input[type=month], input[type=tel], "
         "input[type=url], select, textarea"
     )
     for declaration in (

@@ -69,7 +69,7 @@ def sign_in(page: Page, live_server: LiveServer, username: str, code: str) -> No
     page.keyboard.type(username)
     page.tap("#id_auth-password")
     page.keyboard.type(TEST_PASSWORD)
-    page.get_by_role("button", name="Next").tap()
+    page.get_by_role("button", name="Sign in").tap()
     token = page.locator("#id_token-otp_token")
     token.wait_for(state="visible")
     assert in_viewport(page, "#sandbox-banner")

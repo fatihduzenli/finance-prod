@@ -116,7 +116,7 @@ def signed_in(
     page.goto(f"{live_server.url}/account/login/")
     page.fill("#id_auth-username", username)
     page.fill("#id_auth-password", TEST_PASSWORD)
-    page.get_by_role("button", name="Next").click()
+    page.get_by_role("button", name="Sign in").click()
     page.locator("#id_token-otp_token").fill(current_code(device))
     page.get_by_role("button", name="Next").click()
     page.wait_for_url(f"{live_server.url}/")
@@ -131,14 +131,19 @@ def test_the_lease_card_and_the_billing_dialog_on_the_laptop(
     page = signed_in(laptop, live_server, f"e2e-14c-laptop-{theme}", theme, Role.BILLING)
     page.goto(f"{live_server.url}/stores/{primary.store_id}/")
     card = page.locator("#lease-card")
-    assert "Kaya Repairs LLC" in card.locator("#header-billing").inner_text()
+    # PLAN-014 I-b item 1: the company has its own row; the Billing row is the e-mail.
+    assert "Kaya Repairs LLC" in card.locator("#header-company").inner_text()
     assert "store1601@example.com" in card.locator("#header-billing").inner_text()
     assert "4821" in card.locator("#header-bank").inner_text()
     assert card.locator("#header-bank-shared").count() == 0
     shot(page, f"store-lease-card-billing-{theme}-laptop")
     # The sharer names the account it uses.
     page.goto(f"{live_server.url}/stores/{sharer.store_id}/")
-    expect(page.locator("#header-bank-shared")).to_contain_text("Shared with #1601")
+    # PLAN-014 I-b item 2: "· shared with" and the sharing store, linked.
+    expect(page.locator("#header-bank-shared")).to_contain_text("shared with #1601")
+    expect(page.locator("#header-bank-shared a")).to_have_attribute(
+        "href", f"/stores/{primary.store_id}/"
+    )
     assert page.locator("#lease-bank-entry").count() == 0  # a sharer enters no bank of its own
     # The dialog: save a new billing e-mail; the card follows.
     page.locator("#edit-billing").click()

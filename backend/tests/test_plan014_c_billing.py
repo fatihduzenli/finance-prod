@@ -7,7 +7,9 @@ references of its own, `billing_for` a lease-less charge, the Edit billing detai
 Contact person and Legal name, "Bill to" with the lease's company over the operator's full
 name, a collection message addressed to the lease's billing e-mail, a customer webhook that maps
 to the lease — and the adversarial cases of plan §5 C (a cycle, a self-share, a customer id
-already linked elsewhere, payment data in the company name, a 2-hop share)."""
+already linked elsewhere, payment data in the company name, a 2-hop share). PLAN-014 I-b: the
+LEASE card's Company row ("—" with "Add" for billing) and its Bank row ("shared with" only with
+a bank on file, linking "#<number> <store>")."""
 
 from __future__ import annotations
 
@@ -432,6 +434,72 @@ def test_a_sharer_sees_whose_account_it_uses_and_has_no_link_form() -> None:
         'id="billing-shares"' in html and "1901" in html[html.index('id="billing-shares"') :][:200]
     )
     assert 'id="billing-link-form"' not in html
+
+
+# --- PLAN-014 I-b: the LEASE card's Company and Bank rows -------------------------------------
+
+
+def _lease_card(client: Client, lease: Lease) -> str:
+    html = page(client, f"/stores/{lease.store_id}/")
+    start = html.index('id="lease-card"')
+    return html[start : html.index("</div>\n", start)]
+
+
+def test_the_company_row_shows_the_company_and_the_billing_row_the_email_only() -> None:
+    lease = connected_lease()
+    card = _lease_card(client_for(Role.BILLING)[0], lease)
+    assert '<dd id="header-company"><span class="side-strong">Kaya Repairs LLC</span></dd>' in card
+    assert '<dd id="header-billing">store1901@example.com</dd>' in card
+    assert card.count("Kaya Repairs LLC") == 1 and 'id="header-company-add"' not in card
+
+
+def test_an_empty_company_reads_a_dash_with_add_for_billing_only() -> None:
+    lease = connected_lease()
+    LeaseBilling.objects.filter(lease=lease).update(company_name="")
+    card = _lease_card(client_for(Role.BILLING)[0], lease)
+    assert (
+        '<dd id="header-company">— · <a class="card-link" id="header-company-add" '
+        f'href="/leases/{lease.pk}/billing/">Add</a></dd>'
+    ) in card
+    viewer = _lease_card(client_for(Role.VIEWER)[0], lease)
+    assert '<dd id="header-company">—</dd>' in viewer and "header-company-add" not in viewer
+
+
+def _sharer_of(primary: Lease) -> Lease:
+    sharer = a_lease(a_store("1915", number=1915), primary.operator, started=date(2026, 3, 1))
+    LeaseBilling.objects.create(lease=sharer, shares_account_of=primary)
+    return sharer
+
+
+def test_the_bank_row_without_a_bank_never_names_the_shared_account() -> None:
+    primary = connected_lease("fatih", 1999)  # no last four cached: no bank on file
+    sharer = _sharer_of(primary)
+    card = _lease_card(client_for(Role.BILLING)[0], sharer)
+    assert '<dd id="header-bank">no bank account on file</dd>' in card
+    assert "shared with" not in card.lower()
+
+
+def test_the_bank_row_of_a_lease_with_its_own_bank() -> None:
+    lease = connected_lease()
+    LeaseBilling.objects.filter(lease=lease).update(bank_last4="4821")
+    card = _lease_card(client_for(Role.BILLING)[0], lease)
+    assert '<dd id="header-bank">Bank ····4821</dd>' in card
+
+
+@pytest.mark.parametrize(("number", "label"), [(1999, "#1999 fatih"), (None, "fatih")])
+def test_the_bank_row_of_a_sharer_links_the_store_it_shares_with(
+    number: int | None, label: str
+) -> None:
+    primary = connected_lease("fatih", 1999)
+    primary.store.store_number = number
+    primary.store.save()
+    LeaseBilling.objects.filter(lease=primary).update(bank_last4="4821")
+    sharer = _sharer_of(primary)
+    card = _lease_card(client_for(Role.VIEWER)[0], sharer)
+    assert (
+        '<dd id="header-bank">Bank ····4821 <span class="muted" id="header-bank-shared">'
+        f'· shared with <a href="/stores/{primary.store_id}/">{label}</a></span></dd>'
+    ) in card
 
 
 # --- C1: the operator form --------------------------------------------------------------------

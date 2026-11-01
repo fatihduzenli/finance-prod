@@ -49,10 +49,11 @@
    pair: --text on --month-current
    pair: --muted on --month-current
    pair: --link on --month-current
-   pair: --sidebar-text on --login-gradient[start]
-   pair: --sidebar-text on --login-gradient[end]
-   pair: --sidebar-active-text on --login-gradient[start]
-   pair: --sidebar-active-text on --login-gradient[end]
+   pair: --login-text on --navy
+   pair: --login-heading on --navy
+   pair: --login-text on --login-card-bg over --navy
+   pair: --login-heading on --login-card-bg over --navy
+   pair: --green on --login-icon-bg over --navy (ui)
    pair: --sidebar-text on --sidebar-bg
    pair: --sidebar-active-text on --sidebar-bg
    pair: --btn-primary-text on --btn-primary-bg
@@ -107,6 +108,11 @@
    pair[dark]: --flash-error-text on --flash-error-bg
    pair[dark]: --flash-info-text on --flash-info-bg
    pair[dark]: --btn-dark-text on --btn-dark-bg
+   pair[dark]: --login-text on --navy
+   pair[dark]: --login-heading on --navy
+   pair[dark]: --login-text on --login-card-bg over --navy
+   pair[dark]: --login-heading on --login-card-bg over --navy
+   pair[dark]: --green on --login-icon-bg over --navy (ui)
    The sandbox banner (finance/templates/finance/banner.html) takes --sandbox-text on
    --sandbox-bg (PLAN-012g A5; before 12g it carried the pending pair's values as literals).
    White on --btn-primary-bg is the primary button's label, white on #B42318 the confirming
@@ -138,11 +144,14 @@
    #F08A24, the fills of the dashboard's progress bar (the yellow and orange of the reference);
    each segment is named by the legend's word beside its 8 px square, so the fills carry no text
    and have no text pair.
-   PLAN-012f Batch D adds --login-gradient beside them: the sign-in pages' brand panel, the
-   sidebar gradient's two stops at 160 degrees (DESIGN-SPEC §4 Login), so its text pairs measure
-   as the sidebar's (sidebar-text 11.5 and 7.3, white 15.4 and 9.8); its two soft teal shapes
-   (teal at 12 % and 10 % over the panel, color-mix in app.css) are decoration and sit beside
-   the text, not under it.
+   PLAN-014 I-b (the owner's sign-in redesign) replaces PLAN-012f Batch D's --login-gradient with
+   the --login-* names: the brand panel is --navy in both themes (the dark blocks leave these
+   names alone, so the panel looks the same in light and dark), its text --login-text and
+   --login-heading, its four cards --login-card-bg (the navy at 55 % over the navy) with a
+   --login-card-border rule, each card's icon --green in a --login-icon-bg square (a UI pair).
+   The mosaic behind the panel's text (--login-tile-paid, -teal, -late, -pending, -neutral, the
+   grid's status hues at a low opacity under a navy fade, app.css) is decoration and carries no
+   text, so it has no pair.
    PLAN-012g Batch A (the dark theme, DESIGN-SPEC §7) adds the names the dark theme needs, each
    with its light value in the sub-block marked below, so every colour resolves through a token
    in both themes; light looks as before except the dashboard's chart palette (§7.3 light). Two
@@ -210,9 +219,13 @@
      decoration beside the legend's words, never a text colour */
   --progress-pending: #E5B800;  --progress-partial: #F08A24;
 
-  /* the sign-in pages' brand panel (PLAN-012f D13; DESIGN-SPEC §4 Login): the sidebar's two
-     stops at 160 degrees */
-  --login-gradient: linear-gradient(160deg, #0B2545 0%, #0E4A5C 100%);
+  /* the sign-in pages' brand panel (PLAN-014 I-b): on --navy, the same in both themes (the dark
+     blocks do not set these); the tiles are the mosaic's decoration */
+  --login-text: #C9D6E8;  --login-heading: #FFFFFF;
+  --login-card-bg: rgba(11,37,69,.55);  --login-card-border: rgba(255,255,255,.10);
+  --login-icon-bg: rgba(46,196,166,.16);
+  --login-tile-paid: #2E9E5B;  --login-tile-teal: #13A89E;  --login-tile-late: #C2413A;
+  --login-tile-pending: #D9A521;  --login-tile-neutral: #3A5578;
 
   /* the error flash message's text (PLAN-012f-b E-4; DESIGN-SPEC §4 States: #8A1C14 on the
      unpaid background); no other token carries this value */
@@ -246,7 +259,7 @@
     color-scheme: dark;
 
     /* shell */
-    --sidebar-gradient: none;  --login-gradient: none;
+    --sidebar-gradient: none;
     --sidebar-bg: #171721;  --sidebar-border: #2E2E3D;  --sidebar-card-bg: var(--surface-2);
     --phone-bar-button-bg: var(--surface-2);
     --sidebar-text: #A3A3B3;  --sidebar-active-bg: rgba(46,196,166,.18);  --sidebar-active-text: #FFFFFF;
@@ -301,7 +314,7 @@
       color-scheme: dark;
 
       /* shell */
-      --sidebar-gradient: none;  --login-gradient: none;
+      --sidebar-gradient: none;
       --sidebar-bg: #171721;  --sidebar-border: #2E2E3D;  --sidebar-card-bg: var(--surface-2);
       --phone-bar-button-bg: var(--surface-2);
       --sidebar-text: #A3A3B3;  --sidebar-active-bg: rgba(46,196,166,.18);  --sidebar-active-text: #FFFFFF;

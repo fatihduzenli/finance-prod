@@ -32,7 +32,8 @@ def rule(css: str, selector: str) -> str:
 
 INPUTS = (
     "input[type=text], input[type=email], input[type=search], input[type=number], "
-    "input[type=password], input[type=date], input[type=month], input[type=tel], "
+    "input[type=password], input[type=date], input[type=datetime-local], "
+    "input[type=month], input[type=tel], "
     "input[type=url], select, textarea"
 )
 AUTH_INPUTS = (
@@ -55,7 +56,6 @@ AUTH_INPUTS = (
         (".badge", None),
         (".count-pill", None),
         (AUTH_INPUTS, "padding: 12px 16px;"),
-        (".auth-main .btn", "padding: 13px;"),
     ],
 )
 def test_the_controls_are_pills_with_room_for_their_text(
@@ -65,6 +65,13 @@ def test_the_controls_are_pills_with_room_for_their_text(
     assert PILL in declarations, (selector, declarations)
     if padding:
         assert padding in declarations, (selector, declarations)
+
+
+def test_the_sign_in_buttons_take_the_owners_12px_radius(css: str) -> None:
+    # PLAN-014 I-b (the owner's sign-in redesign): the full-width "Sign in" at radius 12 px.
+    assert rule(css, ".auth-main .btn") == (
+        "padding: 13px; border-radius: 12px; font-size: var(--fs-md);"
+    )
 
 
 def test_the_small_button_keeps_its_height_and_gains_width(css: str) -> None:

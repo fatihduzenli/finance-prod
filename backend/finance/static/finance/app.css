@@ -159,7 +159,7 @@ img, iframe { max-width: 100%; }
    a text area keeps 9/12 and radius 8 (no pill text area in the mock); a search field on
    --surface-2. The focus ring is --link's (the :focus-visible rule above),
    and the border takes --link too. */
-input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=tel], input[type=url], select, textarea { box-sizing: border-box; max-width: 100%; padding: 9px 14px; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-md); }
+input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=datetime-local], input[type=month], input[type=tel], input[type=url], select, textarea { box-sizing: border-box; max-width: 100%; padding: 9px 14px; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-md); }
 input[type=text], input[type=email], input[type=search], textarea { width: 100%; }
 textarea { padding: 9px 12px; border-radius: var(--radius-ctl); }
 input[type=search] { background: var(--surface-2); }
@@ -508,6 +508,8 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .side-list dd.side-partial { color: var(--partial-text); }
 .side-list dd.side-unpaid { color: var(--unpaid-text); }
 .side-list dd.side-muted { color: var(--muted); }
+/* A one-button form inside a row (the insurance row's "Bill now", PLAN-014 I-b) stays on the line. */
+.side-list dd form.side-inline-form { display: inline; margin: 0; }
 .side-list dd[class^="side-"] > a:not(.card-link) { color: inherit; }
 .side-list dd > .card-link { margin-left: var(--space-1); font-size: var(--fs-sm); }
 .side-note.warning { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-ctl); background: var(--flash-warning-bg); color: var(--flash-warning-text); font-size: var(--fs-sm); }
@@ -749,44 +751,75 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
 .error-card .error-sentence { margin: 0; color: var(--muted); font-size: var(--fs-base); }
 .error-card .error-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin: var(--space-5) 0 0; }
 
-/* --- The sign-in pages (PLAN-012f D13; DESIGN-SPEC §4 Login, login-laptop.png) ---------------
-   two_factor/_base.html: body.auth is two columns. Left, .auth-brand on --login-gradient (the
-   sidebar's stops at 160 degrees) with its two soft teal shapes (12 % and 10 %, decoration,
-   aria-hidden), the logo 52 px, the 34/700 headline, one sentence, three check-marked lines
-   (.auth-points) and the company's name · Monvera at the bottom. Right, on --bg: the sandbox
-   banner (injected first in the body) as a rounded strip, then .auth-main, 400 px: "Sign in"
-   26/700, the muted sub-line (.auth-sub), the fields at 12/16 padding as pills, the full-
-   width primary button (13 px padding, a pill) and the muted note (.auth-note). At 768 px
-   and under the panel is a short gradient header (the logo and the headline) and the form takes
-   the width. */
-body.auth { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 1fr auto auto 1fr; min-height: 100vh; padding-top: 0 !important; background: var(--bg); }
-.auth-brand { grid-column: 1; grid-row: 1 / -1; position: relative; overflow: hidden; display: flex; flex-direction: column; gap: var(--space-6); box-sizing: border-box; min-height: 100vh; padding: 56px 56px 48px; background: var(--login-gradient); background-color: var(--sidebar-bg); color: var(--sidebar-text); }
-.auth-shape { position: absolute; pointer-events: none; }
-.auth-shape-1 { top: 0; right: 0; width: 280px; height: 300px; border-radius: 0 0 0 80px; background: color-mix(in srgb, var(--teal) 12%, transparent); }
-.auth-shape-2 { bottom: 0; right: 60px; width: 360px; height: 160px; border-radius: 80px 80px 0 0; background: color-mix(in srgb, var(--teal) 10%, transparent); }
-.auth-logo, .auth-pitch, .auth-company { position: relative; }
-.auth-logo img { display: block; height: 52px; width: auto; max-width: 100%; }
-.auth-pitch { margin: auto 0; max-width: 440px; }
-.auth-headline { margin: 0 0 var(--space-4); color: var(--sidebar-active-text); font-size: 34px; font-weight: 700; line-height: 1.18; }
-.auth-sentence { margin: 0 0 28px; color: var(--sidebar-text); font-size: var(--fs-lg); line-height: 1.6; }
-.auth-points { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; list-style: none; color: var(--sidebar-text); font-size: var(--fs-md); }
-.auth-points li { display: flex; align-items: center; gap: var(--space-3); }
-.auth-check { display: inline-flex; flex: 0 0 22px; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--sidebar-active-bg); color: var(--sidebar-active-text); }
-.auth-company { margin: 0; color: var(--sidebar-text); font-size: var(--fs-sm); }
-body.auth > #sandbox-banner { grid-column: 2; grid-row: 2; justify-self: center; position: static !important; box-sizing: border-box; width: min(400px, calc(100% - 32px)) !important; height: auto !important; min-height: 28px; line-height: 28px !important; margin: 0 0 28px; padding: 0 var(--space-3); border-radius: var(--radius-ctl); white-space: normal !important; }
-.auth-main { grid-column: 2; grid-row: 3; justify-self: center; box-sizing: border-box; width: min(400px, calc(100% - 32px)); padding: 0 0 48px; }
-.auth-main h1 { margin: 0 0 var(--space-1); color: var(--text); font-size: 26px; font-weight: 700; }
+/* --- The sign-in pages (PLAN-014 I-b, the owner's redesign; login-dark-laptop.png) ---------------
+   two_factor/_base.html, the same in both themes. body.auth is a grid: the brand panel on the
+   left across both rows; on the right the top row (the sandbox banner as a pill, then .auth-top
+   with "Need help?") over the form area. The brand panel is --navy (the --login-* names, which
+   the dark theme leaves alone): behind its text the mosaic (.auth-mosaic, aria-hidden; a fixed
+   pattern of tiles in the grid's status hues, turned -8 degrees, fading under a navy gradient
+   towards the bottom), the logo 36 px, the 36/700 headline, one line, the four feature cards in
+   a 2 x 2 grid (the navy at 55 %, a light blur, a 1 px white-10 % border, 14 px radius, the icon
+   in a teal-tinted square) and the company's name · Monvera at the bottom. The form area, 440
+   px: the lock in a teal-tinted square, "Sign in to Monvera" 30/700, the muted sub-line, the
+   username and password in one rounded box with a divider and small upper-case labels, the
+   password's "Show" button, "Keep me signed in" and "Forgot password?" on one row, the
+   full-width primary button (radius 12 px) and, under a rule, the muted note. The other
+   sign-in pages (the token and setup steps, 401, the second factor's 403) take the same frame;
+   their fields are pills one per row. At 768 px and under the panel is a short header (the logo
+   and the headline over the mosaic) and the form takes the width. */
+body.auth { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-rows: auto 1fr; min-height: 100vh; padding-top: 0 !important; background: var(--bg); }
+.auth-brand { grid-column: 1; grid-row: 1 / -1; position: relative; overflow: hidden; isolation: isolate; display: flex; flex-direction: column; gap: var(--space-6); box-sizing: border-box; min-height: 100vh; padding: 56px; background: var(--navy); color: var(--login-text); }
+.auth-mosaic { position: absolute; top: -90px; left: -140px; z-index: -1; width: 1180px; pointer-events: none; }
+.auth-tiles { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 16px 14px; transform: rotate(-8deg); transform-origin: 0 0; opacity: .42; }
+.auth-tiles i { display: block; aspect-ratio: 5 / 3; border-radius: 7px; background: var(--login-tile-paid); }
+.auth-tiles .tile-t { background: var(--login-tile-teal); }
+.auth-tiles .tile-l { background: var(--login-tile-late); }
+.auth-tiles .tile-w { background: var(--login-tile-pending); }
+.auth-tiles .tile-n { background: var(--login-tile-neutral); }
+.auth-mosaic::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--navy) 30%, transparent) 0%, color-mix(in srgb, var(--navy) 65%, transparent) 40%, var(--navy) 82%); }
+.auth-logo img { display: block; height: 36px; width: auto; max-width: 100%; }
+.auth-pitch { margin: auto 0; max-width: 540px; }
+.auth-headline { margin: 0 0 var(--space-3); color: var(--login-heading); font-size: 36px; font-weight: 700; line-height: 1.15; }
+.auth-sentence { margin: 0 0 var(--space-6); color: var(--login-text); font-size: var(--fs-lg); line-height: 1.6; }
+.auth-features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.auth-feature { display: flex; flex-direction: column; gap: 2px; box-sizing: border-box; padding: 18px; border: 1px solid var(--login-card-border); border-radius: 14px; background: var(--login-card-bg); color: var(--login-text); font-size: var(--fs-base); line-height: 1.5; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.auth-feature strong { margin: var(--space-3) 0 0; color: var(--login-heading); font-size: var(--fs-md); font-weight: 600; }
+.auth-feature-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--radius-ctl); background: var(--login-icon-bg); color: var(--green); }
+.auth-company { margin: 0; color: var(--login-text); font-size: var(--fs-sm); }
+body.auth > #sandbox-banner { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; position: static !important; box-sizing: border-box; width: auto !important; height: auto !important; margin: 40px 0 0; padding: 0 var(--space-3); border-radius: var(--radius-pill); font-size: var(--fs-xs) !important; line-height: 26px !important; white-space: nowrap !important; }
+.auth-top { grid-column: 3; grid-row: 1; align-self: start; padding: 40px 72px 0 var(--space-4); font-size: var(--fs-md); line-height: 26px; }
+.auth-top a { color: var(--link); text-decoration: none; }
+.auth-top a:hover { text-decoration: underline; }
+.auth-main { grid-column: 2 / -1; grid-row: 2; align-self: center; justify-self: center; box-sizing: border-box; width: min(440px, calc(100% - 32px)); padding: 0 0 64px; }
+.auth-lock { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin: 0 0 var(--space-5); border-radius: var(--radius-card); background: color-mix(in srgb, var(--teal) 16%, transparent); color: var(--link); }
+.auth-main h1 { margin: 0 0 var(--space-1); color: var(--text); font-size: 30px; font-weight: 700; }
 .auth-sub { margin: 0 0 var(--space-6); color: var(--muted); font-size: var(--fs-md); }
 .auth-main p { color: var(--text-2); font-size: var(--fs-md); }
 .auth-main .field { margin: 0 0 var(--space-4); }
 .auth-main label { margin: 0 0 6px; color: var(--text); font-size: var(--fs-base); font-weight: 600; }
 .auth-main input[type=text], .auth-main input[type=password], .auth-main input[type=number], .auth-main input[type=email], .auth-main input[type=tel] { width: 100%; padding: 12px 16px; border-radius: var(--radius-pill); font-size: var(--fs-md); }
-.auth-main .btn { padding: 13px; border-radius: var(--radius-pill); font-size: var(--fs-md); }
+.auth-credentials { box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+/* One focus indicator for the combined box (review of I-b, WCAG 2.4.7): the box takes a 2 px
+   --link ring (4.67:1 on --bg in light, 8.1:1 in dark) while a field inside has focus; the
+   borderless fields draw none of their own. */
+.auth-credentials:focus-within { border-color: var(--link); box-shadow: 0 0 0 1px var(--link); }
+.auth-main .auth-credential input:focus-visible { box-shadow: none; }
+.auth-credential { padding: 12px var(--space-5) 10px; }
+.auth-credential + .auth-credential { border-top: 1px solid var(--border); }
+.auth-main .auth-credential label { display: block; margin: 0 0 2px; color: var(--muted); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.auth-main .auth-credential input[type=text], .auth-main .auth-credential input[type=password] { padding: 2px 0; border: 0; border-radius: 0; background: transparent; font-size: var(--fs-lg); }
+.auth-password { display: flex; align-items: center; gap: var(--space-2); }
+.auth-main .auth-show { flex: 0 0 auto; color: var(--muted); font-size: var(--fs-sm); }
+.auth-options { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin: var(--space-4) 0 0; font-size: var(--fs-md); }
+.auth-main .auth-options label { margin: 0; color: var(--text); font-size: var(--fs-md); font-weight: 400; }
+.auth-options a { color: var(--link); text-decoration: none; }
+.auth-options a:hover { text-decoration: underline; }
+.auth-main .btn { padding: 13px; border-radius: 12px; font-size: var(--fs-md); }
 .auth-main .auth-actions { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-6) 0 0; }
 .auth-main .auth-actions .btn { width: 100%; }
 .auth-main .auth-actions .btn-primary { order: -1; }
 .auth-main .auth-actions .auth-cancel { align-self: center; margin-top: var(--space-1); }
-.auth-note { margin: var(--space-6) 0 0; color: var(--muted); font-size: var(--fs-sm); text-align: center; }
+.auth-main .auth-note { margin: var(--space-6) 0 0; padding: var(--space-5) 0 0; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-sm); }
 .auth-main .errorlist { margin: var(--space-1) 0 0; padding: 0; list-style: none; font-size: var(--fs-sm); font-weight: 600; }
 .auth-main .errorlist.nonfield { margin: 0 0 var(--space-4); padding: 10px var(--space-3); border-radius: var(--radius-ctl); background: var(--unpaid-bg); }
 /* The package's own form table on the enrolment pages: each label above its field. */
@@ -1156,16 +1189,19 @@ fieldset.card > legend + * { clear: both; }
   .steps { display: none; }
   .steps-line { display: block; }
   .steps-progress { display: block; }
-  /* The sign-in pages: the brand panel a short gradient header (the logo and the headline); the
-     banner strip and the form take the width. */
-  body.auth { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto 1fr; }
-  .auth-brand { grid-column: 1; grid-row: 1; min-height: 0; gap: var(--space-3); padding: var(--space-5) var(--space-4); }
-  .auth-shape, .auth-sentence, .auth-points, .auth-company { display: none; }
+  /* The sign-in pages: the brand panel a short header (the logo and the headline over the
+     mosaic; no line, no cards, no footer); the banner pill and "Need help?" in a row under it,
+     then the form at the full width. */
+  body.auth { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto 1fr; }
+  .auth-brand { grid-column: 1 / -1; grid-row: 1; min-height: 0; gap: var(--space-3); padding: var(--space-5) var(--space-4) var(--space-6); }
+  .auth-sentence, .auth-features, .auth-company { display: none; }
+  .auth-mosaic { top: -60px; left: -80px; width: 760px; }
   .auth-logo img { height: 30px; }
   .auth-pitch { margin: 0; }
-  .auth-headline { margin: 0; font-size: 20px; }
-  body.auth > #sandbox-banner { grid-column: 1; grid-row: 2; margin: var(--space-4) 0; }
-  .auth-main { grid-column: 1; grid-row: 3; align-self: start; }
+  .auth-headline { margin: 0; font-size: 22px; }
+  body.auth > #sandbox-banner { grid-column: 1; grid-row: 2; justify-self: start; margin: var(--space-4) 0 0 var(--space-4); }
+  .auth-top { grid-column: 2; grid-row: 2; padding: var(--space-4) var(--space-4) 0; }
+  .auth-main { grid-column: 1 / -1; grid-row: 3; align-self: start; padding: var(--space-6) 0 48px; }
   /* Form and builder family (PLAN-012f-a D5): one column in markup order (the builder's SUMMARY
      after How to collect), the tiles one a row; the summary card's primary is fixed above the tab
      bar (a sticky one would stay inside its card), the form keeping room for it at the bottom; a
@@ -1604,7 +1640,7 @@ p.detail-more-notes { padding-left: 0; }
 
 /* --- Tablet and phone: touch targets ---------------------------------------------------- */
 @media (max-width: 1023.98px), (pointer: coarse) {
-  .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=file] { min-height: var(--tap); }
+  .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=datetime-local], input[type=month], input[type=file] { min-height: var(--tap); }
   input[type=checkbox], input[type=radio] { min-width: 24px; min-height: 24px; }
   td a, li a, .pagination a, .pager a, .segmented a, .tab { display: inline-flex; align-items: center; min-height: var(--tap); }
   /* A grid cell's block keeps its amount over its status line. */
@@ -1633,7 +1669,7 @@ p.detail-more-notes { padding-left: 0; }
   main, main.wide { margin: 0; padding: var(--space-4); border: 0; border-radius: 0; max-width: none; }
   dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 10px; }
   /* A 16 px field keeps a phone from zooming in on focus. */
-  input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=tel], input[type=url], select, textarea { font-size: 16px; }
+  input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=datetime-local], input[type=month], input[type=tel], input[type=url], select, textarea { font-size: 16px; }
   /* One form column: labels above full-width fields, inline widths overridden. */
   form .actions { flex-direction: column; align-items: stretch; }
   form .actions label { margin: .5rem 0 0; }

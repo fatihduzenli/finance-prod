@@ -15,7 +15,9 @@ The owner's algorithm, keyed to the lease (ADR-0005 point 4):
 Generation is idempotent on ``(lease, policy_year)`` (a unique constraint plus
 ``get_or_create``). :func:`insurance_due_soon` only reads: it lists the anniversaries
 of the coming days for the run screen, with the charge when one exists. Insurance
-autopay schedules are a later plan (7c).
+autopay schedules are a later plan (7c). :func:`bill_now` (PLAN-014 I-b, the LEASE card's
+"Bill now") creates one lease's charge of the current policy year by the same rule, audited
+with the staff member who pressed it.
 
 **Manual payments** (:func:`record_manual_payment`, PLAN-012d D6a): the rent rules
 (method, amount, date, note and the form's creation key;
@@ -68,6 +70,17 @@ NOT_MARKED = provider_sentence(
     "Not marked paid in {provider}: an insurance invoice is marked paid by hand"
 )
 PAY_NEEDS_PREMIUM = "This insurance charge has no premium yet. Nothing was recorded."
+CREATED_ACTION = "insurance_charge.created"
+#: :func:`bill_now`'s sentences (PLAN-014 I-b).
+BILL_CREATED = "This policy year's insurance is billed."
+BILL_NEEDS_PREMIUM = (
+    "This policy year's insurance is billed; it waits for the year's premium to be entered."
+)
+BILL_NO_OPEN_DATE = (
+    "The store has no open date, so its policy year is not known. Nothing was billed."
+)
+BILL_NOT_OWED = "This lease owes no insurance for that policy year. Nothing was billed."
+BILL_ALREADY = "This policy year's insurance is already billed. Nothing was billed."
 #: The run screen lists insurance due within this many days (owner's algorithm).
 DUE_SOON_DAYS = 7
 
@@ -116,6 +129,16 @@ def in_scope(lease: Lease, year: int, today: date) -> date | None:
     return due if holds_on(lease, due) else None
 
 
+def owes(lease: Lease, year: int, today: date) -> bool:
+    """Whether ``lease`` owes ``year`` as of ``today`` (no query: the lease's store is read
+    with it): in scope (:func:`in_scope`) and not prospective, the rule of
+    :func:`generate_insurance_charges` and :func:`bill_now`."""
+    return (
+        lease.collection_status != CollectionStatus.PROSPECTIVE
+        and in_scope(lease, year, today) is not None
+    )
+
+
 def _leases() -> list[Lease]:
     return list(
         Lease.objects.select_related("store")
@@ -126,6 +149,40 @@ def _leases() -> list[Lease]:
 
 def _premiums() -> dict[int, Decimal]:
     return dict(InsurancePremium.objects.values_list("policy_year", "amount"))
+
+
+def policy_year(open_date: date, today: date) -> int:
+    """The policy year ``today`` is in: the latest year whose anniversary (the store's open
+    date, :func:`anniversary`) is on or before ``today``."""
+    year = today.year
+    return year if anniversary(open_date, year) <= today else year - 1
+
+
+def _create(
+    lease: Lease, year: int, due: date, premium: Decimal | None, *, actor: User | None
+) -> tuple[InsuranceCharge, bool]:
+    """The charge of ``lease`` for ``year``, created (and audited
+    ``insurance_charge.created``) when it does not exist yet; whether it was created."""
+    with transaction.atomic():
+        charge, made = InsuranceCharge.objects.get_or_create(
+            lease=lease, policy_year=year, defaults={"due_on": due, "amount": premium}
+        )
+        if made:
+            AuditLog.objects.create(
+                actor=actor,
+                action=CREATED_ACTION,
+                entity_type=ENTITY_INSURANCE,
+                entity_id=str(charge.pk),
+                before=None,
+                after={
+                    "lease": str(lease.pk),
+                    "policy_year": year,
+                    "due_on": due.isoformat(),
+                    "amount": str(charge.amount) if charge.amount is not None else None,
+                    "needs_premium": charge.needs_premium,
+                },
+            )
+    return charge, made
 
 
 def generate_insurance_charges(today: date) -> InsuranceReport:
@@ -141,33 +198,44 @@ def generate_insurance_charges(today: date) -> InsuranceReport:
             due = in_scope(lease, year, today)
             if due is None:
                 continue
-            with transaction.atomic():
-                charge, made = InsuranceCharge.objects.get_or_create(
-                    lease=lease,
-                    policy_year=year,
-                    defaults={"due_on": due, "amount": premiums.get(year)},
-                )
-                if made:
-                    AuditLog.objects.create(
-                        actor=None,
-                        action="insurance_charge.created",
-                        entity_type=ENTITY_INSURANCE,
-                        entity_id=str(charge.pk),
-                        before=None,
-                        after={
-                            "lease": str(lease.pk),
-                            "policy_year": year,
-                            "due_on": due.isoformat(),
-                            "amount": str(charge.amount) if charge.amount is not None else None,
-                            "needs_premium": charge.needs_premium,
-                        },
-                    )
+            charge, made = _create(lease, year, due, premiums.get(year), actor=None)
             if made:
                 created += 1
                 needs_premium += charge.needs_premium
             else:
                 existing += 1
     return InsuranceReport(created, existing, needs_premium, needs_open_date)
+
+
+@dataclass(frozen=True, slots=True)
+class Outcome:
+    """What :func:`bill_now` did: ``ok`` and the one sentence to show; the charge it
+    created, if any."""
+
+    ok: bool
+    message: str
+    charge: InsuranceCharge | None = None
+
+
+def bill_now(lease: Lease, today: date, *, actor: User | None) -> Outcome:
+    """The LEASE card's "Bill now" on the insurance row (PLAN-014 I-b): the charge of the
+    current policy year of ``lease``, by the rule of :func:`generate_insurance_charges` (the
+    store's open date, the lease not prospective and holding the store on the anniversary,
+    before the store closed; the year's premium, or none and ``needs_premium``), audited
+    with ``actor``. Refused with one sentence, writing nothing, when the store has no open
+    date, the lease does not owe this year or the year is already billed (a second press)."""
+    store = lease.store
+    if store.needs_open_date or store.open_date is None:
+        return Outcome(False, BILL_NO_OPEN_DATE)
+    year = policy_year(store.open_date, today)
+    due = in_scope(lease, year, today)
+    if due is None or not owes(lease, year, today):
+        return Outcome(False, BILL_NOT_OWED)
+    premium = InsurancePremium.objects.filter(policy_year=year).values_list("amount", flat=True)
+    charge, made = _create(lease, year, due, premium.first(), actor=actor)
+    if not made:
+        return Outcome(False, BILL_ALREADY)
+    return Outcome(True, BILL_NEEDS_PREMIUM if charge.needs_premium else BILL_CREATED, charge)
 
 
 def insurance_due_soon(today: date, days: int = DUE_SOON_DAYS) -> list[InsuranceDue]:

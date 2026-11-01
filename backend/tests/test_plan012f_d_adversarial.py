@@ -37,11 +37,9 @@ def test_the_login_page_keeps_its_form_and_offers_no_forgot_or_keep_me_controls(
     assert label is not None and "Username" in re.sub(r"<[^>]+>", "", label.group(1))
     lowered = body.lower()
     assert not has_token(lowered, "forgot")
-    assert (
-        "keep me" not in lowered
-        and 'name="remember' not in lowered
-        and "remember_me" not in lowered
-    )
+    # PLAN-014 I-b: "Keep me signed in" is on the page (the session's limits do not change,
+    # tests/test_login_page.py); "Forgot password?" only with a support e-mail, none here.
+    assert 'name="auth-remember"' in lowered and "remember_me" not in lowered
     assert body.count('id="sandbox-banner"') == 1
     assert "Access is by invitation" in body
 

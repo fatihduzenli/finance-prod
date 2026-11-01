@@ -3,6 +3,9 @@
 PLAN-014 C3: the processor customer, its sync, the retry and the link are the lease's
 (``payments.lease_sync``, the LEASE card's Edit billing details); saving an operator is
 local and calls nothing. The cases below are pinned there.
+
+PLAN-014 I-b: the operator form's State is the store form's select (codes stored, anything
+else refused without echo), and the consent date-time fields take the field style.
 """
 
 from __future__ import annotations
@@ -10,14 +13,17 @@ from __future__ import annotations
 import threading
 import uuid
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
+from django import forms
 from django.db import connections
 from django.test import Client, override_settings
 
 from accounts.roles import Role
+from ledger.forms import STATE_CHOICES, STATE_REFUSED, OperatorCreateForm, OperatorForm
 from ledger.models import Lease, LeaseBilling, Operator, SyncStatus
 from ledger.services import operators
 from payments import lease_sync
@@ -504,3 +510,51 @@ def test_an_update_after_retries_exhausted_keeps_the_local_change_and_fails_once
     assert lease.sync_status == SyncStatus.FAILED
     assert call_names(fake).count("update_customer") == 1
     assert "create_customer" not in call_names(fake)
+
+
+# --- PLAN-014 I-b: the State select and the consent fields' style ---------------------------
+
+APP_CSS = Path(__file__).resolve().parents[1] / "finance" / "static" / "finance" / "app.css"
+
+
+def test_the_operator_forms_offer_the_store_forms_state_select() -> None:
+    for form in (OperatorForm(), OperatorCreateForm()):
+        field = form.fields["state"]
+        assert isinstance(field, forms.ChoiceField)
+        offered: Any = field.choices
+        assert list(offered) == list(STATE_CHOICES) and len(STATE_CHOICES) == 52
+    page = _client(Role.ADMIN).get("/operators/new/").content.decode()
+    assert '<select name="state"' in page and '<option value="TX">Texas</option>' in page
+
+
+def test_a_state_code_is_stored_and_an_empty_state_is_allowed() -> None:
+    admin = _client(Role.ADMIN)
+    assert admin.post("/operators/new/", form_data(state="TX")).status_code == 302
+    assert Operator.objects.get().state == "TX"
+    operator = Operator.objects.get()
+    edited = admin.post(f"/operators/{operator.pk}/edit/", form_data(state=""))
+    assert edited.status_code == 302
+    operator.refresh_from_db()
+    assert operator.state == ""
+
+
+@pytest.mark.parametrize("value", ["ZZ", "Texas", "tx", CARD])
+def test_a_state_not_in_the_list_is_refused_without_echo(value: str) -> None:
+    form = OperatorCreateForm(data=form_data(state=value))
+    assert not form.is_valid() and form.errors["state"] == [STATE_REFUSED]
+    response = _client(Role.ADMIN).post("/operators/new/", form_data(state=value), follow=True)
+    assert not Operator.objects.exists()
+    body = response.content.decode()
+    assert STATE_REFUSED in body
+    if value != "Texas":  # "Texas" is an option's label; the rest are never on the page
+        assert not has_token(body, value)
+
+
+def test_the_consent_fields_get_the_field_style_in_the_three_lists() -> None:
+    css = APP_CSS.read_text(encoding="utf-8")
+    lists = [
+        line for line in css.splitlines() if "input[type=date]" in line and "input[type=" in line
+    ]
+    assert len(lists) == 3, lists
+    for line in lists:
+        assert "input[type=date], input[type=datetime-local]," in line, line

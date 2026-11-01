@@ -157,7 +157,7 @@ def test_the_staff_portal_card_and_a_viewer_sees_no_actions(
     page.goto(f"{live_server.url}/account/login/")
     page.fill("#id_auth-username", "e2e-14h-billing")
     page.fill("#id_auth-password", TEST_PASSWORD)
-    page.get_by_role("button", name="Next").click()
+    page.get_by_role("button", name="Sign in").click()
     page.locator("#id_token-otp_token").fill(current_code(device))
     page.get_by_role("button", name="Next").click()
     page.wait_for_url(f"{live_server.url}/")

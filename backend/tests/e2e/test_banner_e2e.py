@@ -27,12 +27,16 @@ def test_banner_is_visible_and_cannot_be_dismissed(live_server: LiveServer, page
     assert viewport is not None
     box = banner.bounding_box()
     assert box is not None
-    # PLAN-012f D13: on the sign-in page the banner is the rounded strip over the form in the
-    # right panel (login-laptop.png), in view without scrolling; the staff pages keep it as the
-    # full-width bar above the page header (tests/e2e/test_shell_12f.py).
-    assert box["y"] >= 0 and box["y"] + box["height"] <= viewport["height"]
-    assert box["x"] >= viewport["width"] / 2 - 1
-    assert box["width"] == pytest.approx(400, abs=2)
+    # PLAN-014 I-b item 7 (docs/design/login-dark-laptop.png): on the sign-in page the banner
+    # is the pill at the top right of the right panel, beside "Need help?", in view without
+    # scrolling; the staff pages keep it as the full-width bar above the page header
+    # (tests/e2e/test_shell_12f.py).
+    brand = page.locator("#auth-brand").bounding_box()
+    assert brand is not None
+    assert box["y"] >= 0 and box["y"] + box["height"] <= 120
+    assert box["x"] >= brand["x"] + brand["width"]
+    assert box["x"] + box["width"] <= viewport["width"]
+    assert box["height"] < 48  # a pill, not a strip
 
     # The login form must not be hidden underneath the banner.
     username_box = page.locator("#id_auth-username").bounding_box()

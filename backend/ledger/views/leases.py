@@ -62,6 +62,7 @@ from ledger.models import (
 from ledger.services import (
     csv_export,
     detail_cards,
+    insurance,
     list_filters,
     one_off_charges,
     search,
@@ -291,7 +292,7 @@ def _detail_context(request: HttpRequest, lease: Lease) -> dict[str, Any]:
         ),
         "open_balance": detail_cards.lease_open_balance(lease, today),
         # The store page's DEPOSIT line (one query), as the workspace header reads it.
-        "deposit_text": workspace._deposit_text(lease),
+        "deposit_text": workspace._deposit_text(lease)[0],
         **activity_context(
             [(service.ENTITY_SCHEDULE, row.pk) for row in live],
             admin=admin,
@@ -972,3 +973,26 @@ def lease_switch_own(request: HttpRequest, pk: str) -> HttpResponse:
     elif submit(request, JobKind.LEASE_ACCOUNT_SWITCH, lease, {"move_key": uuid.uuid4()}):
         messages.info(request, service.SWITCH_QUEUED)
     return redirect("ledger:leases:detail", pk=lease.pk)
+
+
+# --- Insurance "Bill now" (PLAN-014 I-b) ------------------------------------------------
+
+
+@role_required
+@require_POST
+def lease_insurance_bill(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:insurance_bill`` (billing; PLAN-014 I-b): the LEASE card's "Bill now"
+    on the insurance row. Creates the current policy year's insurance charge of the lease
+    (:func:`ledger.services.insurance.bill_now`, audited with the staff member); refused with
+    one sentence and nothing written for an archived operator, a store without an open date,
+    a lease that does not owe the year or a year already billed. Returns to the store page."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    if lease.operator is not None and lease.operator.archived_at is not None:
+        messages.error(request, lease_sync.MESSAGES[lease_sync.ARCHIVED])
+    else:
+        outcome = insurance.bill_now(lease, timezone.localdate(), actor=_actor(request))
+        (messages.success if outcome.ok else messages.error)(request, outcome.message)
+    return redirect("ledger:stores:detail", pk=lease.store_id)

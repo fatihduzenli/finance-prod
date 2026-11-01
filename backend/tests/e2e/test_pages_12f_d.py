@@ -63,7 +63,7 @@ def signed_in(context: BrowserContext, live_server: LiveServer, role: Role) -> P
     page.goto(f"{live_server.url}/account/login/")
     page.fill("#id_auth-username", username)
     page.fill("#id_auth-password", TEST_PASSWORD)
-    page.get_by_role("button", name="Next").click()
+    page.get_by_role("button", name="Sign in").click()
     page.locator("#id_token-otp_token").fill(current_code(device))
     page.get_by_role("button", name="Next").click()
     page.wait_for_url(f"{live_server.url}/")
@@ -76,20 +76,26 @@ def test_the_login_page_on_a_laptop_has_its_two_panels(
     page = laptop.new_page()
     page.goto(f"{live_server.url}/account/login/")
     brand = box(page, "#auth-brand")
+    # PLAN-014 I-b item 7 (docs/design/login-dark-laptop.png): the left panel takes a little
+    # under half the width, full height; the features and the company footer show.
     assert brand["x"] == pytest.approx(0, abs=1)
-    assert brand["width"] == pytest.approx(LAPTOP["width"] / 2, abs=2)
+    assert 0.4 * LAPTOP["width"] <= brand["width"] <= 0.5 * LAPTOP["width"] + 2
     assert brand["height"] >= LAPTOP["height"] - 1
-    assert page.locator("#auth-points").is_visible() and page.locator("#auth-company").is_visible()
+    assert page.locator("#auth-features").is_visible()
+    assert page.locator("#auth-company").is_visible()
     banner = box(page, "#sandbox-banner")
     heading = box(page, "#sign-in-heading")
+    credentials = box(page, "#auth-credentials")
     field = box(page, "#id_auth-username")
-    button = box(page, "#auth-main .btn-primary")
-    # The banner is a strip of the right panel, over "Sign in" and the form, 400 px wide.
-    assert banner["x"] >= LAPTOP["width"] / 2 and banner["width"] == pytest.approx(400, abs=2)
-    assert banner["y"] + banner["height"] <= heading["y"] < field["y"] < button["y"]
-    assert field["width"] == pytest.approx(400, abs=2) and button["width"] == pytest.approx(
-        400, abs=2
+    button = box(page, "#sign-in-button")
+    # The banner pill sits at the top right of the right panel, above "Sign in"; the
+    # credentials box and the button share one width, the field inside the box.
+    assert banner["x"] >= brand["x"] + brand["width"]
+    assert banner["y"] + banner["height"] <= heading["y"] < credentials["y"] < button["y"]
+    assert credentials["x"] <= field["x"] and field["x"] + field["width"] <= (
+        credentials["x"] + credentials["width"]
     )
+    assert button["width"] == pytest.approx(credentials["width"], abs=2)
     assert page.evaluate("document.documentElement.scrollWidth") <= LAPTOP["width"]
 
 
@@ -102,12 +108,16 @@ def test_the_login_page_on_a_phone_is_a_short_header_over_the_form(
     assert brand["width"] == pytest.approx(PHONE["width"], abs=1)
     assert brand["height"] < 200
     assert page.locator("#auth-headline").is_visible()
-    assert not page.locator("#auth-points").is_visible()
+    assert not page.locator("#auth-features").is_visible()
     banner = box(page, "#sandbox-banner")
+    credentials = box(page, "#auth-credentials")
     field = box(page, "#id_auth-username")
-    assert brand["y"] + brand["height"] <= banner["y"] < field["y"]
-    assert field["x"] == pytest.approx(16, abs=1)
-    assert field["width"] == pytest.approx(PHONE["width"] - 32, abs=2)
+    # PLAN-014 I-b item 7: the form takes the full width (16 px gutters); the field sits
+    # inside the credentials box.
+    assert brand["y"] + brand["height"] <= banner["y"] < credentials["y"] <= field["y"]
+    assert credentials["x"] == pytest.approx(16, abs=1)
+    assert credentials["width"] == pytest.approx(PHONE["width"] - 32, abs=2)
+    assert credentials["x"] <= field["x"] < credentials["x"] + credentials["width"]
     assert page.evaluate("document.documentElement.scrollWidth") <= PHONE["width"]
 
 

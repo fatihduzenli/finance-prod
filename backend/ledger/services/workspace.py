@@ -239,6 +239,9 @@ class Header:
     open_count: int = 0
     debit_day_text: str = ""
     deposit_text: str = ""
+    #: The Deposit row's colour (PLAN-014 I-b: ``paid``, ``partial`` or ``unpaid``, as the
+    #: Sign fee row's), "" without a deposit.
+    deposit_tone: str = ""
     next_rent: date | None = None
     next_insurance: date | None = None
     #: The Sign fee and Insurance rows under Deposit (PLAN-014 B3), with a lease.
@@ -380,24 +383,27 @@ def _debit_day_text(lease: Lease) -> str:
     return " and ".join(ordinal(day) for day in days)
 
 
-def _deposit_text(lease: Lease) -> str:
+def _deposit_text(lease: Lease) -> tuple[str, str]:
     """The lease's deposit (its refundable one-off charges, not waived or voided; one
-    query): ``$3,000.00 · not collected``, ``· collected``, or what was collected so far."""
+    query): ``$3,000.00 · not collected``, ``· collected``, or what was collected so far,
+    with its state's code (:data:`ledger.services.detail_cards.COLLECTED`, ``PARTIAL`` or
+    ``UNCOLLECTED``; PLAN-014 I-b: the LEASE card colours the row by it); ``("", "")``
+    without a deposit."""
     found = (
         OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True)
         .exclude(status__in=_CLOSED_ONE_OFF)
         .aggregate(price=Sum("price"), paid=Sum("amount_paid"))
     )
     if found["price"] is None:
-        return ""
+        return "", ""
     price, paid = _money(found["price"]), _money(found["paid"])
     if paid >= price:
-        state = "collected"
+        state, code = "collected", detail_cards.COLLECTED
     elif paid <= 0:
-        state = "not collected"
+        state, code = "not collected", detail_cards.UNCOLLECTED
     else:
-        state = f"{format_amount(paid)} collected"
-    return f"{format_amount(price)} · {state}"
+        state, code = f"{format_amount(paid)} collected", detail_cards.PARTIAL
+    return f"{format_amount(price)} · {state}", code
 
 
 def _next_debit_day(lease: Lease, today: date) -> date | None:
@@ -449,6 +455,7 @@ def _header(
         )
     schedules = leases.live_schedules(lease)
     moved = leases.autopay_move(lease, now)
+    deposit_text, deposit_code = _deposit_text(lease)
     return Header(
         lease=lease,
         operator=lease.operator,
@@ -461,7 +468,8 @@ def _header(
         open_promise=contacts.open_promise(lease.operator, lease),
         open_count=open_count,
         debit_day_text=_debit_day_text(lease),
-        deposit_text=_deposit_text(lease),
+        deposit_text=deposit_text,
+        deposit_tone=detail_cards.TONES[deposit_code] if deposit_code else "",
         next_rent=_next_rent(schedules, moved, now) or _next_debit_day(lease, today),
         next_insurance=_next_insurance(lease, today),
         collections=detail_cards.lease_collections(lease, today),
