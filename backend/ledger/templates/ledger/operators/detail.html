@@ -96,7 +96,7 @@
   <section class="card" id="operator-contacts-card">
   <h2 id="contacts">Notes &amp; follow-ups</h2>
   <p class="actions">
-    {% if can_add_contact %}<a class="btn" id="add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Add entry</a>{% endif %}
+    {% if can_add_contact %}<a class="btn" id="add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">{% icon "plus" 14 %}Log contact</a>{% endif %}
     <a class="btn" id="all-contacts" href="{% url 'ledger:operators:contacts' pk=operator.pk %}">All entries</a>
     <a class="btn" id="export-contacts" href="{% url 'ledger:operators:contacts_export' pk=operator.pk %}">Download spreadsheet</a>
   </p>
@@ -133,7 +133,7 @@
       </dl>
     </section>
     <section class="card" id="recent-contact-card" aria-labelledby="recent-contact-heading">
-      <div class="card-header"><h2 class="section-label" id="recent-contact-heading">Recent contact</h2>{% if can_add_contact %}<a class="card-link" id="recent-add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Add entry</a>{% endif %}</div>
+      <div class="card-header"><h2 class="section-label" id="recent-contact-heading">Recent contact</h2>{% if can_add_contact %}<a class="card-link" id="recent-add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Log contact</a>{% endif %}</div>
       <ul class="recent-contacts" id="recent-contacts">
         {% for row in recent_contacts %}{% with entry=row.entry %}<li class="recent-contact">{% if entry.kind == "promise" %}{% avatar "P" "pending" %}{% else %}{% avatar entry.get_kind_display "neutral" %}{% endif %}
           <div class="recent-contact-body"><a class="recent-contact-title" href="#contact-{{ entry.pk }}">{{ entry.get_kind_display }}{% if entry.kind == "promise" %} · {{ entry.promised_amount|money }} by {{ entry.promised_date|day }}{% elif entry.body %} · {{ entry.body|truncatechars:40 }}{% endif %}</a>

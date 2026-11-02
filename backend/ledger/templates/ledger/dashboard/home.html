@@ -9,7 +9,8 @@ D7; without the script the link leads to the search page for a new invoice; no s
 builder route exists). The rows of DESIGN-SPEC §7.5 (PLAN-012g C1): the four figures as KPI
 cards (ledger.views.dashboard._kpis); the Cashflow card, full width (dashboard/_cashflow.html);
 then two .dashboard-row-thirds (two thirds | one third): what needs attention (PLAN-011b D6;
-ledger/_attention.html) beside the mini calendar (dashboard/_mini_calendar.html); the recent
+ledger/_attention.html) beside the mini calendar (dashboard/_mini_calendar.html; its column ends after
+the card, .dashboard-side-fit); the recent
 payments beside the Payment status card (dashboard/_payment_status.html). Then today's run,
 the failed payment attempts, the waived charges with a live invoice, the invoices not sent and
 the last nightly check, each a card. Phones: one column in that order (§7.5's phone order).{% endcomment %}
@@ -26,7 +27,7 @@ the last nightly check, each a card. Phones: one column in that order (§7.5's p
     <div class="dashboard-main">
       {% include "ledger/_attention.html" with banners=False %}
     </div>
-    <div class="dashboard-side">
+    <div class="dashboard-side dashboard-side-fit">
       {% include "ledger/dashboard/_mini_calendar.html" %}
     </div>
   </div>

@@ -508,7 +508,7 @@ def test_an_empty_store_tab_offers_its_action_bar_step() -> None:
     row = contacts[contacts.index('id="timeline-empty">No entries yet. Add one.') :].split(
         "</li>", 1
     )[0]
-    assert ">Add entry</a>" in row
+    assert ">Log contact</a>" in row
     # A viewer has no action bar: the empty tab names no step.
     viewer = body(client_for(Role.VIEWER)[0].get(f"/stores/{lease.store_id}/?tab=charges"))
     assert 'class="muted empty">No open charges.</td>' in viewer

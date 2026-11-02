@@ -164,6 +164,15 @@ Fable stops and escalates to the human when:
 
 Escalation is a report, not a request for permission to bypass a rule.
 
+### 4.1 Long-running jobs are always watched (owner, 2026-11-02)
+
+Every long-running job — QA gates, CI waits, merge chains, staging verifications — runs as a **tracked
+background task with a completion notice**, never as a detached process that reports to nobody. Its
+watcher (a monitor on the job's log for stage lines, failures and completion) is **re-armed before it
+expires** for as long as the job runs. If a job ends while the model is idle, the model **reports the
+outcome within one message**. On a status check, the model reads each stage's elapsed time from the job's
+log and says whether the machine slept; a stuck or dead stage is stopped and only that stage is rerun.
+
 ---
 
 ## 5. Secrets and Confidential Material — ABSOLUTE PROHIBITIONS
