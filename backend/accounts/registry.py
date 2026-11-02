@@ -426,6 +426,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:settings:index",
         "ledger:settings:templates",
         "ledger:outbox:page",
+        # The Outbox's "Preview next 30 days" (owner, 2026-11-01); the view refuses below admin.
+        "ledger:outbox:preview",
         # Admin › Bank deposits (PLAN-014 I4); the view refuses below billing.
         "banking:page",
         # Lease screens that only read (PLAN-007 §4.1).

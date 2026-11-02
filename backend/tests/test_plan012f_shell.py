@@ -642,6 +642,9 @@ ICON_NAMES = (
     "lock",  # PLAN-014 I-b: the sign-in page's lock
     "bell",  # PLAN-014 I-b: the sign-in page's Reminders card
     "handshake",  # PLAN-014 I-b: the sign-in page's Promises card
+    "phone",  # Log contact (owner, 2026-11-01): the Call card
+    "mail",  # Log contact: the E-mail card
+    "map-pin",  # Log contact: the Visit card
 )
 
 

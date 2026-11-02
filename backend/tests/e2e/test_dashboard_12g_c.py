@@ -83,21 +83,24 @@ def test_the_laptop_dashboard_hover_opens_a_popover_and_the_wide_card_shows(
     )
     assert page.locator("#cashflow-card .bar-pair").count() == 12
     assert page.locator("#range-select").input_value() == "12m"
+    panel = page.locator("#mini-calendar .mini-panel")
+    upcoming = page.locator("#mini-upcoming-body")
+    assert upcoming.is_visible() and not panel.is_visible()
+    shot(page, f"dashboard-{theme}-laptop")
     day = page.locator("#mini-grid .mini-day.has-items").first
     if day.count():
-        # Hover opens the popover (CSS); a click keeps it open and marks the day selected.
+        # Hover opens the popover (CSS). Owner 2026-11-01: a click marks the day selected and
+        # shows its items in the "Next 7 days" list's place, with Back to the list.
         day.locator(".mini-num").hover()
         popover = day.locator(".mini-popover")
         popover.wait_for(state="visible")
         day.locator(".mini-num").click()
         assert "is-selected" in (day.get_attribute("class") or "")
         assert "is-open" in (day.get_attribute("class") or "")
-    assert (
-        not page.locator("#mini-calendar .mini-panel").is_visible()
-        if page.locator("#mini-calendar .mini-panel").count()
-        else True
-    )
-    shot(page, f"dashboard-{theme}-laptop")
+        panel.wait_for(state="visible")
+        assert panel.locator("li.calendar-item").count() >= 1 and not upcoming.is_visible()
+        page.get_by_role("button", name="Back to next 7 days").click()
+        assert upcoming.is_visible() and not panel.is_visible()
     page.select_option("#range-select", "6m")
     page.wait_for_load_state("networkidle")
     assert page.locator("#cashflow-card .bar-pair").count() == 6
@@ -130,6 +133,7 @@ def test_the_phone_dashboard_tap_panel_under_the_grid_and_the_six_month_card(
     assert panel.locator("li.calendar-item").count() >= 1
     assert "tapped" in panel.inner_text()
     assert not day.locator(".mini-popover").is_visible()
+    assert not page.locator("#mini-upcoming-body").is_visible()  # the list's place
     grid_bottom = page.locator("#mini-grid").bounding_box()
     panel_box = panel.bounding_box()
     assert (
@@ -139,3 +143,4 @@ def test_the_phone_dashboard_tap_panel_under_the_grid_and_the_six_month_card(
     # Tapping the same day again closes the panel.
     day.locator(".mini-num").tap()
     assert not panel.is_visible() or panel.locator("li.calendar-item").count() == 0
+    assert page.locator("#mini-upcoming-body").is_visible()

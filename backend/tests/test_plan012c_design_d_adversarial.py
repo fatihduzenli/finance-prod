@@ -212,8 +212,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: link_exchange, disconnect and ledger:settings:bank_save); 313 since PLAN-014 I slice 2
 #: (ledger:leases:alias_add and alias_remove, the billing details dialog's sender names); 314
 #: since PLAN-014 I-b (ledger:leases:insurance_bill, the LEASE card's insurance "Bill now"); 315
-#: since "Copy invite link" (ledger:operators:portal_copy_link; owner, 2026-11-01).
-FROZEN_ROUTES = (315, "09d40deab21b8312db695485f30b001ac0002268d9c248e5688e94bcfa3a2f3d")
+#: since the Outbox's "Preview next 30 days" (ledger:outbox:preview) and "Copy invite link"
+#: (ledger:operators:portal_copy_link), owner, 2026-11-01.
+FROZEN_ROUTES = (316, "9a7f7b9e86b22d58d81b3778ed1fcc9c9c2684446cf94e040a3115154c502e9c")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

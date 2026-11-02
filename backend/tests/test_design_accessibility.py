@@ -574,8 +574,9 @@ def test_every_control_on_the_main_pages_has_a_label(seeded: visual_world.World)
 
 
 #: The sign-in and error pages (PLAN-012f D10, D13): the two steps of the login wizard on
-#: their two-panel layout, the 401 page, the second factor's 403, a role's 403 and a 404 in
-#: the shell. (name, status, how to open it).
+#: their two-panel layout, the 401 page, the second factor's 403 (without a device and with an
+#: unverified one), "Signed out everywhere", a role's 403 and a 404 in the shell. (name, status,
+#: how to open it).
 def sign_in_and_error_pages() -> list[tuple[str, int, HttpResponse]]:
     from tests.auth_helpers import TEST_PASSWORD
 
@@ -584,6 +585,9 @@ def sign_in_and_error_pages() -> list[tuple[str, int, HttpResponse]]:
     no_device, _ = make_user(f"a11y-nodev-{uuid.uuid4().hex[:6]}", Role.VIEWER, with_device=False)
     unverified = Client()
     unverified.force_login(no_device)
+    with_device, _ = make_user(f"a11y-unver-{uuid.uuid4().hex[:6]}", Role.VIEWER)
+    device_unverified = Client()
+    device_unverified.force_login(with_device)
     viewer = client_as(Role.VIEWER)
     token_step = Client().post(
         "/account/login/",
@@ -598,6 +602,12 @@ def sign_in_and_error_pages() -> list[tuple[str, int, HttpResponse]]:
         ("login, token step", 200, token_step),
         ("401", 401, Client().get("/stores/")),
         ("second factor required", 403, unverified.get("/stores/")),
+        ("second factor required, a device", 403, device_unverified.get("/stores/")),
+        (
+            "signed out everywhere",
+            200,
+            client_as(Role.VIEWER).post("/account/sign-out-everywhere/"),
+        ),
         ("role refused", 403, viewer.get("/audit/")),
         ("not found", 404, viewer.get("/stores/00000000-0000-0000-0000-000000000000/")),
     ]

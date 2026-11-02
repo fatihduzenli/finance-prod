@@ -9,14 +9,17 @@
   the tab's filter (``?show=all|notes|contacts|emails``) and the tab's rows and actions;
   deleted entries as above. It has no export.
 - ``ledger:operators:contacts_add`` and ``ledger:stores:contacts_add`` (billing; the
-  registry refuses the POST below billing and the views refuse the form's GET too): add an
-  entry. The store's form is the form of the operator of the store's lease in effect
-  today, with that lease chosen; it returns to the store page's Notes & follow-ups tab, and
-  opened from the store page (``?store=&lease=``, PLAN-012d D2) it hides the lease and
-  shows the read-only line. When the operator has an open promise the form asks what
-  happened to it (Still open, the default, Kept, Rescheduled or Broken), and warns when a
-  new promise would close the open promise of its lease as Rescheduled (PLAN-012c-b D1,
-  D3). A refusal shows the form again.
+  registry refuses the POST below billing and the views refuse the GET too): the "Log
+  contact" dialog (owner, 2026-11-01; ledger/contacts/_log_contact_dialog.html) over the
+  page it was opened from. The store's is over the store page's Notes & follow-ups tab:
+  the entry is about the operator of the store's lease in effect today, with that lease
+  chosen and its field hidden; the operator's is over the operator page, with the Store
+  select of the operator's leases. Kind as four cards; a call's quick outcome; the promise
+  fields for a promise to pay, the amount suggested from the store's open balance. When
+  the operator has an open promise the dialog asks what happened to it (Still open, the
+  default, Kept, Rescheduled or Broken), and warns when a new promise would close the
+  open promise of its lease as Rescheduled (PLAN-012c-b D1, D3). A saved entry returns to
+  the page's notes & follow-ups; a refusal shows the dialog again with its errors.
 - ``ledger:contacts:outcome`` (billing; PLAN-012c-b D2): Kept, Reschedule or Broken on one
   open promise; the entry goes through :func:`contacts.add_entry` with that promise as
   ``previous``, then back to the validated local ``next`` at the new entry.
@@ -69,7 +72,7 @@ from ledger.models import (
     Operator,
     Store,
 )
-from ledger.services import contacts, timeline, workspace
+from ledger.services import contacts, timeline, workspace, workspace_cards
 from ledger.validators import contains_bank_routing_pattern, contains_card_number
 from ledger.views import store_context
 from ledger.views.contact_log import (
@@ -89,7 +92,8 @@ from ledger.views.operators import (
 )
 from ledger.views.operators import _detail_context as _operator_page
 from ledger.views.run import _billing_only
-from ledger.views.store_context import StoreContext, local_next
+from ledger.views.store_context import local_next
+from ledger.views.stores import _detail_context as _store_page
 from ledger.wording import format_amount
 
 NO_STORE_LEASE = "This store has no lease in effect today; add the entry on the operator's page."
@@ -255,6 +259,7 @@ def entry_form(
         leases=leases,
         lease_required=lease is not None or len(active) > 1,
         promises=[(str(row.pk), _promise_label(row)) for row in promises],
+        auto_id=FORM_IDS,
         initial={
             "happened_on": today,
             "kind": ContactKind.CALL,
@@ -291,22 +296,56 @@ def _uuid(value: str | None) -> uuid.UUID | None:
         return None
 
 
+#: The ids of the Log contact form's controls ("log-kind_0"): the page behind the dialog
+#: has forms of its own (the store tab's note form has a "body" too).
+FORM_IDS = "log-%s"
+
+
+def _day_shown(form: ContactEntryForm) -> str:
+    """The form's date as the page reads it ("Nov 1, 2026"), ``""`` when it is not a date."""
+    value = form["happened_on"].value()
+    if isinstance(value, date):
+        return day_text(value)
+    try:
+        return day_text(date.fromisoformat(str(value or "")))
+    except ValueError:
+        return ""
+
+
+def _operator_amounts(operator: Operator, cards: list[workspace_cards.StoreCard]) -> dict[str, str]:
+    """Per lease of ``operator`` (``""``: no particular store), the amount a new promise
+    suggests: the open balance of the lease's store on the operator page's store cards, the
+    operator's across its stores for no store. Balances of zero are left out."""
+    owed = {card.store.pk: card.balance for card in cards}
+    found = {
+        str(lease): str(owed[store])
+        for lease, store in Lease.objects.filter(operator=operator).values_list("pk", "store_id")
+        if owed.get(store, ZERO) > 0
+    }
+    total = sum(owed.values(), ZERO)
+    if total > 0:
+        found[""] = str(total)
+    return found
+
+
 def _add(
     request: HttpRequest,
     operator: Operator,
     *,
     lease: Lease | None,
     back_url: str,
-    title: str,
-    done_url: str = "",
-    context: StoreContext | None = None,
+    done_url: str,
+    store: Store | None = None,
+    about: str = "",
 ) -> HttpResponse:
-    """The add form; a saved entry returns to ``done_url``, else to the log on
-    ``back_url``. Opened from the store page (``context``, PLAN-012d D2) the lease field
-    is hidden and the read-only line names it."""
+    """The Log contact dialog (owner, 2026-11-01) over the store page's Notes & follow-ups
+    tab (``store``: the store's contact ``lease`` chosen and its field hidden) or over the
+    operator page (the Store select of the operator's leases). A saved entry returns to
+    ``done_url``; a refusal shows the dialog again with its errors; closed, the dialog goes
+    to ``back_url``."""
     data = request.POST if request.method == "POST" else None
     form, known = entry_form(operator, data, lease=lease)
-    if context is not None and lease is not None and "lease" in form.fields:
+    if store is not None and "lease" in form.fields:
         form.fields["lease"].widget = forms.HiddenInput()
     if data is not None and form.is_valid():
         values = form.cleaned_data
@@ -326,24 +365,35 @@ def _add(
         )
         if outcome.ok:
             messages.success(request, outcome.message)
-            return redirect(done_url or f"{back_url}#contacts")
+            return redirect(done_url)
         form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
     if data is not None:
         drop_payment_data(form)
     warnings = supersede_warnings(operator)
     chosen = data.get("lease", "") if data is not None else form.initial.get("lease", "")
+    if store is not None:
+        behind = _store_page(request, store, forced_tab=workspace.TAB_CONTACTS)
+        balance = behind["header"].open_balance if behind.get("header") is not None else ZERO
+        amounts = {str(lease.pk if lease else ""): str(balance)} if balance > 0 else {}
+        template = "ledger/contacts/log_contact_store.html"
+    else:
+        behind = _operator_page(request, operator)
+        amounts = _operator_amounts(operator, behind["store_cards"])
+        template = "ledger/contacts/log_contact_operator.html"
     return render(
         request,
-        "ledger/operators/contact_form.html",
+        template,
         {
-            "operator": operator,
-            "form": form,
+            **behind,
+            "log_form": form,
+            "log_action": request.path,
+            "log_about": about,
+            "log_day": _day_shown(form),
             "promise_values": known,
+            "promise_amounts": amounts,
             "supersede_warning": warnings.get(str(chosen), ""),
             "supersede_warnings": warnings,
-            "back_url": back_url,
-            "title": title,
-            "store_context": context,
+            "log_back_url": back_url,
         },
     )
 
@@ -358,12 +408,13 @@ def contacts_add(request: HttpRequest, pk: str) -> HttpResponse:
     if operator.archived_at is not None:
         messages.error(request, contacts.ARCHIVED)
         return redirect("ledger:operators:detail", pk=operator.pk)
+    page = reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
     return _add(
         request,
         operator,
         lease=None,
-        back_url=reverse("ledger:operators:detail", kwargs={"pk": operator.pk}),
-        title=operator.display_name,
+        back_url=f"{page}#contacts",
+        done_url=f"{page}#contacts",
     )
 
 
@@ -374,26 +425,25 @@ def store_contacts_add(request: HttpRequest, pk: str) -> HttpResponse:
     if refused is not None:
         return refused
     store = _store(pk)
-    context = store_context.from_request(request, store=store)
+    # A ?store=&lease= that is not this store's answers 404 (PLAN-012d D2); the entry is
+    # about the store's contact lease whatever lease the link named.
+    store_context.from_request(request, store=store)
     tab = workspace.tab_url(store.pk, workspace.TAB_CONTACTS)
     today = timezone.localdate()
     lease = contacts.store_contact_lease(store, today)
     if lease is None or lease.operator is None:
         messages.error(request, NO_STORE_LEASE)
         return redirect(tab)
-    if context is not None:
-        # The entry is about the store's contact lease whatever lease the link named.
-        context = StoreContext(store=store, lease=lease)
     return _add(
         request,
         lease.operator,
         lease=lease,
-        back_url=reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
-        title=f"{lease.operator.display_name}, store {store.external_label}"
-        f"{_lease_state(lease, today)}",
+        back_url=tab,
         # PLAN-012d D8: back to the store page's Notes & follow-ups tab.
         done_url=tab,
-        context=context,
+        store=store,
+        about=f"{lease.operator.display_name}, store {store.external_label}"
+        f"{_lease_state(lease, today)}",
     )
 
 

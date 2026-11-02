@@ -822,6 +822,14 @@ with a sentence while mail is not set up or, on the sandbox, while the address i
 allowlist. A message to an operator marked *Handled personally* is held ("operator handled
 personally"); a lease without a billing e-mail holds its messages ("no billing e-mail"); an empty
 managers' list holds the internal message ("no manager list").
+**Preview next 30 days** (`/admin-settings/outbox/preview/`, admin; or `manage.py outbox_preview
+[--days 30]` on staging, tab-separated, no addresses) runs the daily job's own planner for each
+coming day against today's data and queues nothing: day, rule, template, store, operator, charge,
+amount and whether it would be queued, paused by a promise or skipped and why (rent charges are
+not made yet, so rent shows as A or B by lease and month; F follows a return and only the
+re-debits due in the window are listed). The old collections ladder is retired for good: nothing
+can queue its rule or an inactive template any more, and its past rows stay in the Outbox as
+history with no store ("—").
 
 **Held is not failed.** `failed` names an error class from the provider (the worker's log has
 the class name only); `suppressed` means the charge closed or the operator was archived between
