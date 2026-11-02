@@ -2,7 +2,8 @@
 
 The adapter keeps ``bank_name`` and still drops ``bank_account``, ``bank_routing``,
 ``bank_holder_type`` and ``meta``; a name that holds payment data or is too long reads as "";
-the redaction keeps ``bank_name`` and drops every other ``bank_*`` key; the method snapshot
+the redaction keeps ``bank_name`` inside a payment-method object only and drops every
+``bank_*`` key elsewhere; the method snapshot
 caches it on ``LeaseBilling`` with ``bank_last4``; the LEASE and PAYMENT cards and the portal's
 store and bank pages print it before the digits, else as before; ledger migration 0067 both
 ways, with the PostgreSQL trigger refusing a card number in ``lease_billing.bank_name``.
@@ -108,21 +109,22 @@ def test_a_bank_name_of_exactly_100_characters_is_kept_and_a_missing_one_is_empt
 # --- The redaction ----------------------------------------------------------------------------
 
 
-def test_the_redaction_keeps_the_bank_name_and_drops_every_other_bank_key() -> None:
-    hostile = {
-        "bank_name": NAME,
-        "bank_type": "checking",
-        "bank_holder_type": "business",
-        "bank_account": ACCOUNT,
-        "bank_routing": ROUTING,
-        "other_bank_name": "Not kept",
-        "bank_name_extra": "Not kept",
-        "BANK_NAME": "Not kept",
-        "x\nbank_name": "Not kept",
-        "bank_name\n": "Not kept",
-    }
-    assert redact(hostile) == {"bank_name": NAME}
-    assert redact({"payment_method": {**BANK_OBJECT, "nickname": "Operating"}}) == {
+HOSTILE_KEYS: dict[str, str] = {
+    "bank_name": NAME,
+    "bank_type": "checking",
+    "bank_holder_type": "business",
+    "bank_account": ACCOUNT,
+    "bank_routing": ROUTING,
+    "other_bank_name": "Not kept",
+    "bank_name_extra": "Not kept",
+    "BANK_NAME": "Not kept",
+    "x\nbank_name": "Not kept",
+    "bank_name\n": "Not kept",
+}
+
+
+def test_the_bank_name_survives_only_inside_a_payment_method_object() -> None:
+    assert redact({"payment_method": {**BANK_OBJECT, **HOSTILE_KEYS, "nickname": "Operating"}}) == {
         "payment_method": {
             "id": "pm-bank-1",
             "method": "bank",
@@ -131,13 +133,21 @@ def test_the_redaction_keeps_the_bank_name_and_drops_every_other_bank_key() -> N
             "nickname": "Operating",
         }
     }
-    assert summary(hostile) == {"bank_name": NAME}
-    assert [key for key in hostile if not SENSITIVE_KEY.search(key)] == ["bank_name"]
+    # A transaction or a stored webhook body: every bank_* key is dropped, bank_name too.
+    transaction_object = {"id": "tx-1", "total": 12, **HOSTILE_KEYS}
+    assert summary(transaction_object) == {"id": "tx-1", "total": 12}
+    webhook_body = {"data": {"id": "tx-1", **HOSTILE_KEYS, "nested": [HOSTILE_KEYS]}}
+    assert redact(webhook_body) == {"data": {"id": "tx-1", "nested": [{}]}}
+    assert all(SENSITIVE_KEY.search(key) for key in HOSTILE_KEYS)
 
 
-def test_the_redaction_drops_a_bank_name_that_holds_payment_data() -> None:
-    assert payment_method_subset({"id": "pm-1", "bank_name": f"Bank {CARD}"}) == {"id": "pm-1"}
-    assert redact({"bank_name": f"{ROUTING} {ACCOUNT}"}) == {}
+def test_the_redaction_drops_a_payment_method_bank_name_with_payment_data_or_too_long() -> None:
+    for value in (f"Bank {CARD}", f"{ROUTING} {ACCOUNT}", "B" * 101):
+        assert payment_method_subset({"id": "pm-1", "bank_name": value}) == {"id": "pm-1"}
+    assert payment_method_subset({"id": "pm-1", "bank_name": "B" * 100}) == {
+        "id": "pm-1",
+        "bank_name": "B" * 100,
+    }
 
 
 # --- The snapshot caches the name with the last four ------------------------------------------

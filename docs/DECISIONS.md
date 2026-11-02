@@ -1197,9 +1197,10 @@ The specification (read 2026-11-01, Rule 7):
    name only, as the processor returns it, run through the payment-data validator and at most 100
    characters. `bank_account`, `bank_routing`, `meta.accountDisplay`, `meta.routingDisplay` and
    `bank_holder_type` are never kept.
-2. **One exception in the redaction.** `payments.redaction.PAYMENT_METHOD_KEYS` gains
-   `bank_name`; `SENSITIVE_KEY` still drops every other `bank_*` key, with the key exactly
-   `bank_name` as its one exception.
+2. **Only on a payment method.** `payments.redaction.PAYMENT_METHOD_KEYS` gains `bank_name`,
+   kept when a payment-method object is reduced to those keys (payment-data validator, at most
+   100 characters). `SENSITIVE_KEY` is unchanged: every `bank_*` key, `bank_name` included, is
+   still dropped from every other object (a transaction, a stored webhook body).
 3. **Our vocabulary.** The adapter reads it into `PaymentMethodRecord.bank_name` (a string that
    is not one, holds a card or routing and account number, or is longer than 100 characters reads
    as `""`); the method snapshot keeps it; `LeaseBilling.bank_name` (guarded text, 100, default

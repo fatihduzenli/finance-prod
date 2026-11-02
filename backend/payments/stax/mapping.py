@@ -50,9 +50,9 @@ from payments.provider import (
     TransactionRecord,
     WebhookRecord,
 )
+from payments.redaction import BANK_NAME_MAX_LENGTH, payment_method_subset
 from payments.redaction import SENSITIVE_KEY as _SENSITIVE_KEY
 from payments.redaction import is_safe_text as _is_safe_text
-from payments.redaction import payment_method_subset
 
 _CENT = Decimal("0.01")
 
@@ -640,7 +640,7 @@ def schedule_record(data: object, fetched_at: datetime) -> ScheduleRecord:
 
 
 #: Longest bank type, nickname or bank name kept from a payment-method object.
-PAYMENT_METHOD_TEXT_MAX_LENGTH = 100
+PAYMENT_METHOD_TEXT_MAX_LENGTH = BANK_NAME_MAX_LENGTH
 _LAST_FOUR = re.compile(r"[0-9]{4}")
 
 
