@@ -55,7 +55,10 @@ JAN = date(2026, 1, 1)
 #: a margin; PLAN-012f-b §10 D20 moved the pin 80 → 81.
 #: PLAN-014 F5 moved it 81 → 83: the pending re-debits and the returns they cover (two fixed
 #: queries of the attention list; 83 measured on PostgreSQL).
-MAX_DASHBOARD_QUERIES = 83
+#: Owner 2026-11-01 (the mini calendar's "Next 7 days", Fable's review) moved it 83 -> 86: the
+#: promises, the one-off charges and the insurance charges of the month and the next seven days
+#: (three fixed queries; 84 measured on SQLite).
+MAX_DASHBOARD_QUERIES = 86
 
 
 @pytest.fixture

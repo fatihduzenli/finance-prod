@@ -301,7 +301,11 @@ def test_the_dashboard_shows_the_owners_two_broken_promises(today: date, role: R
     assert page.index(">Sena on store S1: owes $0.00, not kept</a>") < fifth
     assert ">Sena on store S5: owes $0.00, not kept</a>" in page
     assert "by Oct 7, 2026" not in page
-    assert page.count(f'href="/operators/{operator.pk}/#contacts"') == 2
+    # The two broken promises link to the operator's notes from Needs attention; the mini
+    # calendar's promise rows link there too, so count inside the attention section only.
+    start = page.index('id="attention"')
+    attention = page[start : page.index("</section>", start)]
+    assert attention.count(f'href="/operators/{operator.pk}/#contacts"') == 2
 
 
 def test_the_operator_page_shows_the_owners_broken_promises_as_banners(today: date) -> None:
