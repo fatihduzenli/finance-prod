@@ -104,6 +104,14 @@ PAGES: dict[str, Callable[[Site], str]] = {
     "outbox": lambda site: "/admin-settings/outbox/",
     # PLAN-014 I4: the Bank deposits page (billing): one deposit with a suggestion, one without.
     "bank-deposits": lambda site: "/admin-settings/bank-deposits/",
+    # Log contact (owner, 2026-11-01): the dialog over the store's Notes & follow-ups tab (no
+    # Store field) and over the operator page (the Store select).
+    "store-log-contact": lambda site: reverse(
+        "ledger:stores:contacts_add", kwargs={"pk": site.world.store.pk}
+    ),
+    "operator-log-contact": lambda site: reverse(
+        "ledger:operators:contacts_add", kwargs={"pk": site.world.operator.pk}
+    ),
 }
 
 

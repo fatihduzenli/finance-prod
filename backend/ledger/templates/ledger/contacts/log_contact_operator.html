@@ -1,0 +1,6 @@
+{% extends "ledger/operators/detail.html" %}
+{% load static %}
+{% block title %}Log contact{% endblock %}
+{% comment %}The Log contact dialog over the operator page (ledger:operators:contacts_add; ledger/contacts/_log_contact_dialog.html), with the Store select of the operator's leases.{% endcomment %}
+{% block dialog %}{% include "ledger/contacts/_log_contact_dialog.html" %}{% endblock %}
+{% block scripts %}{{ block.super }}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/log_contact.js' %}" defer></script>{% endblock %}
