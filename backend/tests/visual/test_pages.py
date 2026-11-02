@@ -1,7 +1,7 @@
 """The visual regression pages (docs/qa/PLAN-012c-design-pass.md D10, §3.7; the family pages
 of PLAN-012f-a Batch D): the main pages, the store workspace on each of its tabs, one page of
-each family (lists, detail, forms, the wizard, the calendar) and the sign-in page (seen signed
-out), at 1280 x 800 and 390 x 844, each a full-page PNG
+each family (lists, detail, forms, the wizard, the calendar), the sign-in page and the 401 page
+(seen signed out), at 1280 x 800 and 390 x 844, each a full-page PNG
 compared pixel by pixel with ``baseline/<page>-<width>.png``.
 
 A pixel differs when one of its channels moves by more than :data:`CHANNEL_THRESHOLD`; the
@@ -95,6 +95,8 @@ PAGES: dict[str, Callable[[Site], str]] = {
         "ledger:operators:edit", kwargs={"pk": site.world.operator.pk}
     ),
     "login": lambda site: "/account/login/",
+    # The 401 page on the sign-in frame (owner, 2026-11-01): any staff URL, signed out.
+    "sign-in-required": lambda site: "/stores/",
     # PLAN-014 B2: Admin › Settings (the Brands card), admins only.
     "settings": lambda site: "/admin-settings/",
     # PLAN-014 G1: the Aging report by store (billing), with its filters and buckets.
@@ -146,10 +148,11 @@ AS_ADMIN = {
     "message-templates",
     "outbox",
 }
-#: Seen signed out, in a context of its own (the sign-in page, PLAN-012f-a D9).
-SIGNED_OUT = {"login"}
-#: Pages that answer something other than 200 by design (PLAN-012f-b Batch E: the not-found page).
-STATUS: dict[str, int] = {"not-found": 404}
+#: Seen signed out, in a context of its own (the sign-in page, PLAN-012f-a D9; the 401 page).
+SIGNED_OUT = {"login", "sign-in-required"}
+#: Pages that answer something other than 200 by design (PLAN-012f-b Batch E: the not-found page;
+#: the 401 page).
+STATUS: dict[str, int] = {"not-found": 404, "sign-in-required": 401}
 
 
 def differing_pixels(actual: Image.Image, expected: Image.Image) -> Image.Image:

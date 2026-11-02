@@ -25,7 +25,7 @@ from ledger.services import lease_end
 from payments.fake import FakeProvider
 from tests.test_operator_views import client_for
 from tests.visual import world as visual_world
-from tests.visual.test_pages import AS_ADMIN, PAGES, SIGNED_OUT
+from tests.visual.test_pages import AS_ADMIN, PAGES, SIGNED_OUT, STATUS
 
 pytestmark = pytest.mark.django_db
 
@@ -70,7 +70,7 @@ def test_a_get_and_a_head_of_every_page_in_the_suite_write_nothing(
         for method in (client.get, client.head):
             response = method(path)
             # The not-found page (PLAN-012f-b Batch E) answers 404 by design; still a read.
-            expected = 404 if name == "not-found" else 200
+            expected = STATUS.get(name, 200)  # the not-found page 404, sign-in-required 401
             assert response.status_code == expected, (name, method.__name__, response.status_code)
     assert row_counts() == before
     assert AuditLog.objects.count() == audit_before

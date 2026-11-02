@@ -1,0 +1,3 @@
+{% load icons %}{% comment %}The top of the right panel on the sign-in frame (two_factor/_base.html): the icon in a teal-tinted square (decoration), the page's one heading and the muted sub-line. Takes icon (an icons.py name), heading, heading_id (default "auth-heading"; the sign-in page keeps "sign-in-heading") and sub (left out when the page writes its own, as the sign-in page does per step).{% endcomment %}<span class="auth-lock" aria-hidden="true">{% icon icon 20 %}</span>
+<h1 id="{{ heading_id|default:'auth-heading' }}">{{ heading }}</h1>
+{% if sub %}<p class="auth-sub" id="auth-sub">{{ sub }}</p>{% endif %}

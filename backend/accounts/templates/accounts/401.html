@@ -2,10 +2,11 @@
 {% comment %}
 Rendered with status 401 by accounts.middleware.AuthRequiredMiddleware. No redirect.
 "next" is a same-site path or absent (accounts.views._relative_next).
+The sign-in page's right panel: the lock, the heading, the sentence as the sub-line and the
+full-width primary button.
 {% endcomment %}
 {% block title %}Sign in required{% endblock %}
 {% block content %}
-  <h1>Sign in required</h1>
-  <p>You need to sign in, with your password and your authenticator code, to see this page.</p>
-  <p><a class="btn btn-primary" id="sign-in-link" href="{% url 'two_factor:login' %}{% if next %}?next={{ next|urlencode:'' }}{% endif %}">Sign in</a></p>
+  {% include "two_factor/_auth_head.html" with icon="lock" heading="Sign in required" sub="You need to sign in, with your password and your authenticator code, to see this page." %}
+  <div class="auth-actions"><a class="btn btn-primary" id="sign-in-link" href="{% url 'two_factor:login' %}{% if next %}?next={{ next|urlencode:'' }}{% endif %}">Sign in</a></div>
 {% endblock %}
