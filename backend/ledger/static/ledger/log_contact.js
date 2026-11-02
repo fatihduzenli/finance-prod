@@ -6,6 +6,7 @@
 //   suggestion the user has not edited;
 // - the supersede warning (#supersede-warnings, by lease) shows for a promise only;
 // - a chosen outcome chip is cleared by a second click (a call may have none);
+// - the Note's " *" shows for a visit and a call without an outcome (the server's rule);
 // - "Rescheduled" on the open promise chooses Promise to pay and fills the promise's date
 //   and amount from the old promise (#promise-values).
 // Without the script every field shows and the server checks every rule.
@@ -28,6 +29,7 @@
   var lease = form.querySelector("[name=lease]");
   var warning = document.getElementById("promise-supersede");
   var suggested = "";
+  var noteMark = document.getElementById("log-note-required");
 
   function kind() {
     var chosen = form.querySelector("input[name=kind]:checked");
@@ -53,6 +55,11 @@
     warning.textContent = text;
     warning.hidden = !text;
   }
+  function markNote() {
+    if (!noteMark) { return; }
+    var chip = form.querySelector("input[name=call_outcome]:checked");
+    noteMark.hidden = !(kind() === "visit" || (kind() === "call" && !chip));
+  }
   function choose(value) {
     var radio = form.querySelector("input[name=kind][value=" + value + "]");
     if (!radio || radio.checked) { return; }
@@ -62,7 +69,7 @@
 
   if (date) { date.addEventListener("input", showDay); date.addEventListener("change", showDay); }
   form.querySelectorAll("input[name=kind]").forEach(function (radio) {
-    radio.addEventListener("change", function () { suggest(); showWarning(); });
+    radio.addEventListener("change", function () { suggest(); showWarning(); markNote(); });
   });
   if (lease) { lease.addEventListener("change", function () { suggest(); showWarning(); }); }
   form.querySelectorAll("input[name=call_outcome]").forEach(function (radio) {
@@ -73,7 +80,9 @@
     radio.addEventListener("click", function () {
       if (was) { radio.checked = false; radio.dispatchEvent(new Event("change", { bubbles: true })); }
       was = false;
+      markNote();
     });
+    radio.addEventListener("change", markNote);
   });
   form.querySelectorAll("input[name=outcome]").forEach(function (radio) {
     radio.addEventListener("change", function () {
@@ -90,4 +99,5 @@
   });
   showDay();
   showWarning();
+  markNote();
 })();

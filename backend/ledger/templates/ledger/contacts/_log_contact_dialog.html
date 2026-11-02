@@ -1,4 +1,4 @@
-{% comment %}The "Log contact" dialog (owner, 2026-11-01; ledger.views.contacts._add): the {% dialog %} frame at 440 px, a sheet at the bottom of a phone's screen, over the page it was opened from (log_contact_store.html: the store page's Notes & follow-ups tab; log_contact_operator.html: the operator page). The form ("log_form", ledger.forms.ContactEntryForm, ids "log-…"): the operator page's Store select (hidden from the store page, which shows "log_about", the operator and the store, instead); Kind as four radio cards in a fieldset (Call · E-mail · Visit · Promise to pay, each a label with its icon); a call's outcome chips (Answered, No answer, Left a message, Wrong number: radios, optional; with one the note may stay empty); the Date with the day as the page reads it ("log_day", kept by ledger/log_contact.js); a promise's date and amount (the amount filled from "promise_amounts", the open balance, when Promise to pay is chosen) and the supersede warning; the open promise's outcome when there is one; the Note ("What was said, what happens next"); the one help line; Cancel and Save. The chips and the promise fields carry data-shown-when (ledger/shown_when.js): shown, and sent, only for their kind; without the script every field shows and the server checks every rule.{% endcomment %}{% load components icons %}{% dialog id="log-contact-dialog" title="Log contact" size="sm" open=True return_url=log_back_url %}
+{% comment %}The "Log contact" dialog (owner, 2026-11-01; ledger.views.contacts._add): the {% dialog %} frame at 440 px, a sheet at the bottom of a phone's screen, over the page it was opened from (log_contact_store.html: the store page's Notes & follow-ups tab; log_contact_operator.html: the operator page). The form ("log_form", ledger.forms.ContactEntryForm, ids "log-…"): the operator page's Store select (hidden from the store page, which shows "log_about", the operator and the store, instead); Kind as four radio cards in a fieldset (Call · E-mail · Visit · Promise to pay, each a label with its icon); a call's outcome chips (Answered, No answer, Left a message, Wrong number: radios, optional; with one the note may stay empty); the Date with the day as the page reads it ("log_day", kept by ledger/log_contact.js); a promise's date and amount (the amount filled from "promise_amounts", the open balance, when Promise to pay is chosen) and the supersede warning; the open promise's outcome when there is one; the Note ("What was said, what happens next"; its " *" shown for a visit and for a call without an outcome, the kinds that need one: an e-mail's note starts "E-mail sent." and a promise's "Promised $… by …" when left empty); the one help line; Cancel and Save. The chips and the promise fields carry data-shown-when (ledger/shown_when.js): shown, and sent, only for their kind; without the script every field shows and the server checks every rule.{% endcomment %}{% load components icons %}{% dialog id="log-contact-dialog" title="Log contact" size="sm" open=True return_url=log_back_url %}
 <form method="post" action="{{ log_action }}" id="contact-form" class="js-single-submit dialog-form log-contact-form" autocomplete="off">
   {% csrf_token %}
   {% if log_about %}<p class="muted" id="log-contact-about">{{ log_about }}</p>{% endif %}
@@ -23,11 +23,15 @@
   </div>
   <div class="log-contact-promise">
     <p class="muted" id="promise-supersede"{% if not supersede_warning %} hidden{% endif %}>{{ supersede_warning }}</p>
-    {% include "ledger/stores/_form_field.html" with field=log_form.promised_date label="Promised date" hide_help=True %}
-    {% include "ledger/stores/_form_field.html" with field=log_form.promised_amount label="Amount (USD)" hide_help=True %}
+    {% include "ledger/stores/_form_field.html" with field=log_form.promised_date label="Promised date" hide_help=True mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=log_form.promised_amount label="Amount (USD)" hide_help=True mark=True %}
   </div>
   {% if log_form.previous %}{% include "ledger/stores/_form_field.html" with field=log_form.previous %}{% include "ledger/stores/_form_field.html" with field=log_form.outcome %}{% endif %}
-  {% include "ledger/stores/_form_field.html" with field=log_form.body %}
+  <div class="field{% if log_form.body.errors %} has-error{% endif %}">
+    <label for="{{ log_form.body.id_for_label }}">Note<span id="log-note-required"{% if not log_form.note_required %} hidden{% endif %}> <span class="required">*<span class="visually-hidden"> required</span></span></span></label>
+    {{ log_form.body }}
+    {{ log_form.body.errors }}
+  </div>
   <p class="muted log-contact-help" id="log-contact-help">Never write card or account numbers.</p>
   <div class="dialog-foot"><a class="btn" id="cancel-contact" href="{{ log_back_url }}">Cancel</a><button class="btn btn-primary" type="submit" id="save-contact">Save</button></div>
 </form>

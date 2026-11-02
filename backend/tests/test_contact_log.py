@@ -971,7 +971,8 @@ def test_rescheduled_needs_a_promise_preselected_from_the_old_one(today: date) -
             body="Half on the 20th.",
         ),
     )
-    newer = ContactEntry.objects.get(body="Half on the 20th.")
+    # Log contact (2026-11-01): a promise's note starts with its amount and date.
+    newer = ContactEntry.objects.get(body="Promised $350.00 by Oct 20, 2026. Half on the 20th.")
     assert (newer.promised_date, newer.promised_amount) == (date(2026, 10, 20), D("350.00"))
     new.refresh_from_db()
     assert new.status == ContactStatus.RESCHEDULED
@@ -1369,7 +1370,8 @@ def test_a_new_promise_closes_the_open_promise_of_its_lease_as_rescheduled(today
         ),
     )
     assert response.status_code == 302
-    new = ContactEntry.objects.get(body="New date.")
+    # Log contact (2026-11-01): a promise's note starts with its amount and date.
+    new = ContactEntry.objects.get(body="Promised $500.00 by Oct 20, 2026. New date.")
     old.refresh_from_db()
     assert (old.status, old.closed_by) == (ContactStatus.RESCHEDULED, new)
     message = (

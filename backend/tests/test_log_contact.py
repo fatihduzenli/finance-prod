@@ -246,18 +246,29 @@ def test_a_call_without_an_outcome_or_a_note_is_refused(today: date) -> None:
     assert not ContactEntry.objects.exists()
 
 
-@pytest.mark.parametrize("kind", [ContactKind.VISIT, ContactKind.EMAIL])
-def test_a_visit_or_an_email_without_a_note_is_refused_even_with_a_chip(
-    today: date, kind: str
-) -> None:
+def test_a_visit_without_a_note_is_refused_even_with_a_chip(today: date) -> None:
     store, lease = world()
     client, _ = client_for(Role.BILLING)
     response = client.post(
-        store_url(store), post(kind=kind, call_outcome="answered", lease=str(lease.pk))
+        store_url(store), post(kind="visit", call_outcome="answered", lease=str(lease.pk))
     )
     assert response.status_code == 200
     assert escape(contacts.BODY_REQUIRED) in dialog_of(response.content.decode())
     assert not ContactEntry.objects.exists()
+
+
+@pytest.mark.parametrize(
+    ("note", "body"), [("", "E-mail sent."), ("Sent the October statement.", None)]
+)
+def test_an_email_is_saved_without_a_note_with_its_sentence(
+    today: date, note: str, body: str | None
+) -> None:
+    store, lease = world()
+    client, _ = client_for(Role.BILLING)
+    response = client.post(store_url(store), post(kind="email", body=note, lease=str(lease.pk)))
+    assert response.status_code == 302
+    entry = ContactEntry.objects.get()
+    assert (entry.kind, entry.body) == (ContactKind.EMAIL, body or f"E-mail sent. {note}")
 
 
 def test_an_outcome_chip_is_read_for_a_call_only(today: date) -> None:
@@ -285,34 +296,75 @@ def test_an_unknown_outcome_is_refused_and_not_echoed(today: date, value: str) -
     assert not ContactEntry.objects.exists()
 
 
-def test_a_promise_needs_its_date_and_amount_and_keeps_the_note_rule(today: date) -> None:
+def test_a_promise_needs_its_date_and_amount_but_no_note(today: date) -> None:
     store, lease = world()
     client, _ = client_for(Role.BILLING)
-    base = post(kind="promise", lease=str(lease.pk), body="Will pay.")
+    base = post(kind="promise", lease=str(lease.pk))
     for missing in (
-        {"promised_date": "", "promised_amount": "500.00"},
-        {"promised_date": "2026-11-06", "promised_amount": ""},
+        {"promised_date": "", "promised_amount": "3500.00"},
+        {"promised_date": "2026-11-04", "promised_amount": ""},
+        {"promised_date": "", "promised_amount": ""},
     ):
         response = client.post(store_url(store), {**base, **missing})
         assert response.status_code == 200
-        assert escape(contacts.PROMISE_FIELDS_REQUIRED) in response.content.decode()
-    response = client.post(
-        store_url(store),
-        {**base, "body": "", "promised_date": "2026-11-06", "promised_amount": "500.00"},
-    )
-    assert response.status_code == 200
-    assert escape(contacts.BODY_REQUIRED) in response.content.decode()
+        dialog = dialog_of(response.content.decode())
+        assert escape(contacts.PROMISE_FIELDS_REQUIRED) in dialog
+        assert escape(contacts.BODY_REQUIRED) not in dialog
     assert not ContactEntry.objects.exists()
     response = client.post(
-        store_url(store), {**base, "promised_date": "2026-11-06", "promised_amount": "500.00"}
+        store_url(store), {**base, "promised_date": "2026-11-04", "promised_amount": "3500.00"}
     )
     assert response.status_code == 302
     entry = ContactEntry.objects.get()
-    assert (entry.kind, str(entry.promised_amount), entry.promised_date) == (
+    assert (entry.kind, str(entry.promised_amount), entry.promised_date, entry.body) == (
         ContactKind.PROMISE,
-        "500.00",
-        date(2026, 11, 6),
+        "3500.00",
+        date(2026, 11, 4),
+        "Promised $3,500.00 by Nov 4, 2026.",
     )
+    response = client.post(
+        store_url(store),
+        {
+            **base,
+            "body": "Owner calls back.",
+            "promised_date": "2026-11-06",
+            "promised_amount": "5",
+            # The operator now has an open promise: the dialog asks what happened to it.
+            "previous": str(entry.pk),
+            "outcome": "open",
+        },
+    )
+    assert response.status_code == 302
+    newest = ContactEntry.objects.order_by("-created_at").first()
+    assert newest is not None
+    assert newest.body == "Promised $5.00 by Nov 6, 2026. Owner calls back."
+
+
+def test_the_notes_marker_follows_the_kind(today: date) -> None:
+    store, lease = world()
+    client, _ = client_for(Role.BILLING)
+    marker = '<span id="log-note-required" hidden>'
+    shown = '<span id="log-note-required"> <span class="required">'
+    # Call without an outcome (the default): required.
+    assert shown in dialog_of(page_of(client, store_url(store)))
+    refused = {
+        "visit": post(kind="visit", lease=str(lease.pk)),
+        "call": post(lease=str(lease.pk)),
+        "email": post(kind="email", promised_amount="5", lease=str(lease.pk)),
+        "promise": post(kind="promise", lease=str(lease.pk)),
+        "call-chip": post(call_outcome="answered", promised_amount="5", lease=str(lease.pk)),
+    }
+    expected = {"visit": shown, "call": shown, "email": marker, "promise": marker}
+    expected["call-chip"] = marker
+    for name, data in refused.items():
+        response = client.post(store_url(store), data)
+        assert response.status_code == 200, name
+        assert expected[name] in dialog_of(response.content.decode()), name
+    # The promise fields always carry their marker (they are shown only for a promise).
+    dialog = dialog_of(page_of(client, store_url(store)))
+    for label in ("Promised date", "Amount (USD)"):
+        assert re.search(rf'>{re.escape(label)} <span class="required">\*', dialog), label
+    assert not ContactEntry.objects.exists()
 
 
 def test_promise_fields_on_another_kind_are_still_refused(today: date) -> None:
