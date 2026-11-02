@@ -104,7 +104,17 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     # PLAN-014 H2: the portal's invitation and reset ("portal").
     "MessageKind": ["final_statement", "ladder", "portal"],
     # PLAN-014 D2: held in the Outbox; D3: the message's channel, rule and held reason.
-    "MessageStatus": ["catch_all", "failed", "held", "queued", "sent", "suppressed"],
+    # "combined" and "waiting" added for one e-mail per lease and day (owner, 2026-11-02).
+    "MessageStatus": [
+        "catch_all",
+        "combined",
+        "failed",
+        "held",
+        "queued",
+        "sent",
+        "suppressed",
+        "waiting",
+    ],
     "MessageChannel": ["email", "sms"],
     "MessageRule": [
         "A",

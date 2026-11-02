@@ -1881,6 +1881,14 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_outbound_message(status="held", held_reason="sandbox"),
         lambda: new_outbound_message(status="held", held_reason=""),
     ),
+    # Owner, 2026-11-02 (ledger 0068): a combined row names the message sent for it.
+    ConstraintCase(
+        "outbound_messages_combined_has_message",
+        lambda: new_outbound_message(
+            status="combined", combined_into=saved(new_outbound_message())
+        ),
+        lambda: new_outbound_message(status="combined", combined_into=None),
+    ),
     # PLAN-012e D8, PLAN-014 D3: kinds of outbound messages and their rules.
     ConstraintCase(
         "outbound_messages_kind_matches_rule",

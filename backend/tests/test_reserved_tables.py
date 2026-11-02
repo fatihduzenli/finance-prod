@@ -102,6 +102,8 @@ def test_columns_are_as_listed() -> None:
         "scheduled_for",
         # PLAN-014 E4: the month of a message about a lease month.
         "period_month",
+        # Owner, 2026-11-02 (ledger 0068): the message a combined row is listed in.
+        "combined_into_id",
     }
 
 

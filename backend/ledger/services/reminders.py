@@ -72,6 +72,19 @@ closed before the send is suppressed, as is a lease month whose lease ended, who
 its schedule, or whose rent charge closed since (``LeaseEnded``, ``ScheduleStopped``,
 ``MonthSettled``).
 
+**One e-mail per lease and day, and the 3-day fold** (owner, 2026-11-02). The rows are queued
+as above, one per charge, rule and occurrence, but the operator's rules A to D of one lease and
+day are then sent as one message (:func:`messaging.combine`): the most urgent
+(:data:`COMBINED_RULES`, D > C > B > A) lists every charge, the others are combined into it. E
+goes to the managers and stays on its own; F follows a return and is not this job's. An overdue
+row (C or D, :data:`OVERDUE_RULES`) for a lease whose last overdue message went less than
+:data:`FOLD_DAYS` days before (:func:`last_overdue`: queued, sent or held, counted on the day it
+goes, not a row combined into another) waits instead (:func:`fold`,
+:func:`messaging.wait_for_fold`) and goes on the first day after them, combined with what is due
+that day, or on its own when nothing is; a charge closed meanwhile drops out
+(:func:`messaging.release`). B and A never wait. The Outbox's preview applies the same
+:func:`fold` day by day.
+
 **No fee** (E3). Nothing here creates a charge or a fee, and no rule's text speaks of one.
 """
 
@@ -79,14 +92,16 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
+from django.db.models.functions import Coalesce
 
+from finance.dates import NEW_YORK
 from ledger import merge
 from ledger.models import (
     ChargeEntityType,
@@ -96,6 +111,7 @@ from ledger.models import (
     Lease,
     LeaseBilling,
     MessageRule,
+    MessageStatus,
     MessageTemplate,
     OneOffCharge,
     Operator,
@@ -142,6 +158,16 @@ DAY_E = 30
 #: D again from this day, every :data:`D_EVERY` days.
 D_AGAIN_FROM = 40
 D_EVERY = 10
+
+#: The operator's rules sent as one message per lease and day, most urgent first: the first
+#: present gives the message its template and subject (owner, 2026-11-02).
+COMBINED_RULES: tuple[str, ...] = (MessageRule.D, MessageRule.C, MessageRule.B, MessageRule.A)
+#: The overdue rules: at most one message of them per lease every :data:`FOLD_DAYS` days.
+OVERDUE_RULES: frozenset[str] = frozenset({MessageRule.C, MessageRule.D})
+FOLD_DAYS = 3
+#: The statuses of an overdue message that counts as given to the lease (it went, will go,
+#: or waits in the Outbox for a setting).
+GIVEN: tuple[str, ...] = (MessageStatus.QUEUED, MessageStatus.SENT, MessageStatus.HELD)
 
 
 @dataclass(frozen=True, slots=True)
@@ -537,12 +563,91 @@ def _with_queued_and_emails(items: list[Planned]) -> list[Planned]:
     return found
 
 
+# --- One e-mail per lease and day, and the 3-day fold (owner, 2026-11-02) ----------------------
+
+
+def urgency(rule: str) -> int:
+    """The rank of ``rule`` in :data:`COMBINED_RULES` (0 the most urgent)."""
+    return COMBINED_RULES.index(rule)
+
+
+def fold_until(last: date | None, today: date) -> date | None:
+    """The day an overdue message due ``today`` may go, when the lease's last overdue one was
+    queued on ``last`` less than :data:`FOLD_DAYS` days before; ``None`` when it may go
+    today."""
+    if last is None or not 0 <= (today - last).days < FOLD_DAYS:
+        return None
+    return last + timedelta(days=FOLD_DAYS)
+
+
+def fold[T](
+    items: Sequence[T], rule_of: Callable[[T], str], last: date | None, today: date
+) -> tuple[list[T], list[T], date | None]:
+    """Split one lease's ``items`` of ``today`` by the fold (:func:`fold_until` of ``last``,
+    the day of its last overdue message): what goes today, most urgent first; what waits;
+    and the day the fold ends (``None`` when it does not hold today: nothing waits, and the
+    messages waiting from before go today)."""
+    until = fold_until(last, today)
+    going: list[T] = []
+    held: list[T] = []
+    for item in items:
+        (held if until is not None and rule_of(item) in OVERDUE_RULES else going).append(item)
+    going.sort(key=lambda item: urgency(rule_of(item)))
+    return going, held, until
+
+
+def _start_of(day: date) -> datetime:
+    return datetime.combine(day, time(0), tzinfo=NEW_YORK)
+
+
+def last_overdue(
+    today: date, lease_ids: Iterable[uuid.UUID] | None = None
+) -> dict[uuid.UUID, date]:
+    """Lease -> the New York day its last overdue message (C or D, :data:`GIVEN`, not
+    combined into another) goes, its send window's day (``scheduled_for``; a waiting message
+    sent later is counted on the day it went), in the :data:`FOLD_DAYS` days up to ``today``;
+    only ``lease_ids`` when given (one query)."""
+    found = (
+        OutboundMessage.objects.filter(
+            rule__in=OVERDUE_RULES, status__in=GIVEN, manual=False, lease__isnull=False
+        )
+        .annotate(goes=Coalesce("scheduled_for", "queued_at"))
+        .filter(
+            goes__gte=_start_of(today - timedelta(days=FOLD_DAYS - 1)),
+            goes__lt=_start_of(today + timedelta(days=1)),
+        )
+    )
+    if lease_ids is not None:
+        found = found.filter(lease_id__in=list(lease_ids))
+    days: dict[uuid.UUID, date] = {}
+    for lease_id, goes in found.values_list("lease_id", "goes"):
+        day = goes.astimezone(NEW_YORK).date()
+        if lease_id is not None and day > days.get(lease_id, date.min):
+            days[lease_id] = day
+    return days
+
+
+def waiting(today: date | None = None, lease_id: uuid.UUID | None = None) -> list[OutboundMessage]:
+    """The messages waiting for the fold, oldest first: only those whose day is ``today`` or
+    before when given, of the lease ``lease_id`` when given."""
+    found = OutboundMessage.objects.filter(status=MessageStatus.WAITING).select_related(
+        "lease__store", "operator", "template"
+    )
+    if today is not None:
+        found = found.filter(scheduled_for__lt=_start_of(today + timedelta(days=1)))
+    if lease_id is not None:
+        found = found.filter(lease_id=lease_id)
+    return list(found.order_by(Coalesce("scheduled_for", "queued_at"), "queued_at", "id"))
+
+
 def queue_due(today: date) -> Summary:
     """Queue the message of every item :func:`plan` would queue today (the module
-    docstring): one row and its ``message_send`` job each; the paused counted paused, the
-    rest skipped."""
+    docstring): one row each, then per lease one ``message_send`` job for the operator's
+    rules (:func:`_send_lease`) and one each for E; the paused counted paused, the rest
+    skipped."""
     queued = dict.fromkeys(RULES, 0)
     paused = skipped = 0
+    by_lease: dict[uuid.UUID, list[Planned]] = {}
     for item in plan(today):
         if item.outcome == PAUSED:
             paused += 1
@@ -550,17 +655,74 @@ def queue_due(today: date) -> Summary:
         if not item.queues or item.lease is None or item.template is None:
             skipped += 1
             continue
-        if isinstance(item.subject, RentMonth):
-            done = _queue_month(item.subject, item.rule, item.template, today)
-        elif item.subject is not None and item.row is not None:
-            done = _queue(item.lease, item.subject, item.rule, item.template, item.row, today)
-        else:  # never planned so: a charge to queue has its row
-            done = False
-        if done:
+        if item.rule.code in COMBINED_RULES:
+            by_lease.setdefault(item.lease.pk, []).append(item)
+            continue
+        if _queue_item(item, today, job=True) is not None:
             queued[item.rule.code] += 1
         else:
             skipped += 1
+    released: dict[uuid.UUID, Lease] = {}
+    for message in waiting(today):
+        if message.lease is not None and message.lease.pk not in by_lease:
+            released.setdefault(message.lease.pk, message.lease)
+    for lease_id in [*by_lease, *released]:
+        items = by_lease.get(lease_id, [])
+        lease = items[0].lease if items else released[lease_id]
+        if lease is None:  # never so: a planned item to queue has its lease
+            continue
+        done = _send_lease(lease, items, today)
+        for item in items:
+            if _row_key(item) in done:
+                queued[item.rule.code] += 1
+            else:
+                skipped += 1
     return Summary(queued, paused, skipped)
+
+
+def _send_lease(lease: Lease, items: list[Planned], today: date) -> set[tuple[object, ...]]:
+    """Under the lease's row lock: queue ``items`` without their jobs, then send them, and the
+    lease's waiting messages once their day has come, as one message (the module docstring);
+    the :func:`_row_key` of each item queued."""
+    with transaction.atomic():
+        Lease.objects.select_for_update(of=("self",)).filter(pk=lease.pk).first()
+        last = last_overdue(today, [lease.pk]).get(lease.pk)
+        new: list[tuple[OutboundMessage, messaging.ChargeLine]] = []
+        done: set[tuple[object, ...]] = set()
+        for item in items:
+            message = _queue_item(item, today, job=False)
+            key = _row_key(item)
+            if message is None or item.subject is None or key is None:
+                continue
+            done.add(key)
+            if message.status == MessageStatus.QUEUED:
+                new.append((message, messaging.line_for(item.subject, item.amount, today)))
+        going, held, until = fold(new, lambda pair: pair[0].rule, last, today)
+        if until is not None:
+            messaging.wait_for_fold((message for message, _ in held), until)
+        else:
+            released = messaging.release(waiting(lease_id=lease.pk))
+            charges = messaging.charges_of(released)
+            for message in released:
+                charge = charges.get(message.pk)
+                if charge is not None:
+                    line = messaging.line_for(charge, messaging.balance_of(charge), today)
+                    going.append((message, line))
+            going.sort(key=lambda pair: urgency(pair[0].rule))
+        if going:
+            messaging.combine(going)
+    return done
+
+
+def _queue_item(item: Planned, today: date, *, job: bool) -> OutboundMessage | None:
+    """Queue one planned item's row (with its job when ``job``); ``None`` when it was not."""
+    if item.lease is None or item.template is None:
+        return None
+    if isinstance(item.subject, RentMonth):
+        return _queue_month(item.subject, item.rule, item.template, today, job=job)
+    if item.subject is not None and item.row is not None:
+        return _queue(item.lease, item.subject, item.rule, item.template, item.row, today, job=job)
+    return None  # never planned so: a charge to queue has its row
 
 
 def _queue(
@@ -570,8 +732,10 @@ def _queue(
     template: MessageTemplate,
     row: receivables.OpenBalance,
     today: date,
-) -> bool:
-    """Queue one rule's message under the lease's row lock; ``False`` when the row exists
+    *,
+    job: bool = True,
+) -> OutboundMessage | None:
+    """Queue one rule's message under the lease's row lock; ``None`` when the row exists
     already, or when the template cannot be rendered or sent (logged, by class name)."""
     with transaction.atomic():
         Lease.objects.select_for_update(of=("self",)).filter(pk=lease.pk).first()
@@ -584,8 +748,8 @@ def _queue(
             amount=row.balance,
         )
         try:
-            message = messaging.queue(
-                rule.code, lease, charge, template, context, occurrence=rule.occurrence
+            return messaging.queue(
+                rule.code, lease, charge, template, context, occurrence=rule.occurrence, job=job
             )
         except (messaging.ChannelUnavailable, merge.TemplateRefused) as error:
             logger.warning(
@@ -594,22 +758,28 @@ def _queue(
                 row.charge_id,
                 type(error).__name__,
             )
-            return False
-    return message is not None
+            return None
 
 
-def _queue_month(rent_month: RentMonth, rule: Rule, template: MessageTemplate, today: date) -> bool:
-    """Queue a lease month's A or B under the lease's row lock; ``False`` when the month's
+def _queue_month(
+    rent_month: RentMonth,
+    rule: Rule,
+    template: MessageTemplate,
+    today: date,
+    *,
+    job: bool = True,
+) -> OutboundMessage | None:
+    """Queue a lease month's A or B under the lease's row lock; ``None`` when the month's
     rent charge is settled already, the row exists already, or the template cannot be
     rendered or sent (logged, by class name)."""
     lease = rent_month.lease
     with transaction.atomic():
         Lease.objects.select_for_update(of=("self",)).filter(pk=lease.pk).first()
         if messaging.month_settled(lease.pk, rent_month.month):
-            return False
+            return None
         context = messaging.context_for(lease, rent_month, rule.code, today=today)
         try:
-            message = messaging.queue(rule.code, lease, rent_month, template, context)
+            return messaging.queue(rule.code, lease, rent_month, template, context, job=job)
         except (messaging.ChannelUnavailable, merge.TemplateRefused) as error:
             logger.warning(
                 "Reminder %s not queued for lease %s: %s",
@@ -617,5 +787,4 @@ def _queue_month(rent_month: RentMonth, rule: Rule, template: MessageTemplate, t
                 lease.pk,
                 type(error).__name__,
             )
-            return False
-    return message is not None
+            return None

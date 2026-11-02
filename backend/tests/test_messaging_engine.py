@@ -100,8 +100,14 @@ def plan_templates() -> dict[str, tuple[str, str]]:
 def test_the_seven_seeded_templates_equal_plan_section_9_byte_for_byte() -> None:
     expected = plan_templates()
     assert len(expected) == 7
+    # Re-pinned for the ended-lease wording (Opus, owner 2026-11-02): ledger 0068 puts
+    # {lease_line} in place of D's seeded sentence; 0061 still seeds plan §9's text.
+    sentence = "Continued non-payment may affect your lease."
     for code, (subject, body) in expected.items():
         row = MessageTemplate.objects.get(code=code)
+        if code == "overdue_day10":
+            assert sentence in body
+            body = body.replace(sentence, "{lease_line}")
         assert row.subject.encode("utf-8") == subject.encode("utf-8"), code
         assert row.body.encode("utf-8") == body.encode("utf-8"), code
         assert (row.active, row.channel) == (True, MessageChannel.EMAIL)
@@ -143,6 +149,8 @@ def test_the_fifteen_placeholders_of_a_rent_charge(clock: Any) -> None:
         "store_link": f"http://localhost:8000/stores/{lease.store_id}/",
         "support_email": "help@example.com",
         "company_name": "Monvera",
+        # Re-pinned (Opus, owner 2026-11-02): the sixteenth, a current lease's line.
+        "lease_line": "Continued non-payment may affect your lease.",
     }
 
 

@@ -60,6 +60,25 @@ why the message is no longer to go (the account disabled, already activated, gon
 message is then suppressed. An operator handled personally does not hold a portal message:
 that switch is about the collection e-mails.
 
+**One e-mail per lease and day** (owner, 2026-11-02). The daily job queues each rule's row as
+before (one per charge, rule and occurrence: the idempotency is unchanged) but without its job
+(``queue(..., job=False)``), then :func:`combine` sends one of them for all: the first it is
+given, the most urgent (:mod:`ledger.services.reminders` orders D > C > B > A). When there is
+more than one, that message's body gains the list of every charge (:func:`charges_text`:
+charge · amount · due date · days late, and the total) under its template's text, its subject
+stays its template's, and the others become ``combined`` into it (``combined_into``), audited
+``message.combined``, never sent on their own. An overdue row held back by the 3-day fold is
+``waiting`` (:func:`wait_for_fold`, audited ``message.waiting``) until the morning of its day
+(``scheduled_for``), with no job; on that day :func:`release` drops the ones whose charge
+closed since (``suppressed``, as at a send) and the rest go with that day's :func:`combine`. A
+combined message is suppressed only once every charge it lists is closed; the window, the
+holds, the allowlist and *Send now* apply to it as to any message, and the Outbox shows its
+outcome on the rows combined into it (:func:`status_text`).
+
+**D for an ended lease.** ``{lease_line}`` (:func:`lease_line`) reads "Continued non-payment may
+affect your lease." while the charge's lease is current and "Please contact us to settle this
+balance." once it has ended (its status ended, or its end date today or before).
+
 **By hand.** :func:`send_by_hand` (billing, the charge page's "Send a message now") queues a
 ``manual`` row of an active, not internal template for an open charge, through the same
 queue and window. :func:`send_now` (admin, the Outbox) sends a held message again, only once
@@ -206,6 +225,18 @@ WINDOW_CLOSES = time(18, 0)
 
 #: A placeholder with no value for this message (an empty last four reads so).
 NO_VALUE = "—"
+
+#: ``{lease_line}`` (owner, 2026-11-02): a current lease, and a lease that has ended.
+LEASE_LINE_CURRENT = "Continued non-payment may affect your lease."
+LEASE_LINE_ENDED = "Please contact us to settle this balance."
+
+#: The list under a combined message's text (owner, 2026-11-02).
+CHARGES_HEADING = "Charges ({count}): charge · amount · due date · days late"
+CHARGE_LINE = "- {name} · {amount} · {due} · {days_late}"
+CHARGES_TOTAL = "Total: {amount}"
+#: How the Outbox reads a row combined into another, and one waiting for the fold.
+COMBINED_TEXT = "Combined into the {rule} message: {outcome}"
+WAITING_TEXT = "{label} (until {day})"
 
 
 class ChannelUnavailable(Exception):  # noqa: N818 - reads as the outcome (D8)
@@ -449,6 +480,20 @@ def store_link(lease: Lease) -> str:
     return f"{str(settings.APP_BASE_URL).rstrip('/')}{path}"
 
 
+def lease_ended(lease: Lease, today: date) -> bool:
+    """Whether ``lease`` has ended by ``today``: its status ended, or its end date today or
+    before."""
+    if lease.collection_status == CollectionStatus.ENDED:
+        return True
+    return lease.ended_on is not None and lease.ended_on <= today
+
+
+def lease_line(lease: Lease, today: date) -> str:
+    """``{lease_line}``: :data:`LEASE_LINE_ENDED` once ``lease`` has ended, else
+    :data:`LEASE_LINE_CURRENT`."""
+    return LEASE_LINE_ENDED if lease_ended(lease, today) else LEASE_LINE_CURRENT
+
+
 def context_for(
     lease: Lease,
     charge: Subject,
@@ -462,10 +507,11 @@ def context_for(
     return_reason: str = "",
     company: CompanySettings | None = None,
 ) -> dict[str, str]:
-    """The 15 placeholder values of a message about ``charge`` billed through ``lease``
-    (D4). ``amount`` is the charge's balance unless given; ``debit_date`` its due date
-    unless given; ``days_late`` counted from the due date (never below zero);
-    ``retry_date`` and ``return_reason`` empty unless given (rule F). ``{pay_link}`` is the
+    """The 16 placeholder values of a message about ``charge`` billed through ``lease``
+    (D4; ``{lease_line}`` reads the charge's own lease, else ``lease``). ``amount`` is the
+    charge's balance unless given; ``debit_date`` its due date unless given; ``days_late``
+    counted from the due date (never below zero); ``retry_date`` and ``return_reason`` empty
+    unless given (rule F). ``{pay_link}`` is the
     portal's Pay page of the store when the operator has a portal account that can sign in,
     else a new signed statement link (:func:`pay_link`, PLAN-014 H4). ``rule`` is accepted for
     the rules that will shape a value of their own. For a :class:`RentMonth` the amount is
@@ -492,6 +538,7 @@ def context_for(
         "store_link": store_link(lease),
         "support_email": str(row.support_email or ""),
         "company_name": str(row.name),
+        "lease_line": lease_line(getattr(charge, "lease", None) or lease, today),
     }
 
 
@@ -566,6 +613,7 @@ def queue(
     actor: User | None = None,
     now: datetime | None = None,
     document: Document | None = None,
+    job: bool = True,
 ) -> OutboundMessage | None:
     """Render ``template`` with ``context`` and queue one message and its job (see the
     module docstring); ``None`` when the row exists already (the unique constraint).
@@ -574,7 +622,8 @@ def queue(
     stored as ``failed`` (``PaymentDataRefused``) without its text, and gets no job.
     ``ValueError`` and nothing written when ``lease`` is ``None``, the rule is retired or the
     template inactive (:func:`refuse_retired`). A :class:`RentMonth` is stored by its lease
-    and month (``lease_month``, ``period_month``; E4)."""
+    and month (``lease_month``, ``period_month``; E4). ``job=False`` stores the row without
+    its job: the daily job's :func:`combine` or :func:`wait_for_fold` decides what goes."""
     refuse_retired(rule, template)
     if lease is None:
         raise ValueError(NO_LEASE)
@@ -612,7 +661,7 @@ def queue(
         sent_by=actor,
         scheduled_for=scheduled_for(moment),
     )
-    return _store(message, actor)
+    return _store(message, actor, job=job)
 
 
 def queue_portal(
@@ -658,23 +707,31 @@ def queue_portal(
     return stored
 
 
-def _store(message: OutboundMessage, actor: User | None) -> OutboundMessage | None:
-    """Save a rendered message and its ``message_send`` job, audited; ``None`` when the
-    unique constraint finds the row already there. A text holding payment data is stored as
-    ``failed`` (``PaymentDataRefused``) without its text, and gets no job."""
+def _refuse_payment_data(message: OutboundMessage) -> None:
+    """A text holding payment data: ``failed`` (``PaymentDataRefused``), without its text."""
     try:
         message.check_payment_data()
     except ValidationError:
         message.rendered_subject = message.rendered_body = message.body_sha256 = ""
         message.status = MessageStatus.FAILED
         message.error = PAYMENT_DATA_REFUSED
+
+
+def _store(
+    message: OutboundMessage, actor: User | None, *, job: bool = True
+) -> OutboundMessage | None:
+    """Save a rendered message and its ``message_send`` job (unless ``job`` is false),
+    audited; ``None`` when the unique constraint finds the row already there. A text holding
+    payment data is stored as ``failed`` (``PaymentDataRefused``) without its text, and gets
+    no job."""
+    _refuse_payment_data(message)
     audited: dict[str, object] = {"status": message.status, "error": message.error}
     if message.status == MessageStatus.FAILED:  # as a send's failure reads
         audited["recipients"] = 0
     try:
         with transaction.atomic():
             message.save()
-            if message.status == MessageStatus.QUEUED:
+            if job and message.status == MessageStatus.QUEUED:
                 jobs.enqueue(
                     JobKind.MESSAGE_SEND, message, None, actor, run_after=message.scheduled_for
                 )
@@ -687,6 +744,133 @@ def _store(message: OutboundMessage, actor: User | None) -> OutboundMessage | No
     except IntegrityError:
         return None
     return message
+
+
+# --- One e-mail per lease and day (owner, 2026-11-02) ----------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ChargeLine:
+    """One charge a combined message lists: its name, what is owed, its due date (a lease
+    month's debit date) and the days it is late (never below zero)."""
+
+    name: str
+    amount: Decimal
+    due: date
+    days_late: int
+
+
+def line_for(charge: Subject, amount: Decimal, today: date) -> ChargeLine:
+    due = due_of(charge)
+    return ChargeLine(charge_name(charge), amount, due, max((today - due).days, 0))
+
+
+def charges_text(lines: Iterable[ChargeLine]) -> str:
+    """The list under a combined message's text: a heading, one line per charge, the
+    total."""
+    found = list(lines)
+    rows = [
+        CHARGE_LINE.format(
+            name=line.name,
+            amount=format_amount(line.amount),
+            due=day_text(line.due),
+            days_late=line.days_late,
+        )
+        for line in found
+    ]
+    total = sum((line.amount for line in found), Decimal("0"))
+    return "\n".join(
+        [
+            CHARGES_HEADING.format(count=len(found)),
+            *rows,
+            CHARGES_TOTAL.format(amount=format_amount(total)),
+        ]
+    )
+
+
+def charges_of(messages: Iterable[OutboundMessage]) -> dict[uuid.UUID, Charge]:
+    """Message -> the charge (rent, one-off or insurance) it is about, with its lease and
+    store; a message about anything else, or a charge gone, is left out (three queries at
+    most)."""
+    found = list(messages)
+    models: dict[str, type[RentCharge] | type[OneOffCharge] | type[InsuranceCharge]] = {
+        ChargeEntityType.RENT_CHARGE: RentCharge,
+        ChargeEntityType.ONE_OFF_CHARGE: OneOffCharge,
+        ChargeEntityType.INSURANCE_CHARGE: InsuranceCharge,
+    }
+    charges: dict[uuid.UUID, Charge] = {}
+    for kind, model in models.items():
+        ids = {m.charge_entity_id for m in found if m.charge_entity_type == kind}
+        if not ids:
+            continue
+        loaded = model.objects.select_related("lease__store", "lease__operator").filter(pk__in=ids)
+        by_id: dict[uuid.UUID, Charge] = {charge.pk: charge for charge in loaded}
+        for message in found:
+            if message.charge_entity_type == kind and message.charge_entity_id in by_id:
+                charges[message.pk] = by_id[message.charge_entity_id]
+    return charges
+
+
+def _morning_of(day: date) -> datetime:
+    return datetime.combine(day, WINDOW_OPENS, tzinfo=NEW_YORK).astimezone(UTC)
+
+
+def wait_for_fold(messages: Iterable[OutboundMessage], until: date) -> None:
+    """Hold ``messages`` (queued, without a job) back for the 3-day fold: ``waiting`` until
+    the morning of ``until`` (``scheduled_for``), audited ``message.waiting``."""
+    for message in messages:
+        if message.status != MessageStatus.QUEUED:
+            continue
+        message.status = MessageStatus.WAITING
+        message.scheduled_for = _morning_of(until)
+        message.save(update_fields=["status", "scheduled_for"])
+        _audit("message.waiting", message, None, {"status": message.status, "until": str(until)})
+
+
+def release(messages: Iterable[OutboundMessage]) -> list[OutboundMessage]:
+    """The waiting ``messages`` that still go: one whose charge closed since (or whose
+    operator was archived) is ``suppressed`` as at a send, and left out."""
+    found: list[OutboundMessage] = []
+    for message in messages:
+        reason = _suppress_reason(message)
+        if reason:
+            _finish(message, Disposition(MessageStatus.SUPPRESSED, error=reason))
+        else:
+            found.append(message)
+    return found
+
+
+def combine(
+    rows: list[tuple[OutboundMessage, ChargeLine]], *, now: datetime | None = None
+) -> OutboundMessage:
+    """Send the first of ``rows`` for all of them (the module docstring; the caller puts the
+    most urgent first): with more than one, its body gains :func:`charges_text` and the
+    others become ``combined`` into it. Its ``message_send`` job is queued (a waiting row is
+    queued again, for the send window from ``now``)."""
+    primary = rows[0][0]
+    if len(rows) > 1:
+        lines = [line for _, line in rows]
+        body = f"{primary.rendered_body}\n\n{charges_text(lines)}"
+        primary.rendered_body = body
+        primary.body_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        _refuse_payment_data(primary)
+    if primary.status == MessageStatus.WAITING:
+        primary.status = MessageStatus.QUEUED
+        primary.scheduled_for = scheduled_for(now or timezone.now())
+    primary.save()
+    if primary.status == MessageStatus.QUEUED:
+        jobs.enqueue(JobKind.MESSAGE_SEND, primary, None, None, run_after=primary.scheduled_for)
+    for message, _ in rows[1:]:
+        message.status = MessageStatus.COMBINED
+        message.combined_into = primary
+        message.save(update_fields=["status", "combined_into"])
+        _audit(
+            "message.combined",
+            message,
+            None,
+            {"status": message.status, "into": str(primary.pk)},
+        )
+    return primary
 
 
 # --- Send (D7) ------------------------------------------------------------------------------
@@ -749,27 +933,37 @@ def month_closed_reason(message: OutboundMessage) -> str:
     return ""
 
 
-def _suppress_reason(message: OutboundMessage) -> str:
+def _closed_reason(message: OutboundMessage) -> str:
+    """Why what ``message`` is about no longer calls for it (its charge or month closed, its
+    statement or link gone); ``""`` when it still does."""
     from ledger.services import lease_end
 
     if message.kind == MessageKind.PORTAL:
         issuer = ONE_TIME_LINKS.get(message.template.code)
         if issuer is None:
             return LINK_UNAVAILABLE
-        reason = issuer.refusal(message)
-        if reason:
-            return reason
-    elif message.charge_entity_type == ChargeEntityType.LEASE_MONTH:
-        reason = month_closed_reason(message)
-        if reason:
-            return reason
-    elif message.rule == MessageRule.FINAL_STATEMENT:
-        if not lease_end.statement_ready(message):
-            return STATEMENT_MISSING
-    elif message.rule in OPERATOR_FACING_RULES and not _charge_open(
+        return issuer.refusal(message)
+    if message.charge_entity_type == ChargeEntityType.LEASE_MONTH:
+        return month_closed_reason(message)
+    if message.rule == MessageRule.FINAL_STATEMENT:
+        return "" if lease_end.statement_ready(message) else STATEMENT_MISSING
+    if message.rule in OPERATOR_FACING_RULES and not _charge_open(
         message.charge_entity_type, message.charge_entity_id
     ):
         return CHARGE_CLOSED
+    return ""
+
+
+def _suppress_reason(message: OutboundMessage) -> str:
+    """Why ``message`` is not to be sent at all; a combined message goes while any charge it
+    lists is still open (owner, 2026-11-02)."""
+    reason = _closed_reason(message)
+    if reason and message.kind == MessageKind.LADDER and message.pk is not None:
+        listed = message.combined.select_related("lease", "template")
+        if any(not _closed_reason(row) for row in listed):
+            reason = ""
+    if reason:
+        return reason
     if not message.template.internal and message.operator.archived_at is not None:
         return OPERATOR_ARCHIVED
     return ""
@@ -1023,8 +1217,15 @@ class LogRow:
 
 
 def status_text(message: OutboundMessage) -> str:
-    """ "Held (held on sandbox)", "Failed (ConnectTimeout)", "Sent"…"""
+    """ "Held (held on sandbox)", "Failed (ConnectTimeout)", "Sent"…; a combined row carries
+    the outcome of the message sent for it ("Combined into the D message: Sent"), a waiting
+    one its day ("Waiting for the 3-day fold (until Nov 5, 2026)")."""
     label = message.get_status_display()
+    if message.status == MessageStatus.COMBINED and message.combined_into is not None:
+        primary = message.combined_into
+        return COMBINED_TEXT.format(rule=primary.rule, outcome=status_text(primary))
+    if message.status == MessageStatus.WAITING and message.scheduled_for is not None:
+        return WAITING_TEXT.format(label=label, day=day_text(message.scheduled_for))
     if message.status == MessageStatus.HELD and message.held_reason:
         return f"{label} ({HeldReason(message.held_reason).label})"
     if message.error:
@@ -1107,7 +1308,7 @@ def for_store(store_id: uuid.UUID) -> QuerySet[OutboundMessage]:
     """The messages about a lease of the store, newest first (the timeline, D5)."""
     return (
         OutboundMessage.objects.filter(lease__store_id=store_id)
-        .select_related("template", "sent_by")
+        .select_related("template", "sent_by", "combined_into")
         .order_by("-queued_at", "-id")
     )
 
@@ -1118,7 +1319,7 @@ def outbox(
     """Every message, newest first, for the Outbox (D5): of ``status`` when given, queued
     from ``since`` to ``until`` (New York days, both included) when given."""
     found = OutboundMessage.objects.select_related(
-        "template", "operator", "lease__store", "sent_by"
+        "template", "operator", "lease__store", "sent_by", "combined_into"
     ).order_by("-queued_at", "-id")
     if status:
         found = found.filter(status=status)

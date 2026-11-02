@@ -1048,4 +1048,7 @@ def test_the_portal_migrations_go_both_ways(leaves: list[tuple[str, str]]) -> No
     )
     with pytest.raises(RuntimeError, match="refuses to reverse"):
         _migrate([("ledger", "0063_returned_debits")])
+    # Re-pinned (Opus, 2026-11-02): ledger 0068 alters outbound_messages and reverses before
+    # 0064 refuses, so the schema is brought back up before the row is deleted.
+    _migrate(leaves)
     OutboundMessage.objects.all().delete()
