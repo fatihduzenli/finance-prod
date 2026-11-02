@@ -10,13 +10,16 @@ mosaic of small rounded tiles in the grid's status colours (a fixed pattern, so 
 the visual baseline are the same; decoration, aria-hidden), turned about -8 degrees and fading
 under a navy gradient towards the bottom; over it the brand logo, the headline, one line, four
 feature cards in a 2 x 2 grid (Monthly overview, Bank debits through the processor named in the
-company settings, Reminders, Promises) and the company's name · Monvera at the bottom. Right, on
+company settings, Reminders, Promises) and the company's name · Monvera at the bottom ("Monvera"
+alone when the name is empty or the brand's own; two_factor/_company_line.html). Right, on
 --bg: at the top the SANDBOX banner (injected first in the body by
 finance.middleware.SandboxBannerMiddleware; app.css sets it as a pill) and "Need help?" (a
 mailto: link to the support e-mail, when one is set and the view passes it), then the form area
 (main#auth-main: {% block content %}). The token and setup steps of the two-factor flow take
-the same right panel. At 768 px and under the left panel is a short header (the logo and the
-headline over the mosaic) and the form takes the width. The logo is the brand's own file, never
+the same right panel; the accounts/ pages open it with two_factor/_auth_head.html (the icon
+square, the heading, the sub-line) and put their action in .auth-actions, as the sign-in page.
+At 768 px and under the left panel is a short header (the logo and the headline over the
+mosaic) and the form takes the width. The logo is the brand's own file, never
 the company row's override (a stored document needs a session). The colours and sizes are
 app.css's (tokens.css first); the forms and their flow are the package's own. The tab title is
 "<short name> · <page>" from the company settings (PLAN-012c D2).
@@ -50,7 +53,7 @@ carry the two System theme-color metas.
         <li class="auth-feature"><span class="auth-feature-icon">{% icon "handshake" 18 %}</span><strong>Promises</strong><span>Track who promised what, and when.</span></li>
       </ul>
     </div>
-    <p class="auth-company" id="auth-company">{{ company.name }} · Monvera</p>
+    <p class="auth-company" id="auth-company">{% include "two_factor/_company_line.html" with line="footer" %}</p>
   </div>
   <div class="auth-top" id="auth-top">{% if support_email %}<a href="mailto:{{ support_email }}" id="auth-help">Need help?</a>{% endif %}</div>
   {% block content_wrapper %}

@@ -248,8 +248,12 @@ def test_every_page_answers_under_two_seconds_on_volume(monkeypatch: pytest.Monk
     pages: dict[str, tuple[str, dict[str, str], int]] = {
         # +1 since PLAN-012g A2: the theme row read on every page; +1 since PLAN-014 B1: the
         # attention card's brand_needed source (one query; a second only when a store was cleared).
-        # PLAN-014 F5: +2, the pending re-debits and the returns they cover.
-        "dashboard": ("/", {}, 29 + 3 * due_today),
+        # PLAN-014 F5: +2, the pending re-debits and the returns they cover. Owner 2026-11-01:
+        # +2, the mini calendar's "Next 7 days" (the rows' stores and rent charges; 81 -> 83
+        # measured on SQLite with this world, every debit in the window already charged); then
+        # +4, its promises, one-off charges, insurance charges and their re-debits (Fable's
+        # review; 83 -> 87 measured on SQLite).
+        "dashboard": ("/", {}, 35 + 3 * due_today),
         "grid (500 x 24)": ("/grid/", span, 21),
         # PLAN-012d D16: the words filter keeps the grid's query count.
         "grid filtered": ("/grid/", {**span, "q": "store 1"}, 21),

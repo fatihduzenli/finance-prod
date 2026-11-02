@@ -345,7 +345,7 @@ def test_upload_is_on_the_documents_tab_and_add_entry_on_the_contact_log_tab(
     contacts = page(billing, store_page(lease.store_id, tab="contacts"))
     add = reverse("ledger:stores:contacts_add", kwargs={"pk": lease.store_id})
     entry = contacts[contacts.index('id="add-store-contact"') :].split("</a>", 1)[0]
-    assert add in entry and entry.endswith(">Add entry")
+    assert add in entry and entry.endswith("Log contact")
     # On the tab (and its empty state's next step): the bar's duplicate is gone.
     assert contacts.count('id="add-store-contact"') == 1 and 'id="bar-add-contact"' not in contacts
     bar = contacts.split('id="action-bar"')[1].split("</nav>")[0]
@@ -474,7 +474,8 @@ def test_add_contact_from_the_store_hides_the_lease_and_returns_to_the_contact_t
     url = reverse("ledger:stores:contacts_add", kwargs={"pk": lease.store_id}) + known(lease)
     html = page(billing, url)
     assert f'type="hidden" name="lease" value="{lease.pk}"' in html
-    assert "Store 2477 · Lease from Sep 1, 2026 · Operator Acme Ops" in html
+    # Log contact (owner, 2026-11-01): the dialog over the store page names the operator.
+    assert '<p class="muted" id="log-contact-about">Acme Ops, store 2477</p>' in html
     response = billing.post(
         url,
         {

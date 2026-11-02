@@ -4,10 +4,12 @@
 // without ?range=, the phone's) submits its GET form on change, except Custom, which shows the
 // From and To selects and their Show button. A tap on a mini calendar day toggles its popover
 // and rings the day (is-selected; hover and focus show the popover through the style sheet);
-// one is open at a time. At 768 px and under the popover is not shown: the tapped day's list
-// is moved (not copied) into #mini-panel under the grid, headed "Wed, Oct 28 · tapped", and
-// moved back when another day or the same one is tapped. Without the script the form has its
-// Show button, the popover opens on hover and focus, and a phone lists the days in details.
+// one is open at a time. The tapped day's list is moved (not copied) into #mini-panel in the
+// place of the "Next 7 days" list (#mini-upcoming-body, hidden meanwhile; owner 2026-11-01),
+// headed "Wed, Oct 28 · tapped" with "Back to next 7 days", and moved back when another day
+// or the same one is tapped, or Back is pressed; at 768 px and under the popover is not shown.
+// Without the script the form has its Show button, the popover opens on hover and focus, and
+// a phone lists the days in details.
 document.documentElement.classList.add("js");
 (function () {
   "use strict";
@@ -20,6 +22,7 @@ document.documentElement.classList.add("js");
     });
   });
   var panel = document.getElementById("mini-panel");
+  var upcoming = document.getElementById("mini-upcoming-body");
   var phone = window.matchMedia ? window.matchMedia("(max-width: 768px)") : null;
   var moved = null;
   function restore() {
@@ -28,6 +31,7 @@ document.documentElement.classList.add("js");
       while (panel.firstChild) { panel.removeChild(panel.firstChild); }
       panel.hidden = true;
     }
+    if (upcoming) { upcoming.hidden = false; }
   }
   function intoPanel(day) {
     var list = day.querySelector(".mini-popover");
@@ -40,7 +44,18 @@ document.documentElement.classList.add("js");
     head.appendChild(document.createTextNode(" · tapped"));
     panel.appendChild(head);
     panel.appendChild(list);
+    var back = document.createElement("button");
+    back.type = "button";
+    back.className = "btn btn-sm mini-back";
+    back.textContent = "Back to next 7 days";
+    back.addEventListener("click", function () {
+      var number = day.querySelector(".mini-num");
+      closeAll();
+      if (number) { number.focus(); }
+    });
+    panel.appendChild(back);
     panel.hidden = false;
+    if (upcoming) { upcoming.hidden = true; }
     moved = { day: day, list: list };
   }
   var days = Array.prototype.slice.call(document.querySelectorAll(".mini-day.has-items"));
@@ -56,7 +71,7 @@ document.documentElement.classList.add("js");
       if (!opening) { return; }
       day.classList.add("is-open");
       day.classList.add("is-selected");
-      if (phone && phone.matches) { intoPanel(day); }
+      intoPanel(day);
     });
   });
   if (phone && phone.addEventListener) { phone.addEventListener("change", closeAll); }

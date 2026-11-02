@@ -41,7 +41,7 @@
 
   {% if space.tab == "charges" %}
   <section class="card" id="contact-card" aria-labelledby="contact-card-heading">
-    <div class="card-header"><h2 id="contact-card-heading">Notes &amp; follow-ups</h2><span class="card-link">{% if contact_add_url %}<a class="btn btn-sm" id="card-add-contact" href="{{ contact_add_url }}">{% icon "plus" 14 %}Add entry</a>{% endif %} <a class="btn btn-sm" href="?tab=contacts#tab-contacts" id="card-all-contacts">All entries</a></span></div>
+    <div class="card-header"><h2 id="contact-card-heading">Notes &amp; follow-ups</h2><span class="card-link">{% if contact_add_url %}<a class="btn btn-sm" id="card-add-contact" href="{{ contact_add_url }}">{% icon "plus" 14 %}Log contact</a>{% endif %} <a class="btn btn-sm" href="?tab=contacts#tab-contacts" id="card-all-contacts">All entries</a></span></div>
     {% include "ledger/contacts/_log.html" with rows=contact_rows|slice:":3" empty_next_url=contact_add_url %}
   </section>
   {% endif %}

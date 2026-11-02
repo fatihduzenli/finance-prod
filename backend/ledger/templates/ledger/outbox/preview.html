@@ -1,0 +1,53 @@
+{% extends "finance/base.html" %}
+{% load money dates responsive %}
+{% block title %}Preview next 30 days{% endblock %}
+{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:outbox:page' %}">Outbox</a> <span aria-hidden="true">›</span> <span aria-current="page">Preview next 30 days</span></nav><h1>Preview next 30 days</h1><p class="store-line" id="detail-line">{{ preview.first|day }} to {{ preview.last|day }}</p></div></div>{% endblock %}
+{% block content %}
+  {% comment %}Admin › Outbox › Preview next 30 days (owner, 2026-11-01): what the daily reminder job would queue on each coming day, from today's data; nothing is queued. The rows come from the job's own planner (ledger.services.reminders.plan). No address and no message text is shown.{% endcomment %}
+  <p class="side-note" id="preview-rent-note">{{ rent_note }}</p>
+  <div class="card table-card list-card">
+  {% responsive_table %}
+  <table id="outbox-preview-table" aria-label="Messages the reminder job would queue">
+    <thead><tr><th>Day</th><th>Rule</th><th>Template</th><th>Store</th><th>Operator</th><th>Charge</th><th>Amount</th><th>Outcome</th></tr></thead>
+    <tbody>
+      {% for row in preview.rows %}
+        <tr>
+          <td>{{ row.day|day }}</td>
+          <td>{{ row.rule_label }}</td>
+          <td>{{ row.template }}</td>
+          <td>{% if row.store_id %}<a href="{% url 'ledger:stores:detail' pk=row.store_id %}">{{ row.store }}</a>{% else %}{{ row.store|default:"—" }}{% endif %}</td>
+          <td>{{ row.operator|default:"—" }}</td>
+          <td>{{ row.charge|default:"—" }}</td>
+          <td>{{ row.amount|money }}</td>
+          <td>{{ row.outcome }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8" class="muted empty">No reminder falls in the next 30 days.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  </div>
+  <section class="card table-card list-card" id="preview-redebits">
+  <h2>Automatic re-debits in the window</h2>
+  <p class="side-note">{{ f_note }}</p>
+  {% responsive_table %}
+  <table id="outbox-preview-redebits" aria-label="Automatic re-debits in the window">
+    <thead><tr><th>Day</th><th>Store</th><th>Operator</th><th>Charge</th><th>Amount</th></tr></thead>
+    <tbody>
+      {% for redebit in preview.redebits %}
+        <tr>
+          <td>{{ redebit.day|day }}</td>
+          <td>{% if redebit.store_id %}<a href="{% url 'ledger:stores:detail' pk=redebit.store_id %}">{{ redebit.store }}</a>{% else %}—{% endif %}</td>
+          <td>{{ redebit.operator|default:"—" }}</td>
+          <td>{{ redebit.charge|default:"—" }}</td>
+          <td>{{ redebit.amount|money }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted empty">No automatic re-debit in the window.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  </section>
+{% endblock %}

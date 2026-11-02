@@ -1,10 +1,11 @@
 {% extends "two_factor/_base_focus.html" %}
-{% load i18n icons static two_factor_tags %}
+{% load i18n static two_factor_tags %}
 {% comment %}
 The sign-in page (PLAN-014 I-b, the owner's redesign; docs/design/login-dark-laptop.png): the
 package's login wizard in the right panel of two_factor/_base.html. A lock in a teal-tinted
-square, "Sign in to Monvera" and the muted sub-line ("Staff of <company> only." on the password
-step; the package's sentence on the token and backup steps).
+square, "Sign in to Monvera" (two_factor/_auth_head.html) and the muted sub-line ("Staff of
+<company> only." on the password step, "Staff only." when the name is the brand's own; the
+package's sentence on the token and backup steps).
 
 The password step: the username and the password in one rounded box with a divider, small
 upper-case labels (the fields keep their names, ids and autocomplete attributes; the first is
@@ -28,11 +29,10 @@ backup-token form. The tab title stays "Login".
 {% block title %}Login{% endblock %}
 
 {% block content %}
-  <span class="auth-lock" aria-hidden="true">{% icon "lock" 20 %}</span>
-  <h1 id="sign-in-heading">Sign in to Monvera</h1>
+  {% include "two_factor/_auth_head.html" with icon="lock" heading="Sign in to Monvera" heading_id="sign-in-heading" %}
 
   {% if wizard.steps.current == 'auth' %}
-    <p class="auth-sub" id="auth-sub">Staff of {{ company.name }} only.</p>
+    <p class="auth-sub" id="auth-sub">{% include "two_factor/_company_line.html" with line="staff" %}</p>
   {% elif wizard.steps.current == 'token' %}
     <p class="auth-sub" id="auth-sub">{{ device|as_verbose_action }}</p>
   {% elif wizard.steps.current == 'backup' %}

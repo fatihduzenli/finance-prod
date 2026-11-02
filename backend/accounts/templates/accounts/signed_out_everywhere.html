@@ -1,7 +1,7 @@
 {% extends "two_factor/_base.html" %}
+{% comment %}After accounts.views.sign_out_everywhere. The sign-in page's right panel: a check, the heading, the sentence as the sub-line and the full-width primary button.{% endcomment %}
 {% block title %}Signed out everywhere{% endblock %}
 {% block content %}
-  <h1>Signed out everywhere</h1>
-  <p>Every session on every device has been ended, including this one.</p>
-  <p><a class="btn btn-primary" href="{% url 'two_factor:login' %}">Sign in again</a></p>
+  {% include "two_factor/_auth_head.html" with icon="check" heading="Signed out everywhere" sub="Every session on every device has been ended, including this one." %}
+  <div class="auth-actions"><a class="btn btn-primary" href="{% url 'two_factor:login' %}">Sign in again</a></div>
 {% endblock %}

@@ -559,10 +559,11 @@ def test_the_workspace_names_its_tabs_and_actions_as_the_list_says() -> None:
     assert (tabs[workspace.TAB_SCHEDULES], tabs[workspace.TAB_HISTORY]) == ("Autopay", "Activity")
     text = (BACKEND / "ledger" / "services" / "workspace.py").read_text()
     assert '"Record a payment"' not in text and '"Add payment"' in text
-    # PLAN-012e-2 D5: the bar's menu is "Lease"; Add entry is the Contact log tab's.
+    # PLAN-012e-2 D5: the bar's menu is "Lease"; the Contact log tab's own button (Log contact
+    # since the owner's dialog, 2026-11-01).
     assert '"Lease"' in text and '"Add contact entry"' not in text and '"Add entry"' not in text
     contacts_tab = BACKEND / "ledger" / "templates" / "ledger" / "stores" / "_tab_contacts.html"
-    assert ">Add entry</a>" in contacts_tab.read_text()
+    assert "Log contact</a>" in contacts_tab.read_text()
     charges_tab = BACKEND / "ledger" / "templates" / "ledger" / "stores" / "_tab_charges.html"
     assert ">Create missing charges</button>" in charges_tab.read_text()
 
@@ -608,10 +609,10 @@ def test_the_store_page_tabs_and_action_bar_render_the_new_names() -> None:
     assert ">Schedules<" not in html and ">History<" not in html
     assert "Add payment" in html and "Record a payment" not in html
     # PLAN-012e-2 D5, D6: "Lease ▾" on the bar, "Create missing charges" on the Charges tab,
-    # "Add entry" on the Contact log tab, "More ▾" on the operator page.
+    # "Log contact" on the Contact log tab (owner, 2026-11-01), "More ▾" on the operator page.
     assert ">Lease ▾</summary>" in html and ">Create missing charges</button>" in html
     contacts = page(admin, f"/stores/{lease.store_id}/?tab=contacts")
-    assert ">Add entry<" in contacts and "Add contact entry" not in contacts
+    assert "Log contact</a>" in contacts and "Add contact entry" not in contacts
     operator = page(admin, f"/operators/{lease.operator_id}/")
     assert ">More ▾</summary>" in operator
 
