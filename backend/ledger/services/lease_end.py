@@ -1457,7 +1457,8 @@ def produce_documents(end_id: uuid.UUID, actor: User | None) -> tuple[bool, str]
     operator = end.lease.operator
     if operator is None:
         return True, DOCUMENTS_NO_OPERATOR
-    template = MessageTemplate.objects.filter(code=merge.FINAL_STATEMENT_CODE).first()
+    # An inactive template queues nothing (messaging.queue refuses it): read as missing.
+    template = MessageTemplate.objects.filter(code=merge.FINAL_STATEMENT_CODE, active=True).first()
     if template is None:
         return False, NO_TEMPLATE
     queued = OutboundMessage.objects.filter(

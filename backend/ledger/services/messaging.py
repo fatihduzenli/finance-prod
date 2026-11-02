@@ -12,6 +12,13 @@ before anything is rendered: the unique rule cannot dedupe a NULL lease on Postg
 the row would have no billing e-mail to go to. A template of the ``sms`` channel is refused
 (:class:`ChannelUnavailable`, "SMS is not set up."): no SMS provider exists (D8).
 
+**The old ladder is retired for good** (owner, 2026-11-01). :func:`queue` and
+:func:`queue_portal`, the only ways a message is stored, refuse a retired rule
+(:data:`~ledger.models.RETIRED_RULES`, the old collections ladder) and an inactive template
+with ``ValueError`` before anything is rendered: no row, no job, no audit. The ladder's past
+rows stay as history; the Outbox shows them with no store ("—"), as it does a portal message
+(:data:`~ledger.models.RULES_WITHOUT_STORE`); every other row names its lease's store.
+
 **A lease month (E4).** Rules A and B for rent go three days before the month's debit, before
 its rent charge exists (the owner's decision of 2026-10-30: rent charges are still made on
 their day). Such a message is about a :class:`RentMonth`: its row names the lease as its
@@ -83,6 +90,7 @@ import mail
 from finance.dates import NEW_YORK, day_text, month_long_text
 from ledger import merge
 from ledger.models import (
+    RETIRED_RULES,
     AuditLog,
     ChargeEntityType,
     CollectionSchedule,
@@ -181,6 +189,9 @@ SEND_NOW_NOT_ALLOWED = (
 )
 SEND_NOW_NO_ADDRESS = "The message has no address to send to: it stays held."
 NO_LEASE = "A message belongs to a lease."
+#: Owner, 2026-11-01: the retired ladder queues nothing; an inactive template neither.
+RETIRED_RULE = "The old collections ladder is retired: it queues no message."
+INACTIVE_TEMPLATE = "The template is inactive: it queues no message."
 #: PLAN-014 H2: what a portal message's stored body says where its one-time link goes; the
 #: link replaces it in the outgoing text only (:func:`send`).
 LINK_ADDED_AT_SEND = "[your personal link is added when this e-mail is sent]"
@@ -534,6 +545,15 @@ def _recipients(message: OutboundMessage) -> list[str]:
     return [message.to_address] if message.to_address else []
 
 
+def refuse_retired(rule: str, template: MessageTemplate) -> None:
+    """``ValueError`` for a retired rule (the old ladder) or an inactive template: neither
+    may queue a message (owner, 2026-11-01)."""
+    if rule in RETIRED_RULES:
+        raise ValueError(RETIRED_RULE)
+    if not template.active:
+        raise ValueError(INACTIVE_TEMPLATE)
+
+
 def queue(
     rule: str,
     lease: Lease | None,
@@ -552,8 +572,10 @@ def queue(
     :class:`ChannelUnavailable` for an SMS template; :class:`~ledger.merge.TemplateRefused`
     when the values are not one code's placeholders. A rendered text holding payment data is
     stored as ``failed`` (``PaymentDataRefused``) without its text, and gets no job.
-    ``ValueError`` and nothing written when ``lease`` is ``None``. A :class:`RentMonth` is
-    stored by its lease and month (``lease_month``, ``period_month``; E4)."""
+    ``ValueError`` and nothing written when ``lease`` is ``None``, the rule is retired or the
+    template inactive (:func:`refuse_retired`). A :class:`RentMonth` is stored by its lease
+    and month (``lease_month``, ``period_month``; E4)."""
+    refuse_retired(rule, template)
     if lease is None:
         raise ValueError(NO_LEASE)
     channel_for(template.channel)
@@ -608,7 +630,8 @@ def queue_portal(
     ``actor``) when a staff member asked for it, else (the portal's own reset form) by no one.
     Raises :class:`ChannelUnavailable` for an SMS template and
     :class:`~ledger.merge.TemplateRefused` when ``context`` is not the template's
-    placeholders."""
+    placeholders; ``ValueError`` and nothing written for an inactive template."""
+    refuse_retired(MessageRule.PORTAL, template)
     channel_for(template.channel)
     subject = one_line(merge.render(template.subject, context))[:SUBJECT_MAX_LENGTH]
     body = merge.render(template.body, context)
