@@ -816,6 +816,10 @@ def parse_cal(raw: str, today: date) -> date:
     return pnl._parse_month(raw or "") or today.replace(day=1)
 
 
+#: The UID prefix of an insurance charge's due-date item (:func:`money_items`).
+_INSURANCE_DUE = "due-insurance-"
+
+
 @dataclass(frozen=True, slots=True)
 class _Money:
     """What the list shows of an item the dashboard reads itself (:func:`money_items`): its
@@ -1008,7 +1012,7 @@ def money_items(
             if balance <= 0:
                 continue
             add(
-                f"due-insurance-{pk}",
+                f"{_INSURANCE_DUE}{pk}",
                 KIND_DUE,
                 on,
                 f"Insurance, policy year {year}",
@@ -1017,6 +1021,34 @@ def money_items(
                 (store_id, _where(number, label, city), operator_id, operator or "", lease_id),
             )
     return found, money
+
+
+def _merge_anniversaries(
+    found: Sequence[calendar.CalendarItem],
+    extra: Sequence[calendar.CalendarItem],
+    money: dict[str, _Money],
+) -> list[calendar.CalendarItem]:
+    """``found`` and ``extra`` as one list, an open insurance charge due on its lease's
+    anniversary shown once (Fable's review): the Calendar's "Insurance anniversary" item,
+    with the charge's balance as its amount; the charge's due-date item is dropped. An
+    anniversary without an open charge keeps no amount; a charge due on another day stays a
+    due date. ``money`` is updated in place."""
+    anniversaries = {
+        (item.lease_id, item.on): item for item in found if item.kind == calendar.KIND_INSURANCE
+    }
+    kept = list(found)
+    for item in extra:
+        anniversary = (
+            anniversaries.get((item.lease_id, item.on))
+            if item.uid.startswith(_INSURANCE_DUE)
+            else None
+        )
+        if anniversary is None:
+            kept.append(item)
+            continue
+        due = money.pop(item.uid)
+        money[anniversary.uid] = _Money(_what(anniversary), due.amount, due.where)
+    return kept
 
 
 def _uid_key(item: calendar.CalendarItem) -> str:
@@ -1160,7 +1192,8 @@ def mini_calendar(month: date, today: date) -> MiniCalendar:
     windows = ((first, last), (today, today + timedelta(days=NEXT_DAYS - 1)))
     extra, money = money_items(windows)
     found = sorted(
-        [*calendar.items_in(windows, calendar.Filters()), *extra], key=lambda item: item.on
+        _merge_anniversaries(calendar.items_in(windows, calendar.Filters()), extra, money),
+        key=lambda item: item.on,
     )
     in_month = [item for item in found if first <= item.on <= last]
     weeks = [

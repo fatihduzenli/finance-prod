@@ -466,6 +466,70 @@ def test_the_new_kinds_have_dots_a_legend_and_the_day_s_panel_lists_them() -> No
         assert f".mini-calendar .kind-{kind} {{ --dot-colour: var(--" in css
 
 
+def test_an_insurance_charge_due_on_the_anniversary_is_the_anniversary_s_row() -> None:
+    operator = an_operator("Insured Ops")
+    store = a_store("5400 Lima", 5400)
+    store.open_date, store.needs_open_date = date(2019, 10, 30), False
+    store.save(update_fields=["open_date", "needs_open_date"])
+    lease = a_lease(store, operator, debit_day=15)
+    InsuranceCharge.objects.create(
+        lease=lease, policy_year=2026, due_on=date(2026, 10, 30), amount=D("695.00")
+    )
+    # The same lease's other charge, due on another day: a due date.
+    InsuranceCharge.objects.create(
+        lease=lease, policy_year=2025, due_on=date(2026, 11, 2), amount=D("120.00")
+    )
+    october = blocks.mini_calendar(OCT, TODAY)
+    assert rows_of(october.upcoming) == [
+        (
+            date(2026, 10, 30),
+            calendar.KIND_INSURANCE,
+            "Insurance anniversary",
+            "#5400 Lima",
+            D("695.00"),
+        ),
+        (
+            date(2026, 11, 2),
+            blocks.KIND_DUE,
+            "Insurance, policy year 2025",
+            "#5400 Lima",
+            D("120.00"),
+        ),
+    ]
+    [day] = [cell for cell in october.days_with_items if cell.day == date(2026, 10, 30)]
+    assert [item.kind for item in day.items] == [calendar.KIND_INSURANCE] and day.kinds == [
+        calendar.KIND_INSURANCE
+    ]
+    html = mini(page(client_for(Role.VIEWER)[0]))
+    start = html.index('data-day="2026-10-30"')
+    cell = html[start : html.index("</div>", start)]
+    assert cell.count('<li class="calendar-item') == 1 and "kind-due" not in cell
+
+
+def test_an_anniversary_whose_charge_is_paid_keeps_no_amount() -> None:
+    store = a_store("5500 Quito", 5500)
+    store.open_date, store.needs_open_date = date(2019, 10, 30), False
+    store.save(update_fields=["open_date", "needs_open_date"])
+    lease = a_lease(store, an_operator("Paid Ops"), debit_day=15)
+    charge = InsuranceCharge.objects.create(
+        lease=lease, policy_year=2026, due_on=date(2026, 10, 30), amount=D("100.00")
+    )
+    Payment.objects.create(
+        insurance_charge=charge,
+        kind=PaymentKind.INSURANCE,
+        policy_year=2026,
+        method=PaymentMethod.ACH,
+        amount=D("100.00"),
+        status=PaymentStatus.SETTLED,
+        initiated_on=date(2026, 10, 1),
+        settled_on=date(2026, 10, 3),
+    )
+    rows = blocks.mini_calendar(OCT, TODAY).upcoming.rows
+    assert [(row.kind, row.what, row.amount) for row in rows] == [
+        (calendar.KIND_INSURANCE, "Insurance anniversary", None)
+    ]
+
+
 # --- The page -------------------------------------------------------------------------------------
 
 

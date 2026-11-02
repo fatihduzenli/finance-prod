@@ -5,7 +5,10 @@ first, today in a teal circle, under a day with items one dot per kind present (
 kind-…, coloured by app.css). Each such day is a button over a hidden popover listing its items as links,
 each with a bar in its kind's colour, shown on hover and focus (CSS) and toggled by a tap
 (ledger/static/ledger/dashboard.js), which also rings the day (.is-selected). The legend under the grid
-names the kinds present. Under it the "Next 7 days" list (owner 2026-11-01; #mini-upcoming): today and the six
+names the kinds present. Beside the Calendar's kinds the dashboard reads three of its own
+(ledger.services.dashboard.money_items, owner 2026-11-01): an open promise to pay, an open installment
+of a live plan, and any other open charge's due date (a one-off or an insurance charge; one due on
+its lease's insurance anniversary is that anniversary's row, with its balance). Under it the "Next 7 days" list (owner 2026-11-01; #mini-upcoming): today and the six
 days after, each row the day, the store (linked), what it is (linked to the record) and the amount, at most
 six rows and "+N more", "All in Calendar ›"; one muted line when there is nothing. A tap or click on a day
 moves that day's list (its popover) into #mini-panel in the list's place, headed "Wed, Oct 28 · tapped",
