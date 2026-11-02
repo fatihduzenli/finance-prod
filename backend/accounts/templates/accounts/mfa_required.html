@@ -1,16 +1,17 @@
 {% extends "two_factor/_base.html" %}
-{% comment %}Status 403 from accounts.middleware.MfaRequiredMiddleware.{% endcomment %}
+{% comment %}Status 403 from accounts.middleware.MfaRequiredMiddleware. The sign-in page's right panel: the lock, the heading, the sentence as the sub-line, then the full-width buttons (set up, when the user may enrol, over Sign out).{% endcomment %}
 {% block title %}Two-factor authentication required{% endblock %}
 {% block content %}
-  <h1>Two-factor authentication required</h1>
   {% if can_enrol %}
-    <p>Every account must use an authenticator app. Set one up to continue.</p>
-    <p><a class="btn btn-primary" id="mfa-setup-link" href="{% url 'two_factor:setup' %}">Set up two-factor authentication</a></p>
+    {% include "two_factor/_auth_head.html" with icon="lock" heading="Two-factor authentication required" sub="Every account must use an authenticator app. Set one up to continue." %}
   {% else %}
-    <p>This session has not been verified with your authenticator code. Sign out and sign in again.</p>
+    {% include "two_factor/_auth_head.html" with icon="lock" heading="Two-factor authentication required" sub="This session has not been verified with your authenticator code. Sign out and sign in again." %}
   {% endif %}
-  <form method="post" action="{% url 'logout' %}">
-    {% csrf_token %}
-    <button class="btn" type="submit">Sign out</button>
-  </form>
+  <div class="auth-actions">
+    {% if can_enrol %}<a class="btn btn-primary" id="mfa-setup-link" href="{% url 'two_factor:setup' %}">Set up two-factor authentication</a>{% endif %}
+    <form method="post" action="{% url 'logout' %}">
+      {% csrf_token %}
+      <button class="btn" type="submit">Sign out</button>
+    </form>
+  </div>
 {% endblock %}
