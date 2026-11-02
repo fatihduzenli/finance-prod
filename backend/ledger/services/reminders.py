@@ -159,9 +159,9 @@ DAY_E = 30
 D_AGAIN_FROM = 40
 D_EVERY = 10
 
-#: The operator's rules sent as one message per lease and day, most urgent first: the first
-#: present gives the message its template and subject (owner, 2026-11-02).
-COMBINED_RULES: tuple[str, ...] = (MessageRule.D, MessageRule.C, MessageRule.B, MessageRule.A)
+#: The operator's rules sent as one message per lease and day, most urgent first (owner,
+#: 2026-11-02; the engine's own order, which the send also reads).
+COMBINED_RULES: tuple[str, ...] = messaging.COMBINED_RULES
 #: The overdue rules: at most one message of them per lease every :data:`FOLD_DAYS` days.
 OVERDUE_RULES: frozenset[str] = frozenset({MessageRule.C, MessageRule.D})
 FOLD_DAYS = 3

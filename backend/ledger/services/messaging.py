@@ -70,8 +70,11 @@ stays its template's, and the others become ``combined`` into it (``combined_int
 ``message.combined``, never sent on their own. An overdue row held back by the 3-day fold is
 ``waiting`` (:func:`wait_for_fold`, audited ``message.waiting``) until the morning of its day
 (``scheduled_for``), with no job; on that day :func:`release` drops the ones whose charge
-closed since (``suppressed``, as at a send) and the rest go with that day's :func:`combine`. A
-combined message is suppressed only once every charge it lists is closed; the window, the
+closed since (``suppressed``, as at a send) and the rest go with that day's :func:`combine`. At
+the send (:func:`_regroup`) a combined message is rebuilt from the charges it lists that are
+still open: a row whose charge closed since is ``suppressed`` and left out of the list and the
+total, the most urgent open row is sent (its own subject) for the rest, and the stored body is
+what was sent; once every charge is closed the message is suppressed. The window, the
 holds, the allowlist and *Send now* apply to it as to any message, and the Outbox shows its
 outcome on the rows combined into it (:func:`status_text`).
 
@@ -229,6 +232,10 @@ NO_VALUE = "—"
 #: ``{lease_line}`` (owner, 2026-11-02): a current lease, and a lease that has ended.
 LEASE_LINE_CURRENT = "Continued non-payment may affect your lease."
 LEASE_LINE_ENDED = "Please contact us to settle this balance."
+
+#: The operator's rules sent as one message per lease and day, most urgent first: the first
+#: present gives the message its template and subject (owner, 2026-11-02).
+COMBINED_RULES: tuple[str, ...] = (MessageRule.D, MessageRule.C, MessageRule.B, MessageRule.A)
 
 #: The list under a combined message's text (owner, 2026-11-02).
 CHARGES_HEADING = "Charges ({count}): charge · amount · due date · days late"
@@ -811,6 +818,92 @@ def charges_of(messages: Iterable[OutboundMessage]) -> dict[uuid.UUID, Charge]:
     return charges
 
 
+def _list_start(body: str) -> int:
+    """Where the list of a combined message's body begins (``-1`` when it has none)."""
+    return body.rfind("\n\n" + CHARGES_HEADING.split("(", 1)[0])
+
+
+def _month_line(message: OutboundMessage, today: date) -> ChargeLine:
+    """The line of a message about a lease month (E4), read again: its scheduled debit and
+    amount (the rent schedule's for A, what the rent run charges for B)."""
+    lease = message.lease
+    month = message.period_month
+    if lease is None or month is None or lease.debit_day is None:  # closed: never listed
+        raise ValueError("A lease month's message names its lease and month.")
+    debit = rent_run.debit_date(lease, month, lease.debit_day)
+    amount: Decimal | None
+    if message.rule == MessageRule.A:
+        amount = (
+            CollectionSchedule.objects.filter(
+                lease=lease, kind=ScheduleKind.RENT, state=ScheduleState.ACTIVE
+            )
+            .order_by("seq")
+            .values_list("amount", flat=True)
+            .first()
+        )
+    else:
+        amount = rent_run.first_debit_amount(lease, month)
+    owed = amount if amount is not None else Decimal("0")
+    return line_for(RentMonth(lease, month, debit, owed), owed, today)
+
+
+def _regroup(message: OutboundMessage, now: datetime) -> OutboundMessage:
+    """At the send of a combined message (owner, 2026-11-02): when some of the charges it
+    lists closed since the queue, those rows are ``suppressed`` (``ChargeClosed``) and left
+    out, and the most urgent row still open (:data:`COMBINED_RULES`) is sent for the rest,
+    its own text with the list of the open charges (and their total) rebuilt; the rows still
+    open are combined into it. The message to deliver is returned: ``message`` itself when
+    nothing closed, or when everything did (the send then suppresses it as before)."""
+    listed = list(
+        message.combined.select_for_update(of=("self",))
+        .select_related("operator", "lease", "template")
+        .order_by("queued_at", "id")
+    )
+    if not listed:
+        return message
+    members = [message, *listed]
+    still = [row for row in members if not _closed_reason(row)]
+    if not still or len(still) == len(members):
+        return message
+    still.sort(key=lambda row: (COMBINED_RULES.index(row.rule), row is not message))
+    sending = still[0]
+    today = timezone.localdate(now)
+    charges = charges_of(row for row in still if row.period_month is None)
+    lines = [
+        _month_line(row, today)
+        if row.period_month is not None
+        else line_for(charges[row.pk], balance_of(charges[row.pk]), today)
+        for row in still
+    ]
+    body = sending.rendered_body
+    if sending is message and _list_start(body) >= 0:
+        body = body[: _list_start(body)]
+    if len(still) > 1:
+        body = f"{body}\n\n{charges_text(lines)}"
+    for row in members:
+        if row not in still and row is not message:
+            row.combined_into = None
+            _finish(row, Disposition(MessageStatus.SUPPRESSED, error=CHARGE_CLOSED))
+    if sending is not message:
+        sending.status = MessageStatus.QUEUED
+        sending.combined_into = None
+        sending.scheduled_for = message.scheduled_for
+    sending.rendered_body = body
+    sending.body_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    _refuse_payment_data(sending)
+    sending.save()
+    for row in still[1:]:
+        row.combined_into = sending
+        row.save(update_fields=["combined_into"])
+    if sending is not message:
+        message.combined_into = None
+        _finish(message, Disposition(MessageStatus.SUPPRESSED, error=CHARGE_CLOSED))
+        _audit(
+            "message.regrouped", sending, None, {"status": sending.status, "for": str(message.pk)}
+        )
+    return sending
+
+
 def _morning_of(day: date) -> datetime:
     return datetime.combine(day, WINDOW_OPENS, tzinfo=NEW_YORK).astimezone(UTC)
 
@@ -955,13 +1048,9 @@ def _closed_reason(message: OutboundMessage) -> str:
 
 
 def _suppress_reason(message: OutboundMessage) -> str:
-    """Why ``message`` is not to be sent at all; a combined message goes while any charge it
-    lists is still open (owner, 2026-11-02)."""
+    """Why ``message`` is not to be sent at all (a combined message is first rebuilt from
+    its charges still open, :func:`_regroup`)."""
     reason = _closed_reason(message)
-    if reason and message.kind == MessageKind.LADDER and message.pk is not None:
-        listed = message.combined.select_related("lease", "template")
-        if any(not _closed_reason(row) for row in listed):
-            reason = ""
     if reason:
         return reason
     if not message.template.internal and message.operator.archived_at is not None:
@@ -1053,6 +1142,10 @@ def send(message_id: uuid.UUID, now: datetime | None = None) -> Outcome:
             return Outcome(False, GONE)
         if message.status != MessageStatus.QUEUED:
             return Outcome(True, NOT_QUEUED.format(status=message.get_status_display().lower()))
+        if message.kind == MessageKind.LADDER:
+            message = _regroup(message, now or timezone.now())
+            if message.status != MessageStatus.QUEUED:  # a text refused for payment data
+                return Outcome(True, NOT_QUEUED.format(status=message.get_status_display().lower()))
         reason = _suppress_reason(message)
         if reason:
             return Outcome(

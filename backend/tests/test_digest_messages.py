@@ -194,20 +194,79 @@ def test_f_stays_separate_from_the_day_s_reminders(clock: Any) -> None:
     assert sorted(send_jobs()) == sorted([f.pk, found["C"].pk])
 
 
-def test_a_combined_message_goes_while_any_of_its_charges_is_open(
+def paid(*charges: OneOffCharge) -> None:
+    for charge in charges:
+        OneOffCharge.objects.filter(pk=charge.pk).update(
+            status=OneOffChargeStatus.PAID, amount_paid=charge.price
+        )
+
+
+def test_a_charge_paid_before_the_send_is_left_out_of_the_list_and_the_total(
     clock: Any, memory: MemoryMailSender
 ) -> None:
     lease = billed_lease(2106)
-    paid = one_off(lease, "80.00", day(-10), "Paid since")  # D today: the sent one
-    one_off(lease, "40.00", day(-5), "Still owed")  # C today: combined into it
+    one_off(lease, "80.00", day(-10), "Rent catch-up")  # D today: the subject
+    fee = one_off(lease, "40.00", day(-5), "Late fee")  # C today: combined into it
+    third = one_off(lease, "25.00", day(-5), "Key copy")  # C today: combined too
     run(clock, TODAY)
-    OneOffCharge.objects.filter(pk=paid.pk).update(
-        status=OneOffChargeStatus.PAID, amount_paid=D("80.00")
-    )
+    paid(fee)
     send_all()
-    assert len(memory.sent) == 1
-    d = rows_of(lease)["D"]
-    assert d.status == MessageStatus.SENT
+    [mail_sent] = memory.sent
+    found = {m.charge_entity_id: m for m in OutboundMessage.objects.filter(lease=lease)}
+    sent = next(m for m in found.values() if m.status == MessageStatus.SENT)
+    assert sent.rule == MessageRule.D and mail_sent.subject == sent.rendered_subject
+    assert mail_sent.text == sent.rendered_body  # the stored body is what was sent
+    assert "Late fee" not in sent.rendered_body
+    assert sent.rendered_body.count("Charges (") == 1
+    assert "Charges (2): charge · amount · due date · days late" in sent.rendered_body
+    assert "- Key copy · $25.00 · Oct 15, 2026 · 5" in sent.rendered_body
+    assert sent.rendered_body.endswith("Total: $105.00")
+    dropped = found[fee.pk]
+    assert (dropped.status, dropped.error, dropped.combined_into_id) == (
+        MessageStatus.SUPPRESSED,
+        "ChargeClosed",
+        None,
+    )
+    assert found[third.pk].combined_into_id == sent.pk
+    assert messaging.status_text(found[third.pk]) == "Combined into the D message: Sent"
+
+
+def test_the_subject_charge_paid_before_the_send_gives_the_subject_to_the_open_rule(
+    clock: Any, memory: MemoryMailSender
+) -> None:
+    lease = billed_lease(2108)
+    rent = one_off(lease, "80.00", day(-10), "Rent catch-up")  # D: the subject at the queue
+    one_off(lease, "40.00", day(-5), "Late fee")  # C
+    run(clock, TODAY)
+    paid(rent)
+    send_all()
+    [mail_sent] = memory.sent
+    found = rows_of(lease)
+    assert (found["D"].status, found["D"].error) == (MessageStatus.SUPPRESSED, "ChargeClosed")
+    c = found["C"]
+    assert (c.status, c.combined_into_id) == (MessageStatus.SENT, None)
+    assert mail_sent.subject == c.rendered_subject == "Payment overdue — #2108 2108"
+    assert mail_sent.text == c.rendered_body
+    assert "Charges (" not in c.rendered_body and "Rent catch-up" not in c.rendered_body
+    assert AuditLog.objects.filter(
+        action="message.regrouped", entity_id=str(c.pk), after__for=str(found["D"].pk)
+    ).exists()
+
+
+def test_a_released_waiting_group_is_rebuilt_at_the_send_too(
+    clock: Any, memory: MemoryMailSender
+) -> None:
+    _, _, y, z = fold_world()
+    run(clock, day(0))
+    run(clock, day(2))
+    run(clock, day(3))  # Y's D (released) sent with Z's C
+    paid(z)
+    send_all()
+    sent = about(y)
+    assert sent.status == MessageStatus.SENT
+    assert "Charge Z" not in sent.rendered_body and "Charges (" not in sent.rendered_body
+    assert about(z).status == MessageStatus.SUPPRESSED
+    assert memory.sent[-1].text == sent.rendered_body
 
 
 def test_a_combined_message_whose_charges_all_closed_is_suppressed(
@@ -217,7 +276,7 @@ def test_a_combined_message_whose_charges_all_closed_is_suppressed(
     first = one_off(lease, "80.00", day(-10), "First")
     second = one_off(lease, "40.00", day(-5), "Second")
     run(clock, TODAY)
-    OneOffCharge.objects.filter(pk__in=[first.pk, second.pk]).update(status=OneOffChargeStatus.PAID)
+    paid(first, second)
     send_all()
     assert memory.sent == []
     found = rows_of(lease)
