@@ -35,6 +35,13 @@ def on_sandbox() -> bool:
     return bool(settings.STAX_ENV == SANDBOX_STAX_ENV)
 
 
+def sandbox_outside_production() -> bool:
+    """The sandbox, and not the production deployment: the only place a staff test aid that
+    hands over an operator's credential may exist ("Copy invite link", owner 2026-11-01:
+    its route, its registry rule and its button; read when the URL conf loads)."""
+    return on_sandbox() and settings.APP_ENV != "production"
+
+
 @cache
 def _banner_bytes() -> bytes:
     """The banner markup, rendered once.

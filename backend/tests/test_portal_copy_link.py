@@ -1,18 +1,22 @@
 """The PORTAL card's "Copy invite link" (owner, 2026-11-01; sandbox only, admin only).
 
-Allowed (an admin, the sandbox, local or staging): the operator page answers with a fresh
-one-time link shown once, an invitation link while the account has no password, else a reset
-link; the older link of that kind stops working; the audit row holds the kind and the expiry,
-never the link; the response is ``no-store`` and ``no-referrer``; the link sets the password
-once. Refused: billing and viewer (403), a GET (405), a live key, production, an archived
-operator, a disabled account, no account; the button is hidden in each. The link is never in a
-log, a message, a redirect or the database in clear.
+Allowed (an admin, the sandbox, local or staging): the operator page answers with a dialog
+holding a fresh one-time link, once, an invitation link while the account has no password,
+else a reset link, that expires 60 minutes after the click; the older link of that kind stops
+working; the audit row holds the kind and the expiry, never the link; the response is
+``no-store`` and ``no-referrer``; the link sets the password once. In production or with a live
+key the route does not exist (the URL conf reloaded under those settings). Refused: billing and
+viewer (403), a GET (405), the service off the sandbox, an archived operator, a disabled
+account, no account; the button is hidden in each. The link is never in a log, a message, a
+redirect or the database in clear.
 """
 
 from __future__ import annotations
 
+import importlib
 import logging
 import re
+from collections.abc import Iterator
 from datetime import timedelta
 from typing import Any
 
@@ -22,8 +26,11 @@ from django.contrib.messages import get_messages
 from django.contrib.sessions.models import Session
 from django.db.models import Q
 from django.test import Client
+from django.urls import NoReverseMatch, Resolver404, clear_url_caches, resolve, reverse
 from django.utils import timezone
 
+import finance.urls
+import ledger.urls
 from accounts import registry
 from accounts.roles import Role
 from ledger.models import AuditLog, Operator, OutboundMessage
@@ -120,17 +127,31 @@ def test_an_invited_account_gets_a_fresh_invitation_link_shown_once(
     path, kind, raw = found(response)
     assert (kind, path) == ("invite", f"/portal/invite/{raw}/")
     html = response.content.decode()
-    # Once: the field only; the copy button and the sentence under it.
+    # Once, in the dialog: the field, the copy button and the sentence; closing goes back to
+    # the operator page.
     assert html.count(raw) == 1
-    assert 'id="portal-copied-link-copy"' in html and "ledger/copy_link.js" in html
-    assert "Sandbox only. Anyone with this link can set this operator&#x27;s password" in html
+    assert html.count('id="portal-copy-link-dialog"') == 1
+    dialog = html[html.index('<dialog class="dialog dialog-sm" id="portal-copy-link-dialog"') :]
+    dialog = dialog[: dialog.index("</dialog>")]
+    assert "Invite link for Alpha Owner" in dialog
+    assert f'data-return-url="/operators/{operator.pk}/"' in dialog and " data-open" in dialog
+    assert f'id="portal-copy-link-close" href="/operators/{operator.pk}/"' in dialog
+    assert 'id="portal-copied-link-field"' in dialog and 'id="portal-copied-link-copy"' in dialog
+    assert "ledger/copy_link.js" in html
+    assert (
+        "Sandbox only. Anyone with this link can set this operator&#x27;s password; it works "
+        "once and expires at " in dialog
+    )
+    # A plain GET of the operator page has no dialog and no link.
+    after = page(staff, operator)
+    assert raw not in after and 'id="portal-copy-link-dialog"' not in after
     assert "no-store" in response["Cache-Control"]
     assert response["Referrer-Policy"] == "no-referrer"
     assert list(get_messages(response.wsgi_request)) == []
     # The new token is the one live invitation; the older one is voided.
     token = PortalToken.objects.get(token_hash=tokens.digest(raw))
     assert token.kind == TokenKind.INVITE and token.used_at is None
-    assert token.expires_at - token.created_at >= tokens.INVITE_LIFETIME - timedelta(seconds=5)
+    assert abs(token.expires_at - token.created_at - timedelta(minutes=60)) < timedelta(seconds=5)
     older.refresh_from_db()
     assert older.used_at is not None
     assert tokens.find(older_raw, TokenKind.INVITE) is None
@@ -234,11 +255,104 @@ def _refused(staff: Client, operator: Operator, sentence: str) -> None:
     assert 'id="portal-copied-link-field"' not in page(staff, operator)
 
 
+class Clock:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.now = timezone.now()
+        monkeypatch.setattr(timezone, "now", lambda: self.now)
+
+
+@pytest.mark.parametrize("make", [invited, active])
+def test_a_copied_link_expires_sixty_minutes_after_the_click(
+    monkeypatch: pytest.MonkeyPatch, make: Any
+) -> None:
+    clock = Clock(monkeypatch)
+    operator = an_operator()
+    make(operator)
+    response = copy(client_for(Role.ADMIN)[0], operator)
+    path, kind, raw = found(response)
+    token = PortalToken.objects.get(token_hash=tokens.digest(raw))
+    assert token.expires_at == clock.now + timedelta(minutes=60)
+    assert invitations.COPIED_LIFETIME == timedelta(minutes=60)
+    clock.now += timedelta(minutes=59)
+    assert Client().get(path).status_code == 200
+    clock.now += timedelta(minutes=1)
+    assert Client().get(path).status_code == 404
+    done = Client().post(path, {"password": NEW_PASSWORD, "confirm": NEW_PASSWORD})
+    assert done.status_code == 404
+    assert PortalToken.objects.get(pk=token.pk).used_at is None
+
+
+def test_the_mailed_links_keep_their_own_lifetimes() -> None:
+    user = invited(an_operator())
+    moment = timezone.now()
+    invite, _ = tokens.issue(user, TokenKind.INVITE, moment)
+    reset, _ = tokens.issue(user, TokenKind.RESET, moment)
+    assert invite.expires_at == moment + timedelta(days=7)
+    assert reset.expires_at == moment + timedelta(hours=1)
+
+
+# --- Never routable outside the sandbox ------------------------------------------------------
+
+
+def _reload_urls() -> None:
+    clear_url_caches()
+    importlib.reload(ledger.urls)
+    importlib.reload(finance.urls)
+    clear_url_caches()
+
+
+@pytest.fixture
+def reloaded(settings: Any) -> Iterator[Any]:
+    """Reloads the URL conf under the settings the test sets; restores it after."""
+    yield settings
+    settings.STAX_ENV = "sandbox"
+    settings.APP_ENV = "local"
+    _reload_urls()
+
+
+PATH = "/operators/00000000-0000-0000-0000-000000000000/portal/copy-link/"
+
+
 @pytest.mark.parametrize(
     ("stax_env", "app_env"),
     [("live", "production"), ("live", "staging"), ("sandbox", "production")],
 )
-def test_a_live_key_or_production_is_refused(sandbox: Any, stax_env: str, app_env: str) -> None:
+def test_the_route_does_not_exist_in_production_or_with_a_live_key(
+    reloaded: Any, stax_env: str, app_env: str
+) -> None:
+    reloaded.STAX_ENV = stax_env
+    reloaded.APP_ENV = app_env
+    _reload_urls()
+    with pytest.raises(NoReverseMatch):
+        reverse("ledger:operators:portal_copy_link", kwargs={"pk": "x"})
+    try:
+        match = resolve(PATH)
+    except Resolver404:
+        match = None
+    assert match is None or match.view_name != "ledger:operators:portal_copy_link"
+    assert registry.sandbox_only_rules() == {}
+    operator = an_operator()
+    invited(operator)
+    admin, _ = client_for(Role.ADMIN)
+    assert admin.post(f"/operators/{operator.pk}/portal/copy-link/").status_code == 404
+    assert BUTTON not in page(admin, operator)
+    assert not PortalToken.objects.exists()
+
+
+def test_the_route_exists_on_the_sandbox(reloaded: Any) -> None:
+    _reload_urls()
+    assert reverse("ledger:operators:portal_copy_link", kwargs={"pk": "x"}) == (
+        "/operators/x/portal/copy-link/"
+    )
+    assert resolve(PATH).view_name == "ledger:operators:portal_copy_link"
+    assert set(registry.sandbox_only_rules()) == {"ledger:operators:portal_copy_link"}
+
+
+@pytest.mark.parametrize(
+    ("stax_env", "app_env"),
+    [("live", "production"), ("live", "staging"), ("sandbox", "production")],
+)
+def test_the_service_refuses_off_the_sandbox_too(sandbox: Any, stax_env: str, app_env: str) -> None:
     sandbox.STAX_ENV = stax_env
     sandbox.APP_ENV = app_env
     operator = an_operator()

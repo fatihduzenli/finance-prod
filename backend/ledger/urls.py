@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from django.urls import include, path, re_path
 
+from finance.middleware import sandbox_outside_production
 from ledger.views import (
     audit,
     autopay_plans,
@@ -89,9 +90,20 @@ operator_patterns = (
         path("<str:pk>/portal/disable/", portal_access.portal_disable, name="portal_disable"),
         path("<str:pk>/portal/enable/", portal_access.portal_enable, name="portal_enable"),
         path("<str:pk>/portal/reset/", portal_access.portal_reset, name="portal_reset"),
-        # "Copy invite link" (owner, 2026-11-01): admin, the sandbox only.
-        path("<str:pk>/portal/copy-link/", portal_access.portal_copy_link, name="portal_copy_link"),
-    ],
+    ]
+    # "Copy invite link" (owner, 2026-11-01): admin, and the route exists on the sandbox only,
+    # never in production (read when the URL conf loads).
+    + (
+        [
+            path(
+                "<str:pk>/portal/copy-link/",
+                portal_access.portal_copy_link,
+                name="portal_copy_link",
+            )
+        ]
+        if sandbox_outside_production()
+        else []
+    ),
     "operators",
 )
 

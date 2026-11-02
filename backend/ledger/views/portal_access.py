@@ -5,10 +5,10 @@ deposits.md H2): billing, POST only, each audited by :mod:`portal.invitations`.
   is not accepted; the message goes to the operator's e-mail through the Outbox.
 - ``ledger:operators:portal_disable`` / ``portal_enable``: portal access off and on.
 - ``ledger:operators:portal_reset``: "Reset password" (an active account).
-- ``ledger:operators:portal_copy_link``: "Copy invite link" (admin, the sandbox only; staging
-  has no mail). Its answer is the operator page itself, with the new one-time link in the
-  PORTAL card: the link is in that one response only (no message, no redirect, no log),
-  which carries ``Cache-Control: no-store`` and ``Referrer-Policy: no-referrer``.
+- ``ledger:operators:portal_copy_link``: "Copy invite link" (admin; the route exists on the
+  sandbox only, ``ledger/urls.py``). Its answer is the operator page itself with a dialog open
+  on the new one-time link: the link is in that one response only (no message, no redirect,
+  no log), which carries ``Cache-Control: no-store`` and ``Referrer-Policy: no-referrer``.
 
 The operator in the URL is loaded first (404 otherwise); the outcome is a message on the page.
 """

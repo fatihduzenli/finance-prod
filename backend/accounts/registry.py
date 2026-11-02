@@ -26,6 +26,7 @@ from django.conf import settings
 from django.http import HttpRequest
 
 from accounts.roles import Role, meets
+from finance.middleware import sandbox_outside_production
 
 SAFE_METHODS: frozenset[str] = frozenset({"GET", "HEAD", "OPTIONS"})
 POST: frozenset[str] = frozenset({"POST"})
@@ -350,9 +351,6 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:operators:portal_disable": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:portal_enable": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:portal_reset": RouteRule(min_role=Role.BILLING, methods=POST),
-    # Owner, 2026-11-01: "Copy invite link" hands over a one-time credential, so admin (the
-    # view checks again; the service refuses outside the sandbox).
-    "ledger:operators:portal_copy_link": RouteRule(min_role=Role.ADMIN, methods=POST),
     # PLAN-014 D6: "Send a message now" on a charge's page.
     "ledger:charges:send_message": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:send_message": RouteRule(min_role=Role.BILLING, methods=POST),
@@ -365,9 +363,22 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "finance:payment_status_period": RouteRule(min_role=Role.VIEWER, methods=POST),
 }
 
+
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every
 #: action of a listed model (add, change, delete, changelist bulk actions, extra views
 #: such as auth_user_password_change) needs at least this role for an unsafe method.
+def sandbox_only_rules() -> dict[str, RouteRule]:
+    """The rules of the routes that exist on the sandbox only (``ledger/urls.py`` registers
+    them under the same test, :func:`finance.middleware.sandbox_outside_production`): "Copy
+    invite link" (owner, 2026-11-01) hands over a one-time credential, so admin (the view
+    checks again)."""
+    if not sandbox_outside_production():
+        return {}
+    return {"ledger:operators:portal_copy_link": RouteRule(min_role=Role.ADMIN, methods=POST)}
+
+
+ROUTE_ROLES.update(sandbox_only_rules())
+
 ADMIN_MODEL_PREFIX_RULES: dict[str, RouteRule] = {
     "admin:auth_user_": RouteRule(min_role=Role.ADMIN, methods=POST),
     "admin:auth_group_": RouteRule(min_role=Role.ADMIN, methods=POST),

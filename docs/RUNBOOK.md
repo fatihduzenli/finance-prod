@@ -861,12 +861,12 @@ sign-in. Every action is in the activity log (`portal_user.invited`, `disabled`,
 `reset_sent`; `activated` and `password_reset` when the operator uses a link).
 
 **Testing the portal on staging.** Staging sends no mail, so an admin opens the operator page and
-presses **Copy invite link** on the Portal card (shown on the sandbox only, never in production,
-and only to an admin, for an account that exists and is not disabled): the page shows a new
-one-time link once, an invitation link while the account has no password, else a one-hour reset
-link, and the link made before it stops working. Open the link in a private window to choose the
+presses **Copy invite link** on the Portal card (it exists on the sandbox only, never in
+production, and only for an admin, for an account that exists and is not disabled): a dialog
+shows a new one-time link once, an invitation link while the account has no password, else a
+reset link, which expires 60 minutes after the click, and the link made before it stops working. Open the link in a private window to choose the
 password and sign in as the operator; the link is never stored, logged or mailed, so copy it
-before leaving the page, and press the button again for a fresh one. Each press is in the
+before closing the dialog, and press the button again for a fresh one. Each press is in the
 activity log as `portal_user.link_copied` with the link's kind and expiry, never the link.
 
 **Too many attempts.** Five wrong sign-ins within 15 minutes for one e-mail, or from one address,

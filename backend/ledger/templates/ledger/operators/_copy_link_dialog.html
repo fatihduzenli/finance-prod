@@ -1,0 +1,6 @@
+{% comment %}"Copy invite link" (owner, 2026-11-01; the sandbox only, admin only): the operator page's answer to the POST opens this dialog once, with the new one-time link in a read-only field (selectable without script), the Copy button (ledger/copy_link.js) and the sentence with its expiry. Closing it (×, Escape, the backdrop or Close) is a plain GET of the operator page, where the link is gone. The link is in this response only: no message, no redirect, no log, no-store.{% endcomment %}{% load components %}{% url 'ledger:operators:detail' pk=operator.pk as back_url %}{% dialog id="portal-copy-link-dialog" title="Invite link for "|add:operator.display_name size="sm" open=True return_url=back_url %}
+<p><label for="portal-copied-link-field">One-time link</label></p>
+<p><input type="text" id="portal-copied-link-field" value="{{ copied_link.link }}" readonly autocomplete="off" spellcheck="false"> <button type="button" class="btn btn-sm" id="portal-copied-link-copy" data-copy-from="portal-copied-link-field" hidden>Copy</button></p>
+<p class="muted" id="portal-copied-link-note">{{ copied_link.message }}</p>
+<div class="dialog-foot"><a class="btn" id="portal-copy-link-close" href="{{ back_url }}">Close</a></div>
+{% enddialog %}

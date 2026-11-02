@@ -21,10 +21,12 @@ operator's row lock and audited on the entity ``portal_user``:
   password?" form: the same message for an active account, at most one per
   :data:`RESET_COOLDOWN`, nothing for any other e-mail; the caller answers the same sentence
   whatever happened.
-- :func:`copy_link` ("Copy invite link"; admin, the sandbox only: staging has no mail): a fresh
-  one-time link handed to the admin in the outcome, never stored: an invitation link while the
-  account has not chosen a password, else a reset link; the older live link of that kind stops
-  working. Audited ``portal_user.link_copied`` with the kind and the expiry, never the link.
+- :func:`copy_link` ("Copy invite link"; admin, the sandbox only: staging has no mail; its route
+  exists only there, :func:`finance.middleware.sandbox_outside_production`): a fresh one-time
+  link handed to the admin in the outcome, never stored, that expires
+  :data:`COPIED_LIFETIME` after the click: an invitation link while the account has not chosen
+  a password, else a reset link; the older live link of that kind stops working. Audited
+  ``portal_user.link_copied`` with the kind and the expiry, never the link.
 
 **One-time links.** A portal message is stored with
 :data:`ledger.services.messaging.LINK_ADDED_AT_SEND` where its link goes; :func:`register_links`
@@ -49,7 +51,7 @@ from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
 from finance.dates import moment_text
-from finance.middleware import on_sandbox
+from finance.middleware import sandbox_outside_production
 from ledger import merge
 from ledger.models import (
     AuditLog,
@@ -73,6 +75,8 @@ RESET_SENT = "portal_user.reset_sent"
 LINK_COPIED = "portal_user.link_copied"
 #: The portal's own reset form queues at most one message per account in this time.
 RESET_COOLDOWN = timedelta(minutes=5)
+#: A copied link (:func:`copy_link`) works for this long after the click, whatever its kind.
+COPIED_LIFETIME = timedelta(minutes=60)
 
 NO_OPERATOR = "The operator no longer exists."
 #: The PORTAL card's account line for an archived operator.
@@ -98,7 +102,7 @@ SANDBOX_ONLY = "Copy invite link is only on the sandbox."
 ADMIN_ONLY = "Only an admin can copy an invite link."
 COPIED_TEXT = (
     "Sandbox only. Anyone with this link can set this operator's password; it works once and "
-    "expires on {expires}."
+    "expires at {expires}."
 )
 
 #: Why a portal message is no longer to be sent (class names, the message's ``error``).
@@ -351,20 +355,16 @@ def request_reset(raw_email: object, now: datetime | None = None) -> None:
         )
 
 
-def copy_link_environment() -> bool:
-    """Whether this environment offers "Copy invite link": the sandbox, never production."""
-    return on_sandbox() and settings.APP_ENV != "production"
-
-
 def copy_link_offered(portal_card: Card, role: Role | None) -> bool:
     """Whether the PORTAL card shows "Copy invite link" to a viewer of ``role``."""
-    return copy_link_environment() and meets(role, Role.ADMIN) and portal_card.can_copy_link
+    return sandbox_outside_production() and meets(role, Role.ADMIN) and portal_card.can_copy_link
 
 
 def copy_link(operator_id: uuid.UUID, actor: User, now: datetime | None = None) -> Outcome:
     """The PORTAL card's "Copy invite link" (see the module docstring): the outcome carries the
     link, which the caller shows once and never stores, logs or puts in a URL."""
-    if not copy_link_environment():
+    # Defence in depth: outside the sandbox the route does not exist (ledger/urls.py).
+    if not sandbox_outside_production():
         return Outcome(False, SANDBOX_ONLY)
     if not meets(role_of(actor), Role.ADMIN):
         return Outcome(False, ADMIN_ONLY)
@@ -386,7 +386,7 @@ def copy_link(operator_id: uuid.UUID, actor: User, now: datetime | None = None) 
             kind, route = TokenKind.RESET, "portal:reset_confirm"
         else:
             return Outcome(False, NOT_ACTIVE)
-        token, raw = tokens.issue(user, kind, moment)
+        token, raw = tokens.issue(user, kind, moment, lifetime=COPIED_LIFETIME)
         tokens.keep(token, moment)
         _audit(
             LINK_COPIED,
