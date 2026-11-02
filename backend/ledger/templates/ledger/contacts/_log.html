@@ -7,6 +7,6 @@ D6): one ledger/contacts/_log_entry.html per row, newest first. ``rows``: LogRow
 reason; only billing and admin are ever given one.
 {% endcomment %}<ul class="contact-log" id="contact-entries">
   {% for row in rows %}{% include "ledger/contacts/_log_entry.html" %}{% empty %}
-  <li class="muted empty">No entries yet. Add one.{% if empty_next_url %} <a class="btn empty-next" href="{{ empty_next_url }}">Add entry</a>{% endif %}</li>
+  <li class="muted empty">No entries yet. Add one.{% if empty_next_url %} <a class="btn empty-next" href="{{ empty_next_url }}">Log contact</a>{% endif %}</li>
   {% endfor %}
 </ul>

@@ -1,4 +1,4 @@
-{% comment %}The Notes & follow-ups tab (PLAN-012 D3, docs/qa/PLAN-012d D3; PLAN-014 B4 to B6): for billing, the note form (#note-form: "Write a note about this store…", at most 2,000 characters, Save); the filter (#timeline-filter, links: All · Notes · Calls & promises · E-mails, the current one aria-current); then one list, newest first (ledger.services.timeline.entries; ledger/stores/_timeline_list.html, which the store's All entries page also lists). E-mails lists nothing until Batch D ("No e-mails yet.").{% endcomment %}
+{% load icons %}{% comment %}The Notes & follow-ups tab (PLAN-012 D3, docs/qa/PLAN-012d D3; PLAN-014 B4 to B6): for billing, the note form (#note-form: "Write a note about this store…", at most 2,000 characters, Save); the filter (#timeline-filter, links: All · Notes · Calls & promises · E-mails, the current one aria-current); then one list, newest first (ledger.services.timeline.entries; ledger/stores/_timeline_list.html, which the store's All entries page also lists). E-mails lists nothing until Batch D ("No e-mails yet.").{% endcomment %}
 <h2 id="contacts">Notes &amp; follow-ups</h2>
 {% if note_form %}<form method="post" action="{% url 'ledger:notes:add' pk=store.pk %}" class="note-form js-single-submit" id="note-form" autocomplete="off">
   {% csrf_token %}
@@ -8,7 +8,7 @@
 <div class="timeline-bar">
   <nav class="segmented" id="timeline-filter" aria-label="Show">{% for value, label, url in timeline_filters %}<a href="{{ url }}" id="timeline-show-{{ value }}"{% if value == timeline_show %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
   <p class="actions">
-    {% if contact_add_url %}<a class="btn" id="add-store-contact" href="{{ contact_add_url }}">Add entry</a>{% endif %}
+    {% if contact_add_url %}<a class="btn" id="add-store-contact" href="{{ contact_add_url }}">{% icon "plus" 14 %}Log contact</a>{% endif %}
     <a class="btn" id="all-store-contacts" href="{% url 'ledger:stores:contacts' pk=store.pk %}">All entries</a>
   </p>
 </div>

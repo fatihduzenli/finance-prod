@@ -58,6 +58,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services import autopay_plans, installments, invoice_builder, one_off_charges, rent_run
+from ledger.services.contacts import PROMISE_FIELDS_REQUIRED
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import (
     ACCOUNT_ENTER,
@@ -2747,8 +2748,38 @@ OUTCOME_CHOICES = [
 ]
 
 
+#: The quick outcomes of a call (the owner's "Log contact" dialog, 2026-11-01): the radio's
+#: value, its chip's words, and the sentence the entry's note starts with.
+CALL_OUTCOMES: dict[str, tuple[str, str]] = {
+    "answered": ("Answered", "Answered."),
+    "no_answer": ("No answer", "No answer."),
+    "left_message": ("Left a message", "Left a message."),
+    "wrong_number": ("Wrong number", "Wrong number."),
+}
+#: An e-mail's note without words of its own.
+EMAIL_SENTENCE = "E-mail sent."
+#: A call with neither an outcome nor a note.
+CALL_NOTE_REQUIRED = "Choose what happened on the call, or write a note."
+#: The kind's sentence and the note together exceed the note's limit.
+CALL_NOTE_TOO_LONG = (
+    f"With its first sentence the note is too long: keep it under {CONTACT_BODY_MAX_LENGTH:,} "
+    "characters in all."
+)
+
+
 class ContactEntryForm(ContactEditForm):
-    """Add one contact entry to an operator's log (PLAN-011b D7, PLAN-012 D3, D5).
+    """Add one contact entry to an operator's log (PLAN-011b D7, PLAN-012 D3, D5), the
+    "Log contact" dialog (owner, 2026-11-01).
+
+    ``kind``: four radio cards. ``call_outcome``: a call's quick outcome (one of
+    :data:`CALL_OUTCOMES`, optional); with one the note may be left empty, and the entry's
+    note is the outcome's sentence, then the note when there is one ("No answer. Try
+    Friday."). It is read only for a call. An e-mail and a promise to pay need no note either:
+    theirs starts "E-mail sent." or "Promised $3,500.00 by Nov 4, 2026." (a promise still
+    needs its date and amount). A visit, and a call without an outcome, need a note. The
+    promise fields and the outcome chips carry ``data-shown-when`` (ledger/shown_when.js) on
+    the kind's radios: shown, and sent, only for their kind; the service refuses promise
+    fields on any other kind either way.
 
     ``lease``: required when the operator has more than one lease in effect
     (``lease_required``). ``previous`` and ``outcome``: offered when the operator has an
@@ -2757,6 +2788,25 @@ class ContactEntryForm(ContactEditForm):
     amount for the page's "Rescheduled" preselection."""
 
     lease = _QuietChoiceField(required=False, label="Store")
+    kind = _QuietChoiceField(
+        choices=ContactKind.choices,
+        widget=forms.RadioSelect,
+        label="Kind",
+        error_messages={"required": "Choose the kind of contact."},
+    )
+    call_outcome = _QuietChoiceField(
+        required=False,
+        label="Outcome",
+        choices=[(value, words) for value, (words, _) in CALL_OUTCOMES.items()],
+        widget=forms.RadioSelect,
+    )
+    body = forms.CharField(
+        required=False,
+        label="Note",
+        widget=forms.Textarea(attrs={"rows": 3, "placeholder": "What was said, what happens next"}),
+        max_length=CONTACT_BODY_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+    )
     previous = _QuietChoiceField(required=False, label="Previous promise")
     outcome = _QuietChoiceField(
         required=False,
@@ -2767,12 +2817,13 @@ class ContactEntryForm(ContactEditForm):
     )
     field_order = [
         "lease",
-        "previous",
-        "outcome",
         "kind",
+        "call_outcome",
         "happened_on",
         "promised_date",
         "promised_amount",
+        "previous",
+        "outcome",
         "body",
     ]
 
@@ -2799,6 +2850,71 @@ class ContactEntryForm(ContactEditForm):
         else:
             del self.fields["previous"]
             del self.fields["outcome"]
+        # The kind's radios are "<id>_<n>" in the order of ContactKind.
+        kind_id = self.auto_id % "kind" if isinstance(self.auto_id, str) else "kind"
+        kinds = list(ContactKind.values)
+        call = f"{kind_id}_{kinds.index(ContactKind.CALL)}"
+        promise = f"{kind_id}_{kinds.index(ContactKind.PROMISE)}"
+        self.fields["call_outcome"].widget.attrs["data-shown-when"] = call
+        for name in ("promised_date", "promised_amount"):
+            self.fields[name].widget.attrs["data-shown-when"] = promise
+
+    def clean_body(self) -> str:
+        return visible_text(self.cleaned_data.get("body") or "")
+
+    def note_required(self) -> bool:
+        """Whether the kind shown asks for a note (the dialog's marker): a visit, and a call
+        without an outcome."""
+        kind = self["kind"].value()
+        return kind == ContactKind.VISIT or (
+            kind == ContactKind.CALL and not self["call_outcome"].value()
+        )
+
+    def _sentence(self, cleaned: dict[str, Any]) -> str | None:
+        """The sentence the entry's note starts with (owner, 2026-11-01): a call's outcome,
+        "E-mail sent.", or the promise's amount and date; ``""`` when the kind needs a note
+        instead; ``None`` when a promise lacks its date or amount (refused on the fields)."""
+        kind = cleaned.get("kind")
+        if kind == ContactKind.CALL:
+            chosen = cleaned.get("call_outcome")
+            return CALL_OUTCOMES[chosen][1] if chosen else ""
+        if kind == ContactKind.EMAIL:
+            return EMAIL_SENTENCE
+        if kind == ContactKind.PROMISE:
+            on, amount = cleaned.get("promised_date"), cleaned.get("promised_amount")
+            if on is not None and amount is not None:
+                return f"Promised {format_amount(amount)} by {day_text(on)}."
+            if cleaned.get("outcome") == "rescheduled":
+                # The service takes the old promise's date and amount; a note says the rest.
+                return ""
+            for name, value in (("promised_date", on), ("promised_amount", amount)):
+                if value is None and name not in self.errors:
+                    self.add_error(name, PROMISE_FIELDS_REQUIRED)
+            return None
+        return ""
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
+        if "body" in self.errors:
+            return cleaned
+        note = cleaned.get("body") or ""
+        sentence = self._sentence(cleaned)
+        if sentence is None:
+            return cleaned
+        if sentence:
+            body = f"{sentence} {note}" if note else sentence
+            if len(body) > CONTACT_BODY_MAX_LENGTH:
+                self.add_error("body", CALL_NOTE_TOO_LONG)
+            else:
+                cleaned["body"] = body
+        elif not note:
+            self.add_error(
+                "body",
+                CALL_NOTE_REQUIRED
+                if cleaned.get("kind") == ContactKind.CALL
+                else ContactEditForm.base_fields["body"].error_messages["required"],
+            )
+        return cleaned
 
 
 #: How the outcome of a promise was learned (PLAN-012c-b D2): the kinds of a Kept or Broken
