@@ -35,13 +35,18 @@ months; the last 12 by default, PLAN-012g C2):
   calendar month; not the Cashflow range) as Overdue, Paid and Upcoming by the grid's status
   rule, the pending ones counted apart (D20: an installment, an autopay-plan occurrence and a
   re-debit count through their parent or source, never on their own);
-- :func:`mini_calendar` (the Calendar page's three queries): a month's days and items.
+- :func:`mini_calendar` (the Calendar page's three queries): a month's days and items, and
+  the next seven days' items from today (:class:`NextDays`, owner 2026-11-01): at most
+  :data:`NEXT_ROWS` rows with the store's title and the amount, read by at most four more
+  queries over the rows shown (the stores; the rent charges, the rent in effect and the
+  re-debit charges behind the amounts), never one per row.
 
 Money is ``Decimal``; dates are the project's ``TIME_ZONE`` days.
 """
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
@@ -51,11 +56,14 @@ from decimal import ROUND_FLOOR, Decimal
 
 from django.db.models import Count, Exists, F, Max, OuterRef, Sum
 from django.db.models.functions import Least
+from django.urls import reverse
 from django.utils import timezone
 
 from finance.dates import day_short_text, day_text, month_long_text, month_text
 from ledger.models import (
     ZERO,
+    Lease,
+    LeaseRentHistory,
     OneOffCategory,
     OneOffCharge,
     OneOffChargeStatus,
@@ -64,8 +72,10 @@ from ledger.models import (
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
+    Store,
 )
-from ledger.services import calendar, grid, pnl, stores
+from ledger.services import calendar, grid, pnl, rent_run, stores
+from ledger.services.leases import debit_amounts
 
 #: Business days an ACH debit takes to settle (docs/CLAUDE.md §10, the provider's ACH page).
 ACH_SETTLE_BUSINESS_DAYS = 5
@@ -713,12 +723,54 @@ class MiniDay:
         return f"{_WEEKDAYS_SHORT[self.day.weekday()]}, {day_short_text(self.day)}"
 
 
+#: The days the mini calendar's "Next 7 days" list covers: today and the six after it.
+NEXT_DAYS = 7
+#: The rows the list shows at most; the rest are counted ("+N more").
+NEXT_ROWS = 6
+NEXT_EMPTY = "Nothing in the next 7 days."
+#: A generated title's tail when the lease is debited twice a month (", debit 2").
+_DEBIT_SUFFIX = re.compile(r", debit \d\Z")
+
+
+@dataclass(frozen=True, slots=True)
+class NextItem:
+    """A row of the "Next 7 days" list: the day ("Nov 3"), the store (its title, linked;
+    empty when the item has none), what it is (the day panel's words without the store)
+    and the amount (``None`` when the item has none or it is not known)."""
+
+    on: date
+    kind: str
+    what: str
+    url: str
+    store: str
+    store_url: str
+    amount: Decimal | None
+
+    @property
+    def label(self) -> str:
+        return day_short_text(self.on)
+
+
+@dataclass(frozen=True, slots=True)
+class NextDays:
+    start: date
+    end: date
+    rows: list[NextItem]
+    #: The items past :data:`NEXT_ROWS`, counted, not listed.
+    more: int
+
+    @property
+    def empty_line(self) -> str:
+        return NEXT_EMPTY
+
+
 @dataclass(frozen=True, slots=True)
 class MiniCalendar:
     month: date
     previous: date
     next: date
     weeks: list[list[MiniDay]]
+    upcoming: NextDays
 
     @property
     def days_with_items(self) -> list[MiniDay]:
@@ -738,19 +790,143 @@ def parse_cal(raw: str, today: date) -> date:
     return pnl._parse_month(raw or "") or today.replace(day=1)
 
 
+def _uid_key(item: calendar.CalendarItem) -> str:
+    """The part of a generated item's UID before the host ("debit-<lease>-<seq>-<day>",
+    "redebit-<charge>"): what names its record."""
+    return item.uid.partition("@")[0]
+
+
+def _what(item: calendar.CalendarItem) -> str:
+    """The day panel's words without the store: a generated item's title before the store
+    ("Debit day", "Re-debit", "Lease ends", with ", debit 2" kept); a stored entry's own
+    title; a generated item without a store keeps its whole title (the operator's name)."""
+    if not item.generated or item.store_id is None:
+        return item.title
+    head, _, rest = item.title.partition(": ")
+    suffix = _DEBIT_SUFFIX.search(rest)
+    return head + (suffix.group(0) if suffix else "")
+
+
+def _debit_amounts(debits: Sequence[calendar.CalendarItem]) -> dict[str, Decimal]:
+    """Each debit day's amount by its UID: the rent charge's amount due when the charge is
+    made (a waived one has none), else what the rent run would charge that day (the rent in
+    effect, the first month prorated, split for a twice-monthly lease). Two queries."""
+    keys: dict[str, tuple[uuid.UUID, int, date]] = {}
+    for item in debits:
+        if item.lease_id is None:  # a debit day is always a lease's
+            continue
+        _, seq_text, _ = _uid_key(item).rsplit("-", 2)
+        keys[item.uid] = (item.lease_id, int(seq_text), item.on)
+    if not keys:
+        return {}
+    lease_ids = {lease_id for lease_id, _, _ in keys.values()}
+    charges = {
+        (lease_id, seq, due_on): (status, amount)
+        for lease_id, seq, due_on, status, amount in RentCharge.objects.filter(
+            lease_id__in=lease_ids, due_on__in={on for _, _, on in keys.values()}
+        ).values_list("lease_id", "seq", "due_on", "status", "amount_due")
+    }
+    found: dict[str, Decimal] = {}
+    missing = {uid: key for uid, key in keys.items() if key not in charges}
+    for uid, key in keys.items():
+        if key in charges and charges[key][0] != RentChargeStatus.WAIVED:
+            found[uid] = Decimal(charges[key][1])
+    if not missing:
+        return found
+    rents: dict[uuid.UUID, list[LeaseRentHistory]] = defaultdict(list)
+    leases: dict[uuid.UUID, Lease] = {}
+    for row in LeaseRentHistory.objects.select_related("lease").filter(
+        lease_id__in={lease_id for lease_id, _, _ in missing.values()},
+        effective_from__lte=max(on for _, _, on in missing.values()),
+    ):
+        rents[row.lease_id].append(row)
+        leases[row.lease_id] = row.lease
+    for uid, (lease_id, seq, on) in missing.items():
+        live = [
+            row
+            for row in rents[lease_id]
+            if row.effective_from <= on and (row.effective_to is None or row.effective_to >= on)
+        ]
+        if not live:
+            continue
+        lease = leases[lease_id]
+        rent = max(live, key=lambda row: row.effective_from).amount
+        month = rent_run.first_month(lease, on.replace(day=1), rent)
+        days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+        found[uid] = debit_amounts(month.amount, twice_monthly=len(days) == 2)[seq - 1]
+    return found
+
+
+def _redebit_amounts(redebits: Sequence[calendar.CalendarItem]) -> dict[str, Decimal]:
+    """Each re-debit's (or bank debit's) amount by its UID: the charge's price. One query."""
+    if not redebits:
+        return {}
+    by_pk = {_uid_key(item).removeprefix("redebit-"): item.uid for item in redebits}
+    return {
+        by_pk[str(pk)]: Decimal(price)
+        for pk, price in OneOffCharge.objects.filter(pk__in=list(by_pk)).values_list("pk", "price")
+    }
+
+
+def next_days(found: Iterable[calendar.CalendarItem], today: date) -> NextDays:
+    """The "Next 7 days" list (owner 2026-11-01): ``found``'s items from today to six days
+    after, by day, then kind in :data:`DOT_ORDER`, then ``found``'s order; the first
+    :data:`NEXT_ROWS` as rows, the rest counted. At most four queries, over the rows shown."""
+    start, end = today, today + timedelta(days=NEXT_DAYS - 1)
+    within = [item for item in found if start <= item.on <= end]
+    within.sort(key=lambda item: (item.on, DOT_ORDER.index(item.kind)))
+    shown = within[:NEXT_ROWS]
+    store_ids = {item.store_id for item in shown if item.store_id is not None}
+    titles = (
+        {
+            pk: stores.title_of(number, label, city)
+            for pk, number, label, city in Store.objects.filter(pk__in=store_ids).values_list(
+                "pk", "store_number", "external_label", "city"
+            )
+        }
+        if store_ids
+        else {}
+    )
+    amounts = _debit_amounts([item for item in shown if item.kind == calendar.KIND_DEBIT])
+    amounts |= _redebit_amounts([item for item in shown if item.kind == calendar.KIND_REDEBIT])
+    rows = [
+        NextItem(
+            on=item.on,
+            kind=item.kind,
+            what=_what(item),
+            url=item.url,
+            store=titles.get(item.store_id, "") if item.store_id is not None else "",
+            store_url=(
+                reverse("ledger:stores:detail", kwargs={"pk": item.store_id})
+                if item.store_id in titles
+                else ""
+            ),
+            amount=amounts.get(item.uid),
+        )
+        for item in shown
+    ]
+    return NextDays(start=start, end=end, rows=rows, more=len(within) - len(shown))
+
+
 def mini_calendar(month: date, today: date) -> MiniCalendar:
     """The month's weeks (Sunday first) with each day's items: the Calendar page's own
-    reads (:func:`ledger.services.calendar.items_in` over the month, every kind, no store
-    or operator filter, three queries; :func:`ledger.services.calendar.month_weeks`)."""
+    reads (:func:`ledger.services.calendar.items_in` over the month and the next seven
+    days, every kind, no store or operator filter, three queries;
+    :func:`ledger.services.calendar.month_weeks`), and the "Next 7 days" list
+    (:func:`next_days`) from the same read."""
     first, last = calendar.month_bounds(month)
-    found = calendar.items_in(((first, last),), calendar.Filters())
+    found = calendar.items_in(
+        ((first, last), (today, today + timedelta(days=NEXT_DAYS - 1))), calendar.Filters()
+    )
+    in_month = [item for item in found if first <= item.on <= last]
     weeks = [
         [MiniDay(cell.day, cell.day == today, cell.in_month, cell.items) for cell in week]
-        for week in calendar.month_weeks(first, found)
+        for week in calendar.month_weeks(first, in_month)
     ]
     return MiniCalendar(
         month=first,
         previous=pnl.add_months(first, -1),
         next=pnl.add_months(first, 1),
         weeks=weeks,
+        upcoming=next_days(found, today),
     )

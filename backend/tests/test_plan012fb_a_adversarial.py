@@ -225,5 +225,8 @@ def test_the_dashboard_query_count_stays_within_its_budget(
     billing, _ = client_for(Role.BILLING)
     billing.get("/")  # warm the session row
     # D20 (A5): the fees query joined; PLAN-014 F5: +2, the pending re-debits (83 on PostgreSQL).
-    with django_assert_max_num_queries(83):
+    # Owner 2026-11-01, the mini calendar's "Next 7 days": +3 when the lease's debit day is in
+    # the next seven days (the stores, the rent charges, the rent in effect; 81 -> 84 measured
+    # on SQLite), so 83 -> 86.
+    with django_assert_max_num_queries(86):
         assert billing.get("/?range=12m").status_code == 200

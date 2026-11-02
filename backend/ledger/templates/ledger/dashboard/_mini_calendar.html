@@ -1,13 +1,17 @@
-{% load dates %}
+{% load dates money %}
 {% comment %}The mini calendar (PLAN-012f-b D6; PLAN-012g C3; DESIGN-SPEC §4a, §7.5): the month's name links to Reports ›
 Calendar for that month; ‹ › step the month (?cal=YYYY-MM beside an explicit range); a 7-column grid, Sunday
 first, today in a teal circle, under a day with items one dot per kind present (up to three, .mini-dot
 kind-…, coloured by app.css). Each such day is a button over a hidden popover listing its items as links,
 each with a bar in its kind's colour, shown on hover and focus (CSS) and toggled by a tap
 (ledger/static/ledger/dashboard.js), which also rings the day (.is-selected). The legend under the grid
-names the kinds present. On a phone the popover is not shown: the script moves the tapped day's list into
-#mini-panel under the legend; without the script the days' lists are the details under it
-(.mini-day-items, hidden once html.js is set). Built from the Calendar page's own reads.{% endcomment %}
+names the kinds present. Under it the "Next 7 days" list (owner 2026-11-01; #mini-upcoming): today and the six
+days after, each row the day, the store (linked), what it is (linked to the record) and the amount, at most
+six rows and "+N more", "All in Calendar ›"; one muted line when there is nothing. A tap or click on a day
+moves that day's list (its popover) into #mini-panel in the list's place, headed "Wed, Oct 28 · tapped",
+with "Back to next 7 days"; on a phone the popover is not shown. Without the script the popover opens on
+hover and focus, and a phone lists the days in details (.mini-day-items, hidden once html.js is set).
+The card ends after its content (app.css). Built from the Calendar page's own reads.{% endcomment %}
 <section class="card mini-calendar" id="mini-calendar" aria-labelledby="mini-calendar-heading">
   <div class="card-header mini-head">
     <h2 id="mini-calendar-heading"><a id="mini-month" href="{% url 'ledger:calendar:page' %}?month={{ mini_calendar.month|date:'Y-m' }}">{{ mini_calendar.month|month }}</a></h2>
@@ -18,6 +22,12 @@ names the kinds present. On a phone the popover is not shown: the script moves t
     {% for week in mini_calendar.weeks %}{% for cell in week %}<div class="mini-day{% if not cell.in_month %} other-month{% endif %}{% if cell.today %} is-today{% endif %}{% if cell.items %} has-items{% endif %}" data-day="{{ cell.day|date:'Y-m-d' }}"{% if cell.items %} data-label="{{ cell.label }}"{% endif %}>{% if cell.items %}<button type="button" class="mini-num" aria-label="{{ cell.day|day }}: {{ cell.items|length }} item{{ cell.items|length|pluralize }}"{% if cell.today %} aria-current="date"{% endif %}>{{ cell.day.day }}</button><span class="mini-dots" aria-hidden="true">{% for kind in cell.kinds %}<span class="mini-dot kind-{{ kind }}"></span>{% endfor %}</span><ul class="mini-popover">{% for item in cell.items %}<li class="calendar-item kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a href="{{ item.url }}">{{ item.title }}</a></li>{% endfor %}</ul>{% else %}<span class="mini-num"{% if cell.today %} aria-current="date"{% endif %}>{{ cell.day.day }}</span>{% endif %}</div>{% endfor %}{% endfor %}
   </div>
   {% if mini_calendar.legend %}<ul class="mini-legend" id="mini-legend">{% for kind, label in mini_calendar.legend %}<li><span class="mini-key kind-{{ kind }}" aria-hidden="true"></span>{{ label }}</li>{% endfor %}</ul>{% endif %}
-  <div class="mini-panel" id="mini-panel" aria-live="polite" hidden></div>
+  <div class="mini-upcoming" id="mini-upcoming">
+    <div class="mini-upcoming-body" id="mini-upcoming-body">
+      <div class="mini-upcoming-head"><h3 id="mini-upcoming-heading">Next 7 days</h3><a class="card-link" id="mini-upcoming-all" href="{% url 'ledger:calendar:page' %}">All in Calendar ›</a></div>
+      {% if mini_calendar.upcoming.rows %}<ul class="mini-upcoming-list" id="mini-upcoming-list">{% for row in mini_calendar.upcoming.rows %}<li class="mini-upcoming-row kind-{{ row.kind }}" data-kind="{{ row.kind }}"><span class="mini-upcoming-on">{{ row.label }}</span><span class="mini-upcoming-store">{% if row.store_url %}<a href="{{ row.store_url }}">{{ row.store }}</a>{% else %}{{ row.store|default:"—" }}{% endif %}</span><a class="mini-upcoming-what" href="{{ row.url }}">{{ row.what }}</a><span class="mini-upcoming-amount">{% if row.amount is not None %}{{ row.amount|money }}{% endif %}</span></li>{% endfor %}</ul>{% if mini_calendar.upcoming.more %}<p class="mini-upcoming-more" id="mini-upcoming-more">+{{ mini_calendar.upcoming.more }} more</p>{% endif %}{% else %}<p class="muted mini-upcoming-none" id="mini-upcoming-none">{{ mini_calendar.upcoming.empty_line }}</p>{% endif %}
+    </div>
+    <div class="mini-panel" id="mini-panel" aria-live="polite" hidden></div>
+  </div>
   {% if mini_calendar.days_with_items %}<div class="mini-days-list">{% for cell in mini_calendar.days_with_items %}<details class="mini-day-items"><summary>{{ cell.label }}</summary><ul class="mini-day-list">{% for item in cell.items %}<li class="calendar-item kind-{{ item.kind }}"><a href="{{ item.url }}">{{ item.title }}</a></li>{% endfor %}</ul></details>{% endfor %}</div>{% endif %}
 </section>
