@@ -48,6 +48,16 @@ of that lease and for its month's B; A still goes, since the debit will happen a
 promise past its date is broken and pauses nothing: the rules resume from the next rule day,
 without catching up the days paused.
 
+**Plan, then queue** (:func:`plan`, :func:`queue_due`). :func:`plan` reads what the day's rules
+would queue, writing nothing: per lease month and open charge its rule, template, lease (and
+store), operator, amount and outcome (:class:`Planned`) — it would be queued, paused by a
+promise, or skipped and why (no lease or operator to bill, no active template, the month
+settled, already queued); a message that would be queued to a lease without a billing e-mail
+says it will be held. :func:`queue_due` queues exactly the planned items that would be queued,
+so the Outbox's preview of the next 30 days (:mod:`ledger.services.outbox_preview`) and the
+daily job can never disagree, but for a template that cannot be rendered, which only the queue
+finds (counted skipped).
+
 **Queue** (:func:`queue_due`). The lease months first, then the open balances. The lease
 that bills a charge is
 :func:`ledger.services.leases.billing_lease` (a one-off charge without a lease bills its
@@ -70,7 +80,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -79,13 +89,17 @@ from django.db.models import Exists, OuterRef, Q
 
 from ledger import merge
 from ledger.models import (
+    ChargeEntityType,
     CollectionSchedule,
     CollectionStatus,
     InsuranceCharge,
     Lease,
+    LeaseBilling,
     MessageRule,
     MessageTemplate,
     OneOffCharge,
+    Operator,
+    OutboundMessage,
     Payment,
     PaymentChannel,
     PaymentStatus,
@@ -320,10 +334,137 @@ def _paused(
     return (operator_id, lease.pk) in pending or (operator_id, None) in pending
 
 
-def queue_due(today: date) -> Summary:
-    """Queue the message of the rule due today for every lease month
-    (:func:`rent_months_due`), then for every open charge (the module docstring): one row
-    and its ``message_send`` job each."""
+#: What :func:`plan` says of one message (the preview's outcome).
+QUEUE = "queue"
+PAUSED = "paused"
+NO_LEASE = "no_lease"
+NO_TEMPLATE = "no_template"
+MONTH_SETTLED = "month_settled"
+ALREADY_QUEUED = "already_queued"
+OUTCOME_TEXT: Mapping[str, str] = {
+    QUEUE: "Would queue",
+    PAUSED: "Paused by a promise",
+    NO_LEASE: "Skipped: no lease or operator to bill",
+    NO_TEMPLATE: "Skipped: no active template",
+    MONTH_SETTLED: "Skipped: the month is settled",
+    ALREADY_QUEUED: "Skipped: already queued",
+}
+#: Added to "Would queue" when the lease has no billing e-mail: the send holds it.
+HELD_NO_EMAIL = "held: no billing e-mail"
+
+
+@dataclass(frozen=True, slots=True)
+class Planned:
+    """One message :func:`plan` finds for ``day``: about a lease month (``row`` ``None``) or
+    an open charge (``row`` its open balance; ``subject`` ``None`` when the charge was not
+    found), with the lease that bills it, its operator, the rule's active template, the amount
+    and the outcome (:data:`OUTCOME_TEXT`). ``no_email``: the lease has no billing e-mail (an
+    operator-facing message would be held)."""
+
+    day: date
+    rule: Rule
+    subject: messaging.Subject | None
+    row: receivables.OpenBalance | None
+    lease: Lease | None
+    operator: Operator | None
+    template: MessageTemplate | None
+    amount: Decimal
+    outcome: str
+    no_email: bool = False
+
+    @property
+    def queues(self) -> bool:
+        return self.outcome == QUEUE
+
+    @property
+    def key(self) -> tuple[object, ...]:
+        """What the job's idempotency keeps once: (lease, rule, month) for a lease month;
+        (charge kind, charge, rule, occurrence) for a charge."""
+        if isinstance(self.subject, RentMonth):
+            return (self.subject.lease.pk, self.rule.code, self.subject.month)
+        row = self.row
+        return (row.kind, row.charge_id, self.rule.code, self.rule.occurrence) if row else ()
+
+    @property
+    def outcome_text(self) -> str:
+        text = OUTCOME_TEXT[self.outcome]
+        return f"{text} ({HELD_NO_EMAIL})" if self.queues and self.no_email else text
+
+
+def _settled_months(months: list[tuple[RentMonth, Rule]]) -> set[tuple[uuid.UUID, date]]:
+    """(lease, month) of the lease months whose rent charge is settled already (one query)."""
+    if not months:
+        return set()
+    return set(
+        RentCharge.objects.filter(
+            lease_id__in=[month.lease.pk for month, _ in months],
+            period_month__in={month.month for month, _ in months},
+            seq=1,
+            status__in=messaging.CLOSED_RENT,
+        ).values_list("lease_id", "period_month")
+    )
+
+
+def _row_key(item: Planned) -> tuple[object, ...] | None:
+    """The unique row ``item`` would be: (lease, rule, month) for a lease month; (lease,
+    charge type, charge, rule, occurrence) for a charge; ``None`` without a lease."""
+    if item.lease is None or item.subject is None:
+        return None
+    if isinstance(item.subject, RentMonth):
+        return (item.lease.pk, item.rule.code, item.subject.month)
+    return (
+        item.lease.pk,
+        messaging.charge_type_of(item.subject),
+        item.subject.pk,
+        item.rule.code,
+        item.rule.occurrence,
+    )
+
+
+def _already_queued(items: list[Planned]) -> set[tuple[object, ...]]:
+    """The :func:`_row_key` of each of ``items`` that a rule's row holds already (two queries
+    at most)."""
+    months: list[RentMonth] = [
+        item.subject for item in items if isinstance(item.subject, RentMonth)
+    ]
+    charge_ids = [
+        item.subject.pk
+        for item in items
+        if item.subject is not None and not isinstance(item.subject, RentMonth)
+    ]
+    found: set[tuple[object, ...]] = set()
+    if months:
+        found.update(
+            OutboundMessage.objects.filter(
+                manual=False,
+                charge_entity_type=ChargeEntityType.LEASE_MONTH,
+                lease_id__in=[month.lease.pk for month in months],
+                period_month__in={month.month for month in months},
+            ).values_list("lease_id", "rule", "period_month")
+        )
+    if charge_ids:
+        found.update(
+            OutboundMessage.objects.filter(
+                manual=False, period_month__isnull=True, charge_entity_id__in=charge_ids
+            ).values_list(
+                "lease_id", "charge_entity_type", "charge_entity_id", "rule", "occurrence"
+            )
+        )
+    return found
+
+
+def _billing_emails(items: list[Planned]) -> dict[uuid.UUID, str]:
+    """Lease -> its billing e-mail, for the leases of ``items`` (one query)."""
+    ids = {item.lease.pk for item in items if item.lease is not None}
+    if not ids:
+        return {}
+    return dict(LeaseBilling.objects.filter(lease_id__in=ids).values_list("lease_id", "email"))
+
+
+def plan(today: date) -> list[Planned]:
+    """What the rules due ``today`` would queue (the module docstring), writing nothing: the
+    lease months first (:func:`rent_months_due`), then the open charges, each with its
+    outcome. :func:`queue_due` queues exactly the items that :attr:`Planned.queues`."""
     months = rent_months_due(today)
     rows = receivables.open_balances(today)
     autopay = on_autopay(rows)
@@ -332,42 +473,91 @@ def queue_due(today: date) -> Summary:
         for row in rows
         if (rule := rule_for(row, today, autopay=row.charge_id in autopay)) is not None
     ]
-    queued = dict.fromkeys(RULES, 0)
     if not due and not months:
-        return Summary(queued, 0, 0)
+        return []
     templates = {
         row.code: row
         for row in MessageTemplate.objects.filter(code__in=TEMPLATES.values(), active=True)
     }
     pending = contacts.promises_pending(today)
-    paused = skipped = 0
+    settled = _settled_months(months)
+    items: list[Planned] = []
     for rent_month, rule in months:
-        owner = rent_month.lease.operator
+        lease = rent_month.lease
+        owner = lease.operator
         template = templates.get(rule.template)
-        if owner is None or template is None:
-            skipped += 1
-            continue
-        if rule.code in PAUSED_BY_PROMISE and _paused(rent_month.lease, owner.pk, pending):
-            paused += 1
-            continue
-        if _queue_month(rent_month, rule, template, today):
-            queued[rule.code] += 1
+        if owner is None:
+            outcome = NO_LEASE
+        elif template is None:
+            outcome = NO_TEMPLATE
+        elif rule.code in PAUSED_BY_PROMISE and _paused(lease, owner.pk, pending):
+            outcome = PAUSED
+        elif (lease.pk, rent_month.month) in settled:
+            outcome = MONTH_SETTLED
         else:
-            skipped += 1
+            outcome = QUEUE
+        items.append(
+            Planned(
+                today, rule, rent_month, None, lease, owner, template, rent_month.amount, outcome
+            )
+        )
     charges = _charges(row for row, _ in due)
     for row, rule in due:
         charge = charges.get((row.kind, row.charge_id))
-        lease = leases.billing_lease(charge) if charge is not None else None
-        operator = messaging.operator_of(lease, charge) if charge is not None else None
+        billed = leases.billing_lease(charge) if charge is not None else None
+        operator = messaging.operator_of(billed, charge) if charge is not None else None
         template = templates.get(rule.template)
-        if charge is None or lease is None or operator is None or template is None:
-            skipped += 1
-            continue
-        if rule.code in PAUSED_BY_PROMISE and _paused(lease, operator.pk, pending):
+        if charge is None or billed is None or operator is None:
+            outcome = NO_LEASE
+        elif template is None:
+            outcome = NO_TEMPLATE
+        elif rule.code in PAUSED_BY_PROMISE and _paused(billed, operator.pk, pending):
+            outcome = PAUSED
+        else:
+            outcome = QUEUE
+        items.append(
+            Planned(today, rule, charge, row, billed, operator, template, row.balance, outcome)
+        )
+    return _with_queued_and_emails(items)
+
+
+def _with_queued_and_emails(items: list[Planned]) -> list[Planned]:
+    """``items`` with the ones a row holds already marked so, and the e-mail-less marked."""
+    candidates = [item for item in items if item.queues]
+    queued = _already_queued(candidates)
+    emails = _billing_emails(candidates)
+    found: list[Planned] = []
+    for item in items:
+        if item.queues and _row_key(item) in queued:
+            item = replace(item, outcome=ALREADY_QUEUED)
+        elif item.queues and item.lease is not None and item.template is not None:
+            internal = item.template.internal
+            item = replace(item, no_email=not internal and not emails.get(item.lease.pk))
+        found.append(item)
+    return found
+
+
+def queue_due(today: date) -> Summary:
+    """Queue the message of every item :func:`plan` would queue today (the module
+    docstring): one row and its ``message_send`` job each; the paused counted paused, the
+    rest skipped."""
+    queued = dict.fromkeys(RULES, 0)
+    paused = skipped = 0
+    for item in plan(today):
+        if item.outcome == PAUSED:
             paused += 1
             continue
-        if _queue(lease, charge, rule, template, row, today):
-            queued[rule.code] += 1
+        if not item.queues or item.lease is None or item.template is None:
+            skipped += 1
+            continue
+        if isinstance(item.subject, RentMonth):
+            done = _queue_month(item.subject, item.rule, item.template, today)
+        elif item.subject is not None and item.row is not None:
+            done = _queue(item.lease, item.subject, item.rule, item.template, item.row, today)
+        else:  # never planned so: a charge to queue has its row
+            done = False
+        if done:
+            queued[item.rule.code] += 1
         else:
             skipped += 1
     return Summary(queued, paused, skipped)

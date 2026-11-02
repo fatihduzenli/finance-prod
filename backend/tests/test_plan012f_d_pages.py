@@ -320,6 +320,8 @@ PAGES: dict[str, Role] = {
     "ledger:settings:templates": Role.ADMIN,
     "ledger:settings:template_edit": Role.ADMIN,
     "ledger:outbox:page": Role.ADMIN,
+    # Owner, 2026-11-01: the Outbox's "Preview next 30 days" (the view keeps it to admin).
+    "ledger:outbox:preview": Role.ADMIN,
 }
 #: The routes whose GET renders a form, opened by the role the registry gives their POST.
 FORM_PAGES = (
@@ -648,6 +650,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
         "B — Payment due",
     ),
     "ledger:operators:contacts": lambda w: (["Walk Co"], "Notes & follow-ups"),
+    # Owner, 2026-11-01: Admin › Outbox › Preview next 30 days.
+    "ledger:outbox:preview": lambda w: (["Outbox"], "Preview next 30 days"),
     "ledger:leases:create": lambda w: (["Leases"], "New lease"),
     "ledger:leases:detail": lambda w: (["Leases"], f"Lease {w.store.external_label}"),
     "ledger:leases:edit": lambda w: (
