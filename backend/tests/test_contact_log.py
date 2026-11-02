@@ -530,7 +530,8 @@ def test_the_store_page_lists_its_entries_and_add_entry_preselects_its_lease(
     full = page_of(client, f"/stores/{store.pk}/contacts/")
     assert "Pays 2477 Friday." in full and "About 2476." not in full
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
-    assert f'<option value="{lease.pk}" selected>Store 2477</option>' in form
+    # Log contact (owner, 2026-11-01): opened from the store, the Store field is hidden.
+    assert f'type="hidden" name="lease" value="{lease.pk}"' in form
     # The open promise on this store's lease is the previous promise chosen.
     assert f'<option value="{mine.pk}" selected>' in form
     response = client.post(
@@ -613,8 +614,11 @@ def test_add_entry_on_a_store_whose_only_lease_is_not_in_effect(
         assert add_link(store) in page_of(client, f"/stores/{store.pk}/?tab=contacts")
     client, _ = client_for(Role.BILLING)
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
-    assert f"<h1>Add entry: Acme, store 2477{suffix}</h1>" in form
-    assert f'<option value="{lease.pk}" selected>Store 2477{label}</option>' in form
+    # Log contact (owner, 2026-11-01): the dialog's line names the operator, the store and the
+    # lease's state; the Store field is hidden.
+    assert f'<p class="muted" id="log-contact-about">Acme, store 2477{suffix}</p>' in form
+    assert f'type="hidden" name="lease" value="{lease.pk}"' in form
+    assert f"Store 2477{label}</option>" not in form
     response = client.post(
         f"/stores/{store.pk}/contacts/new/", contact_post(lease=str(lease.pk), body="Old lease.")
     )
@@ -638,7 +642,7 @@ def test_the_lease_in_effect_wins_over_an_older_ended_one(today: date) -> None:
     assert contacts.store_contact_lease(store, TODAY) == current
     client, _ = client_for(Role.BILLING)
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
-    assert "<h1>Add entry: New, store 2477</h1>" in form
+    assert '<p class="muted" id="log-contact-about">New, store 2477</p>' in form
 
 
 def test_of_two_ended_leases_the_later_start_wins_then_the_later_creation(
@@ -653,7 +657,10 @@ def test_of_two_ended_leases_the_later_start_wins_then_the_later_creation(
     assert contacts.store_contact_lease(store, TODAY) == later
     client, _ = client_for(Role.BILLING)
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
-    assert "<h1>Add entry: Second, store 2477, lease ended Jun 30, 2024</h1>" in form
+    assert (
+        '<p class="muted" id="log-contact-about">Second, store 2477, lease ended Jun 30, 2024</p>'
+        in form
+    )
     # A lease without a start comes last; between two, the later creation wins.
     other = a_store("2478")
     Lease.objects.filter(pk=undated.pk).update(store=other)
@@ -910,7 +917,7 @@ def test_the_form_asks_for_the_outcome_when_a_promise_is_open(today: date) -> No
     assert f'<option value="{old.pk}" selected>$700.00 by Oct 9, 2026' in page
     assert '"amount": "700.00"' in page and '"date": "2026-10-09"' in page
     assert '<input type="radio" name="outcome" value="open"' in page
-    assert 'value="open" id="id_outcome_0" checked' in page
+    assert 'value="open" id="log-outcome_0" checked' in page
     assert "Still open (no change)" in page
 
 
@@ -1430,15 +1437,17 @@ def test_an_entry_closing_another_promise_leaves_the_auto_closed_one_without_clo
     assert (on_b.status, on_b.closed_by) == (ContactStatus.RESCHEDULED, None)
 
 
-def test_the_add_buttons_and_the_form_say_add_entry(today: date) -> None:
+def test_the_add_buttons_and_the_form_say_log_contact(today: date) -> None:
+    # Log contact (owner, 2026-11-01): "+ Log contact" opens the "Log contact" dialog.
     client, _ = client_for(Role.BILLING)
     operator = an_operator("Acme")
     for path in (f"/operators/{operator.pk}/", f"/operators/{operator.pk}/contacts/"):
         page = page_of(client, path)
-        assert '<a class="btn" id="add-contact"' in page and ">Add entry</a>" in page, path
-        assert "Add contact" not in page, path
+        assert '<a class="btn" id="add-contact"' in page and "Log contact</a>" in page, path
+        assert "Add contact" not in page and "Add entry" not in page, path
     form = form_page(client, operator)
-    assert "Monvera · Add entry: Acme</title>" in form and "<h1>Add entry: Acme</h1>" in form
+    assert "Monvera · Log contact</title>" in form
+    assert '<h2 id="log-contact-dialog-title">Log contact</h2>' in form
 
 
 def test_the_outcome_route_is_registered_for_billing() -> None:

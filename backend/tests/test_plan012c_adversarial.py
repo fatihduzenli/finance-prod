@@ -82,7 +82,10 @@ def test_the_older_lease_with_a_live_operator_wins_over_a_newer_archived_one() -
     Operator.objects.filter(pk=newer_operator.pk).update(archived_at=timezone.now())
     assert contacts.store_contact_lease(store, TODAY) == Lease.objects.get(pk=older.pk)
     billing, _ = client_for(Role.BILLING)
-    form = page_of(billing, f"/stores/{store.pk}/contacts/new/")
+    page = page_of(billing, f"/stores/{store.pk}/contacts/new/")
+    # Log contact (owner, 2026-11-01): the dialog is over the store page, whose Leases card
+    # lists every lease; the dialog names the operator the entry is about.
+    form = page[page.index('id="log-contact-dialog"') : page.index("</dialog>")]
     assert older_operator.display_name in form and newer_operator.display_name not in form
 
 

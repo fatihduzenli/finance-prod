@@ -1,0 +1,6 @@
+{% extends "ledger/stores/detail.html" %}
+{% load static %}
+{% block title %}Log contact{% endblock %}
+{% comment %}The Log contact dialog over the store page's Notes & follow-ups tab (ledger:stores:contacts_add; ledger/contacts/_log_contact_dialog.html).{% endcomment %}
+{% block dialog %}{% include "ledger/contacts/_log_contact_dialog.html" %}{% endblock %}
+{% block scripts %}{{ block.super }}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/log_contact.js' %}" defer></script>{% endblock %}

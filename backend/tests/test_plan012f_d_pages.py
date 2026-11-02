@@ -648,7 +648,6 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
         "B — Payment due",
     ),
     "ledger:operators:contacts": lambda w: (["Walk Co"], "Notes & follow-ups"),
-    "ledger:operators:contacts_add": lambda w: (["Walk Co"], "Add entry: Walk Co"),
     "ledger:leases:create": lambda w: (["Leases"], "New lease"),
     "ledger:leases:detail": lambda w: (["Leases"], f"Lease {w.store.external_label}"),
     "ledger:leases:edit": lambda w: (

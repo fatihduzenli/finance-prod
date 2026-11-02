@@ -1,0 +1,34 @@
+{% comment %}The "Log contact" dialog (owner, 2026-11-01; ledger.views.contacts._add): the {% dialog %} frame at 440 px, a sheet at the bottom of a phone's screen, over the page it was opened from (log_contact_store.html: the store page's Notes & follow-ups tab; log_contact_operator.html: the operator page). The form ("log_form", ledger.forms.ContactEntryForm, ids "log-…"): the operator page's Store select (hidden from the store page, which shows "log_about", the operator and the store, instead); Kind as four radio cards in a fieldset (Call · E-mail · Visit · Promise to pay, each a label with its icon); a call's outcome chips (Answered, No answer, Left a message, Wrong number: radios, optional; with one the note may stay empty); the Date with the day as the page reads it ("log_day", kept by ledger/log_contact.js); a promise's date and amount (the amount filled from "promise_amounts", the open balance, when Promise to pay is chosen) and the supersede warning; the open promise's outcome when there is one; the Note ("What was said, what happens next"); the one help line; Cancel and Save. The chips and the promise fields carry data-shown-when (ledger/shown_when.js): shown, and sent, only for their kind; without the script every field shows and the server checks every rule.{% endcomment %}{% load components icons %}{% dialog id="log-contact-dialog" title="Log contact" size="sm" open=True return_url=log_back_url %}
+<form method="post" action="{{ log_action }}" id="contact-form" class="js-single-submit dialog-form log-contact-form" autocomplete="off">
+  {% csrf_token %}
+  {% if log_about %}<p class="muted" id="log-contact-about">{{ log_about }}</p>{% endif %}
+  {{ log_form.non_field_errors }}
+  {% for field in log_form.hidden_fields %}{{ field }}{% endfor %}
+  {% if log_form.lease and not log_form.lease.is_hidden %}{% include "ledger/stores/_form_field.html" with field=log_form.lease %}{% endif %}
+  <fieldset class="field kind-cards{% if log_form.kind.errors %} has-error{% endif %}" id="log-contact-kind">
+    <legend>Kind</legend>
+    <div class="kind-card-grid">{% for radio in log_form.kind %}<label class="kind-card" for="{{ radio.id_for_label }}">{{ radio.tag }}{% if radio.data.value == "call" %}{% icon "phone" 20 %}{% elif radio.data.value == "email" %}{% icon "mail" 20 %}{% elif radio.data.value == "visit" %}{% icon "map-pin" 20 %}{% else %}{% icon "handshake" 20 %}{% endif %}<span class="kind-card-name">{{ radio.choice_label }}</span></label>{% endfor %}</div>
+    {{ log_form.kind.errors }}
+  </fieldset>
+  <fieldset class="field outcome-chips{% if log_form.call_outcome.errors %} has-error{% endif %}" id="log-contact-outcome">
+    <legend>Outcome</legend>
+    <div class="outcome-chip-row">{% for radio in log_form.call_outcome %}<label class="outcome-chip" for="{{ radio.id_for_label }}">{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>{% endfor %}</div>
+    {{ log_form.call_outcome.errors }}
+  </fieldset>
+  <div class="field{% if log_form.happened_on.errors %} has-error{% endif %}">
+    <label for="{{ log_form.happened_on.id_for_label }}">Date</label>
+    {{ log_form.happened_on }}
+    <span class="help muted" id="log-contact-day" aria-live="polite">{{ log_day }}</span>
+    {{ log_form.happened_on.errors }}
+  </div>
+  <div class="log-contact-promise">
+    <p class="muted" id="promise-supersede"{% if not supersede_warning %} hidden{% endif %}>{{ supersede_warning }}</p>
+    {% include "ledger/stores/_form_field.html" with field=log_form.promised_date label="Promised date" hide_help=True %}
+    {% include "ledger/stores/_form_field.html" with field=log_form.promised_amount label="Amount (USD)" hide_help=True %}
+  </div>
+  {% if log_form.previous %}{% include "ledger/stores/_form_field.html" with field=log_form.previous %}{% include "ledger/stores/_form_field.html" with field=log_form.outcome %}{% endif %}
+  {% include "ledger/stores/_form_field.html" with field=log_form.body %}
+  <p class="muted log-contact-help" id="log-contact-help">Never write card or account numbers.</p>
+  <div class="dialog-foot"><a class="btn" id="cancel-contact" href="{{ log_back_url }}">Cancel</a><button class="btn btn-primary" type="submit" id="save-contact">Save</button></div>
+</form>
+{% enddialog %}{{ promise_values|json_script:"promise-values" }}{{ supersede_warnings|json_script:"supersede-warnings" }}{{ promise_amounts|json_script:"promise-amounts" }}
