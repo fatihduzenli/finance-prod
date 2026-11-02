@@ -89,6 +89,8 @@ operator_patterns = (
         path("<str:pk>/portal/disable/", portal_access.portal_disable, name="portal_disable"),
         path("<str:pk>/portal/enable/", portal_access.portal_enable, name="portal_enable"),
         path("<str:pk>/portal/reset/", portal_access.portal_reset, name="portal_reset"),
+        # "Copy invite link" (owner, 2026-11-01): admin, the sandbox only.
+        path("<str:pk>/portal/copy-link/", portal_access.portal_copy_link, name="portal_copy_link"),
     ],
     "operators",
 )

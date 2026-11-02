@@ -567,6 +567,8 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:portal_disable",
         "ledger:operators:portal_enable",
         "ledger:operators:portal_reset",
+        # Owner, 2026-11-01: "Copy invite link" (admin, the sandbox only).
+        "ledger:operators:portal_copy_link",
     }
     assert {
         "ledger:operators:list",
@@ -589,6 +591,7 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:portal_enable": Role.BILLING,
         "ledger:operators:portal_reset": Role.BILLING,
         "ledger:operators:archive": Role.ADMIN,
+        "ledger:operators:portal_copy_link": Role.ADMIN,
         # PLAN-014 C3: the details, the link and the retry post to the lease's billing.
         "ledger:leases:billing": Role.BILLING,
     }

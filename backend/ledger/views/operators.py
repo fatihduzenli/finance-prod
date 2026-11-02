@@ -356,6 +356,7 @@ def _detail_context(
     )
     store_count = len(space.stores)
     store_cards = operator_cards.store_cards(operator, space.stores, space.open_rows, today)
+    portal_card = invitations.card(operator)
     return {
         **space.data,
         **tab_context,
@@ -415,7 +416,9 @@ def _detail_context(
         ],
         "statement_link_opened": operator_cards.statement_link_opened(operator),
         # PLAN-014 H2: the operator's portal account and the card's actions (billing).
-        "portal": invitations.card(operator),
+        "portal": portal_card,
+        # Owner, 2026-11-01: "Copy invite link" (admin, the sandbox only).
+        "can_copy_link": invitations.copy_link_offered(portal_card, role),
     }
 
 

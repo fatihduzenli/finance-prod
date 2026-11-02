@@ -350,6 +350,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:operators:portal_disable": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:portal_enable": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:portal_reset": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Owner, 2026-11-01: "Copy invite link" hands over a one-time credential, so admin (the
+    # view checks again; the service refuses outside the sandbox).
+    "ledger:operators:portal_copy_link": RouteRule(min_role=Role.ADMIN, methods=POST),
     # PLAN-014 D6: "Send a message now" on a charge's page.
     "ledger:charges:send_message": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:send_message": RouteRule(min_role=Role.BILLING, methods=POST),

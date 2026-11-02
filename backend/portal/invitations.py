@@ -21,6 +21,10 @@ operator's row lock and audited on the entity ``portal_user``:
   password?" form: the same message for an active account, at most one per
   :data:`RESET_COOLDOWN`, nothing for any other e-mail; the caller answers the same sentence
   whatever happened.
+- :func:`copy_link` ("Copy invite link"; admin, the sandbox only: staging has no mail): a fresh
+  one-time link handed to the admin in the outcome, never stored: an invitation link while the
+  account has not chosen a password, else a reset link; the older live link of that kind stops
+  working. Audited ``portal_user.link_copied`` with the kind and the expiry, never the link.
 
 **One-time links.** A portal message is stored with
 :data:`ledger.services.messaging.LINK_ADDED_AT_SEND` where its link goes; :func:`register_links`
@@ -34,7 +38,7 @@ message was sent (the older link of that kind stops working) and dropped when it
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -43,6 +47,9 @@ from django.db import IntegrityError, transaction
 from django.urls import reverse
 from django.utils import timezone
 
+from accounts.roles import Role, meets, role_of
+from finance.dates import moment_text
+from finance.middleware import on_sandbox
 from ledger import merge
 from ledger.models import (
     AuditLog,
@@ -63,6 +70,7 @@ INVITED = "portal_user.invited"
 DISABLED = "portal_user.disabled"
 ENABLED = "portal_user.enabled"
 RESET_SENT = "portal_user.reset_sent"
+LINK_COPIED = "portal_user.link_copied"
 #: The portal's own reset form queues at most one message per account in this time.
 RESET_COOLDOWN = timedelta(minutes=5)
 
@@ -86,6 +94,12 @@ INVITED_TEXT = "Invitation queued to {email}. Its link works for 7 days, once."
 DISABLED_TEXT = "Portal access disabled: the operator is signed out at their next click."
 ENABLED_TEXT = "Portal access enabled."
 RESET_TEXT = "A link to choose a new password is queued to {email}. It works for one hour, once."
+SANDBOX_ONLY = "Copy invite link is only on the sandbox."
+ADMIN_ONLY = "Only an admin can copy an invite link."
+COPIED_TEXT = (
+    "Sandbox only. Anyone with this link can set this operator's password; it works once and "
+    "expires on {expires}."
+)
 
 #: Why a portal message is no longer to be sent (class names, the message's ``error``).
 USER_GONE = "PortalUserGone"
@@ -99,6 +113,10 @@ USER_CANNOT_SIGN_IN = "PortalUserCannotSignIn"
 class Outcome:
     ok: bool
     message: str
+    #: :func:`copy_link` only: the one-time link and its expiry, for the one response that
+    #: shows it (never in the repr, so a logged outcome holds no link).
+    link: str = field(default="", repr=False)
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +130,16 @@ class Card:
     can_disable: bool
     can_enable: bool
     can_reset: bool
+
+    @property
+    def can_copy_link(self) -> bool:
+        """Whether the account may get a copied link (:func:`copy_link`), the environment and
+        the viewer's role aside."""
+        return (
+            self.user is not None
+            and self.state != OPERATOR_ARCHIVED
+            and self.user.disabled_at is None
+        )
 
 
 def card(operator: Operator) -> Card:
@@ -321,6 +349,58 @@ def request_reset(raw_email: object, now: datetime | None = None) -> None:
             None,
             {"to": mask_address(user.email), "message": str(message.pk), "by": "portal"},
         )
+
+
+def copy_link_environment() -> bool:
+    """Whether this environment offers "Copy invite link": the sandbox, never production."""
+    return on_sandbox() and settings.APP_ENV != "production"
+
+
+def copy_link_offered(portal_card: Card, role: Role | None) -> bool:
+    """Whether the PORTAL card shows "Copy invite link" to a viewer of ``role``."""
+    return copy_link_environment() and meets(role, Role.ADMIN) and portal_card.can_copy_link
+
+
+def copy_link(operator_id: uuid.UUID, actor: User, now: datetime | None = None) -> Outcome:
+    """The PORTAL card's "Copy invite link" (see the module docstring): the outcome carries the
+    link, which the caller shows once and never stores, logs or puts in a URL."""
+    if not copy_link_environment():
+        return Outcome(False, SANDBOX_ONLY)
+    if not meets(role_of(actor), Role.ADMIN):
+        return Outcome(False, ADMIN_ONLY)
+    moment = now or timezone.now()
+    with transaction.atomic():
+        operator = _locked_operator(operator_id)
+        if operator is None:
+            return Outcome(False, NO_OPERATOR)
+        if operator.archived_at is not None:
+            return Outcome(False, ARCHIVED)
+        user = _locked_user(operator)
+        if user is None:
+            return Outcome(False, NO_ACCOUNT)
+        if user.disabled_at is not None:
+            return Outcome(False, IS_DISABLED)
+        if user.activated_at is None:
+            kind, route = TokenKind.INVITE, "portal:invite"
+        elif user.can_sign_in:
+            kind, route = TokenKind.RESET, "portal:reset_confirm"
+        else:
+            return Outcome(False, NOT_ACTIVE)
+        token, raw = tokens.issue(user, kind, moment)
+        tokens.keep(token, moment)
+        _audit(
+            LINK_COPIED,
+            user,
+            actor,
+            {"kind": str(kind), "expires_at": token.expires_at.isoformat()},
+        )
+    path = reverse(route, kwargs={"token": raw})
+    return Outcome(
+        True,
+        COPIED_TEXT.format(expires=moment_text(token.expires_at)),
+        link=f"{str(settings.APP_BASE_URL).rstrip('/')}{path}",
+        expires_at=token.expires_at,
+    )
 
 
 # --- One-time links --------------------------------------------------------------------------

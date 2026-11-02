@@ -423,6 +423,8 @@ for _name in (
     "ledger:operators:portal_disable",
     "ledger:operators:portal_enable",
     "ledger:operators:portal_reset",
+    # Owner, 2026-11-01: "Copy invite link" (admin, the sandbox only).
+    "ledger:operators:portal_copy_link",
     "ledger:stores:close_cost",
     "ledger:stores:create_charges",
     "ledger:stores:check_address",
