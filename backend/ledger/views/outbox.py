@@ -5,7 +5,12 @@
   status (and held reason), address ("the managers (n)" for an internal message, which goes
   to every manager) and the time the send window lets it go; filters by status and by a
   range of days queued (the list pages' filters component). Each row opens
-  its stored subject and body. The address is shown in full: the page is admin's only.
+  its stored subject and body. The address is shown in full: the page is admin's only. The
+  Store cell names the lease's store; "—" only for a row of the retired ladder or a portal
+  message (:data:`~ledger.models.RULES_WITHOUT_STORE`), which have no lease.
+- ``ledger:outbox:preview`` (admin, GET, read-only in the registry): "Preview next 30 days",
+  what the daily reminder job would queue on each coming day, from today's data, queuing
+  nothing (:func:`ledger.services.outbox_preview.preview`); no address, no message text.
 - ``ledger:outbox:send_now`` (admin, POST): "Send now" on a held message
   (:func:`ledger.services.messaging.send_now`); the outcome is a message on the page.
 """
@@ -20,12 +25,13 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST, require_safe
 
 import mail
 from finance.dates import day_text
-from ledger.models import MessageStatus
-from ledger.services import list_filters, messaging
+from ledger.models import RULES_WITHOUT_STORE, MessageStatus
+from ledger.services import list_filters, messaging, outbox_preview
 from ledger.views.leases import _admin_only
 from ledger.views.operators import _actor, role_required
 
@@ -86,12 +92,31 @@ def outbox_page(request: HttpRequest) -> HttpResponse:
                     message,
                     messaging.status_text(message),
                     managers if message.template.internal else message.to_address,
+                    message.rule in RULES_WITHOUT_STORE,
                 )
                 for message in page
             ],
             "status_choices": MessageStatus.choices,
             "selected": {"status": status, "from": since, "to": until},
             "mail_set_up": mail.is_set_up(),
+        },
+    )
+
+
+@role_required
+@require_safe
+def preview_page(request: HttpRequest) -> HttpResponse:
+    refused = _admin_only(request)
+    if refused is not None:
+        return refused
+    found = outbox_preview.preview(timezone.localdate())
+    return render(
+        request,
+        "ledger/outbox/preview.html",
+        {
+            "preview": found,
+            "rent_note": outbox_preview.RENT_BEFORE_ITS_CHARGE,
+            "f_note": outbox_preview.F_NOT_PREDICTABLE,
         },
     )
 
