@@ -1100,6 +1100,9 @@ them, so Rule 1's substance holds while its old wording ("do not embed Stax.js")
 
 ---
 
+
+**Amendment (owner, 2026-11-01): "Copy invite link" on the sandbox.** Staging has no mail, so a held invitation carries no link and the portal could not be tested as an operator. An **admin**, on the **sandbox only** (`STAX_ENV` sandbox and `APP_ENV` not production), may press "Copy invite link" on the PORTAL card: a fresh one-time link (invite before acceptance, else reset; the older one voided) is shown once in that response (`Cache-Control: no-store`, `Referrer-Policy: no-referrer`), never stored, flashed, logged or put in a URL; audited `portal_user.link_copied` without the token. Production and a live key never offer it, so the rule above holds where operators are real.
+
 ## ADR-0018 — Bank deposit matching with a pluggable transaction source and a Plaid connector, dark by default
 
 **Date:** 2026-10-31
