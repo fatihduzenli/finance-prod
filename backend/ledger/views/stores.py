@@ -267,7 +267,7 @@ def _detail_context(
         **workspace_cards.side_cards(request, store, today),
     }
     if tab in (workspace.TAB_CONTACTS, workspace.TAB_CHARGES):
-        # PLAN-012 D3: Add entry.
+        # PLAN-012 D3: Log contact (the dialog's URL).
         context["contact_add_url"] = contact_log.store_add_url(request, store, today)
     if tab == workspace.TAB_CHARGES:
         # PLAN-012 D3: the latest entries about a lease of this store, under the Charges tab.

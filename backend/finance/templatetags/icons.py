@@ -103,6 +103,17 @@ ICONS: dict[str, str] = {
         '<path d="M2 11l4-4 4 2 3-2 4 1 5 4"/><path d="M6 7v7l5 5 2-2"/>'
         '<path d="M18 9v6l-4 4M10 13l2 2M12 11l3 3"/>'
     ),
+    # The Log contact dialog's kind cards (owner, 2026-11-01): Call, E-mail and Visit
+    # (Promise to pay takes the handshake).
+    "phone": (
+        '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6'
+        'a2 2 0 0 1 2-2"/>'
+    ),
+    "mail": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+    "map-pin": (
+        '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/>'
+        '<circle cx="12" cy="10" r="2.5"/>'
+    ),
 }
 
 
