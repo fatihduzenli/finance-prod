@@ -2777,6 +2777,13 @@ class MessageRule(models.TextChoices):
     PORTAL = "portal", "Portal access"
 
 
+#: The rule of the retired collections ladder (owner, 2026-11-01): nothing queues it any more
+#: (:func:`ledger.services.messaging.queue` refuses it); its past rows are kept as history.
+RETIRED_RULES: frozenset[str] = frozenset({MessageRule.LADDER})
+#: The rules whose rows may have no lease, so no store: the ladder's history and the portal's
+#: messages. Every other rule's row names its lease (``queue`` refuses one without).
+RULES_WITHOUT_STORE: frozenset[str] = RETIRED_RULES | {MessageRule.PORTAL}
+
 #: Longest rule code (PLAN-014 D3).
 RULE_MAX_LENGTH = 32
 
