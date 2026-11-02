@@ -868,6 +868,15 @@ never accepted its invitation stays invited). The card shows the account's state
 sign-in. Every action is in the activity log (`portal_user.invited`, `disabled`, `enabled`,
 `reset_sent`; `activated` and `password_reset` when the operator uses a link).
 
+**Testing the portal on staging.** Staging sends no mail, so an admin opens the operator page and
+presses **Copy invite link** on the Portal card (it exists on the sandbox only, never in
+production, and only for an admin, for an account that exists and is not disabled): a dialog
+shows a new one-time link once, an invitation link while the account has no password, else a
+reset link, which expires 60 minutes after the click, and the link made before it stops working. Open the link in a private window to choose the
+password and sign in as the operator; the link is never stored, logged or mailed, so copy it
+before closing the dialog, and press the button again for a fresh one. Each press is in the
+activity log as `portal_user.link_copied` with the link's kind and expiry, never the link.
+
 **Too many attempts.** Five wrong sign-ins within 15 minutes for one e-mail, or from one address,
 lock that e-mail or that address for 15 minutes ("Too many attempts. Try again in n minutes"),
 the same for an e-mail that has no account. A successful sign-in clears the e-mail's count. There

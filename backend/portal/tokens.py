@@ -40,13 +40,22 @@ def digest(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def issue(user: PortalUser, kind: str, now: datetime | None = None) -> tuple[PortalToken, str]:
+def issue(
+    user: PortalUser,
+    kind: str,
+    now: datetime | None = None,
+    lifetime: timedelta | None = None,
+) -> tuple[PortalToken, str]:
     """A new token of ``kind`` for ``user`` and its raw value; the older ones stay as they
-    are until :func:`keep`."""
+    are until :func:`keep`. It lives :data:`LIFETIMES` of its kind unless ``lifetime`` says
+    otherwise (a copied link: :data:`portal.invitations.COPIED_LIFETIME`)."""
     moment = now or timezone.now()
     raw = secrets.token_urlsafe(32)
     token = PortalToken.objects.create(
-        user=user, kind=kind, token_hash=digest(raw), expires_at=moment + LIFETIMES[kind]
+        user=user,
+        kind=kind,
+        token_hash=digest(raw),
+        expires_at=moment + (lifetime if lifetime is not None else LIFETIMES[kind]),
     )
     return token, raw
 

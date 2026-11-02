@@ -4,6 +4,7 @@
 {% load tz %}
 {% block title %}{{ operator.display_name }}{% endblock %}
 {% comment %}PLAN-012f-a D7 (DESIGN-SPEC §4 "Operator workspace", operator-workspace-laptop.png): the 56 px avatar with the display name's initials, the name with the Active (or Archived) badge and "Connected to <provider>" while a provider customer is linked, one muted line (phone · e-mail · SMS consent · stores); the actions Statement, Edit and More (Connect to <provider>, Archive): the invoice and payment actions live on the store page. The tab row has the Store select at its right: All stores (the default) or one of the operator's stores; it submits on change, its Show button the no-script way.{% endcomment %}
+{% block head %}{% if copied_link %}{% comment %}"Copy invite link" answers its POST with this page: the page's relative links (?tab=…) resolve against the operator's own URL.{% endcomment %}<base href="{% url 'ledger:operators:detail' pk=operator.pk %}">{% endif %}{% endblock %}
 {% block header %}<div class="page-header workspace-head operator-head">
   <div class="page-title-block">
     <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}" aria-current="page">{{ operator.display_name }}</a></nav>
@@ -159,6 +160,7 @@
         {% if portal.can_disable %}<form method="post" action="{% url 'ledger:operators:portal_disable' pk=operator.pk %}" class="js-single-submit card-note" id="portal-disable-form">{% csrf_token %}<button class="link-action" type="submit">Disable</button></form>{% endif %}
         {% if portal.can_enable %}<form method="post" action="{% url 'ledger:operators:portal_enable' pk=operator.pk %}" class="js-single-submit card-note" id="portal-enable-form">{% csrf_token %}<button class="link-action" type="submit">Enable</button></form>{% endif %}
       {% endif %}
+      {% if can_copy_link %}<form method="post" action="{% url 'ledger:operators:portal_copy_link' pk=operator.pk %}" class="js-single-submit card-note" id="portal-copy-link-form">{% csrf_token %}<button class="link-action" type="submit">Copy invite link</button></form>{% endif %}
       <p id="statement-links" class="muted">Statement link: each collection e-mail carries a link to this operator's statement that opens without an account for {{ statement_link_days }} days.{% if operator.statement_links_revoked_at %} Links sent before {{ operator.statement_links_revoked_at|moment }} were revoked.{% endif %}</p>
       <dl class="side-list"><dt>Last opened</dt><dd id="statement-link-opened">{% if statement_link_opened %}{{ statement_link_opened|moment }}{% else %}Never{% endif %}</dd></dl>
       {% if can_revoke_links %}
@@ -179,6 +181,7 @@
   </aside>
   </div>
   {% if form_dialog %}{% include "ledger/operators/_form_dialog.html" with dialog=form_dialog open=True %}{% endif %}
+  {% if copied_link %}{% include "ledger/operators/_copy_link_dialog.html" %}{% endif %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}<script>
   (function () {
@@ -190,4 +193,4 @@
     show.style.display = "none";
     select.addEventListener("change", function () { select.form.submit(); });
   })();
-</script>{% if ows.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
+</script>{% if copied_link %}<script src="{% static 'ledger/copy_link.js' %}" defer></script>{% endif %}{% if ows.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
