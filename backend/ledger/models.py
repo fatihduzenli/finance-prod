@@ -524,8 +524,9 @@ class LeaseBilling(GuardedModel):
     by ledger migration 0059, independent of it from then on.
 
     The processor customer and its bank method are ``payments.ExternalRef`` rows of the
-    lease (``entity_type="lease"``); ``bank_last4`` is a cached copy of the linked
-    method's last four for lists and cards (Rule 1: never more). A lease that
+    lease (``entity_type="lease"``); ``bank_last4`` and ``bank_name`` are cached copies
+    of the linked method's last four and the bank's institution name for lists and cards
+    (Rule 1, ADR-0019: never more; ``""`` when unknown). A lease that
     ``shares_account_of`` another bills through that lease's customer and method and
     holds no reference of its own (one hop; ``ledger.services.leases.customer_ref``).
     """
@@ -540,6 +541,7 @@ class LeaseBilling(GuardedModel):
     state = guarded_char(50, blank=True, default="")
     postal_code = guarded_char(20, blank=True, default="")
     bank_last4 = models.CharField(max_length=4, blank=True, default="")
+    bank_name = guarded_char(100, blank=True, default="")
     shares_account_of = models.ForeignKey(
         Lease,
         on_delete=models.PROTECT,

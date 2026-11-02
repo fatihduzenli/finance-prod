@@ -7,8 +7,10 @@ webhook receiver imports nothing from the adapter package.
 
 Rules (docs/CLAUDE.md Rule 1): a key that names account, routing, bank, card-number,
 token, secret or password data is dropped with its value; of a ``payment_method``
-object only :data:`PAYMENT_METHOD_KEYS` survive; any string, number or key whose text
-holds a card number or a routing and account number is dropped.
+object only :data:`PAYMENT_METHOD_KEYS` survive, ``bank_name`` (the bank's institution
+name, ADR-0019) only there and at most :data:`BANK_NAME_MAX_LENGTH` characters; any
+string, number or key whose text holds a card number or a routing and account number is
+dropped.
 """
 
 from __future__ import annotations
@@ -30,8 +32,12 @@ PAYMENT_METHOD_KEYS: tuple[str, ...] = (
     "card_last_four",
     "card_exp",
     "nickname",
+    "bank_name",
 )
-#: Keys whose values never enter a summary, whatever they hold.
+#: Longest ``bank_name`` kept from a payment-method object (ADR-0019).
+BANK_NAME_MAX_LENGTH = 100
+#: Keys whose values never enter a summary, whatever they hold. ``bank_name`` is among them:
+#: it survives only inside a payment-method object (:func:`payment_method_subset`).
 SENSITIVE_KEY = re.compile(
     r"(account|routing|bank_|cvv|cvc|card_number|cardnumber|token|secret|password)",
     re.IGNORECASE,
@@ -55,13 +61,15 @@ def is_safe_text(value: str) -> bool:
 
 
 def payment_method_subset(value: Mapping[str, object]) -> dict[str, str]:
-    """The :data:`PAYMENT_METHOD_KEYS` of a payment-method object, as safe strings."""
+    """The :data:`PAYMENT_METHOD_KEYS` of a payment-method object, as safe strings; a
+    ``bank_name`` longer than :data:`BANK_NAME_MAX_LENGTH` is dropped."""
     return {
         name: str(value[name])
         for name in PAYMENT_METHOD_KEYS
         if isinstance(value.get(name), str | int)
         and not isinstance(value.get(name), bool)
         and is_safe_text(str(value[name]))
+        and (name != "bank_name" or len(str(value[name])) <= BANK_NAME_MAX_LENGTH)
     }
 
 

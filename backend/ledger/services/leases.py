@@ -645,6 +645,7 @@ METHOD_SNAPSHOT_FIELDS: tuple[str, ...] = (
     "bank_type",
     "nickname",
     "is_default",
+    "bank_name",
 )
 
 
@@ -734,8 +735,8 @@ def bank_last4(method: PaymentMethodRecord | None) -> str:
 def refresh_payment_methods(lease_id: uuid.UUID) -> MethodsRefresh:
     """Read the payment methods of the customer that bills the lease from the provider
     (one list call) and keep them as the one method-list snapshot of that customer
-    reference (worker only); the linked method's last four are cached on the account
-    lease's billing row (``bank_last4``).
+    reference (worker only); the linked method's last four and bank name are cached on the
+    account lease's billing row (``bank_last4``, ``bank_name``).
 
     Nothing is written before the call; a failure keeps the previous snapshot. The new
     snapshot replaces the previous ones in one transaction.
@@ -759,8 +760,8 @@ def _store_methods(
     ref: ExternalRef, methods: list[PaymentMethodRecord], owner: Lease | None
 ) -> None:
     """Keep ``methods`` as the one method-list snapshot of the customer reference and
-    cache the linked method's last four on ``owner``'s billing row (the caller's
-    transaction)."""
+    cache the linked method's last four and bank name on ``owner``'s billing row (the
+    caller's transaction)."""
     fetched_at = max((method.fetched_at for method in methods), default=timezone.now())
     old = [snapshot.pk for snapshot in _method_snapshots(ref)]
     ProviderSnapshot.objects.create(
@@ -771,8 +772,14 @@ def _store_methods(
     ProviderSnapshot.objects.filter(pk__in=old).delete()
     if owner is not None:
         linked = linked_payment_method(owner)
-        digits = bank_last4(next((m for m in methods if m.external_id == linked), None))
-        LeaseBilling.objects.update_or_create(lease=owner, defaults={"bank_last4": digits})
+        method = next((m for m in methods if m.external_id == linked), None)
+        LeaseBilling.objects.update_or_create(
+            lease=owner,
+            defaults={
+                "bank_last4": bank_last4(method),
+                "bank_name": method.bank_name if method is not None else "",
+            },
+        )
 
 
 # --- Bank account entry (PLAN-014 C7) ---------------------------------------------------

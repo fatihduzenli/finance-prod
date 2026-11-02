@@ -619,6 +619,8 @@ class BankPage:
     #: The lease whose processor customer holds the bank account (the one it shares, or itself).
     account: Lease | None
     last4: str
+    #: The bank's institution name, ``""`` when unknown (ADR-0019).
+    bank_name: str
     #: ``#1991`` when the account is another store's lease's.
     shared_with: str
     #: The other stores whose leases debit the same account (a replacement changes theirs).
@@ -699,6 +701,7 @@ def bank_page(user: PortalUser, store: Store, *, after_send: bool = False) -> Ba
         lease=lease,
         account=account,
         last4=services.bank_last4(lease),
+        bank_name=services.bank_name(lease),
         shared_with=_shared_with(lease),
         sharing=_sharing(account, lease) if account is not None and lease is not None else [],
         config=config,

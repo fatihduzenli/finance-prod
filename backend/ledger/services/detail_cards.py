@@ -419,8 +419,9 @@ NO_BANK_ON_FILE = "no bank account on file"
 @dataclass(frozen=True, slots=True)
 class LeaseAccount:
     """A lease's billing line for the LEASE card and the operator page's PAYMENT card: the
-    company billed, the billing e-mail, the bank line ("Bank ····4821" or
-    :data:`NO_BANK_ON_FILE`, from the cached last four of the account's lease) and the
+    company billed, the billing e-mail, the bank line ("Bank ····4821", the bank's name in
+    place of "Bank" when known, or :data:`NO_BANK_ON_FILE`, from the cached last four and
+    name of the account's lease) and the
     lease whose account it shares, if any."""
 
     lease: Lease
@@ -456,9 +457,12 @@ class LeaseAccount:
         )
 
 
-def bank_text(last4: str) -> str:
-    """ "Bank ····4821", or :data:`NO_BANK_ON_FILE` without four digits."""
-    return f"Bank ····{last4}" if last4 else NO_BANK_ON_FILE
+def bank_text(last4: str, name: str = "") -> str:
+    """ "Chase ····4821" with the bank's name, else "Bank ····4821" (ADR-0019), or
+    :data:`NO_BANK_ON_FILE` without four digits."""
+    if not last4:
+        return NO_BANK_ON_FILE
+    return f"{name or 'Bank'} ····{last4}"
 
 
 def lease_account(lease: Lease) -> LeaseAccount:
@@ -471,7 +475,7 @@ def lease_account(lease: Lease) -> LeaseAccount:
         lease=lease,
         company=billing.company_name,
         email=billing.email,
-        bank=bank_text(owner.bank_last4),
+        bank=bank_text(owner.bank_last4, owner.bank_name),
         shares=shares,
     )
 

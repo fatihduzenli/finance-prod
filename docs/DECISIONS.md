@@ -1160,3 +1160,67 @@ a long-lived credential to the business's own account, which no earlier decision
 - Plaid's sandbox serves the tests of the client; a real linked account is TODO-VERIFY-071.
 - The page is called "Bank deposits" (the owner's word); the existing "Bank account check" report
   keeps its name.
+
+---
+
+## ADR-0019 — The bank's institution name beside the last four
+
+**Date:** 2026-11-01
+**Status:** Accepted (owner, 2026-11-01: "Amend Rule 1 to keep the bank's institution name
+returned by the processor, beside the last four digits, with a new decision record. Only the
+institution name is added — never routing or account numbers. If the processor does not return a
+name for a payment method, the card keeps 'Bank ····4821' and nothing else changes."; a dashboard
+method's `bank_name` is TODO-VERIFY-074)
+**Deciders:** Project owner; plan and record by Fable; built by Opus
+
+### Context
+
+Rule 1 kept, of a processor payment-method object, at most `id`, `method`, `card_type`,
+`card_last_four`, `card_exp` and `nickname`; the LEASE card, the operator page's PAYMENT card and
+the portal's store and bank pages showed a bank account as "Bank ····4821". An operator with
+several accounts, and staff answering them, cannot tell from four digits which bank is debited.
+The owner asked for the bank's name beside the digits.
+
+The specification (read 2026-11-01, Rule 7):
+
+- `reference/get-a-payment-method-by-id.md`: the response object lists `bank_name`, `bank_type`
+  and `bank_holder_type` with no description or type; the account and routing numbers appear only
+  as `meta.accountDisplay` and `meta.routingDisplay`.
+- `reference/create-a-payment-method-copy.md`: `bank_name` is a request field of a bank method,
+  typed by the caller, not looked up by Stax. Whether a method that staff enter in the Stax
+  dashboard carries it, and in what form, is not documented (TODO-VERIFY-074).
+
+### Decision
+
+1. **Rule 1 keeps `bank_name`.** The kept payment-method fields become `id`, `method`,
+   `card_type`, `card_last_four`, `card_exp`, `nickname` and `bank_name`: the bank's institution
+   name only, as the processor returns it, run through the payment-data validator and at most 100
+   characters. `bank_account`, `bank_routing`, `meta.accountDisplay`, `meta.routingDisplay` and
+   `bank_holder_type` are never kept.
+2. **Only on a payment method.** `payments.redaction.PAYMENT_METHOD_KEYS` gains `bank_name`,
+   kept when a payment-method object is reduced to those keys (payment-data validator, at most
+   100 characters). `SENSITIVE_KEY` is unchanged: every `bank_*` key, `bank_name` included, is
+   still dropped from every other object (a transaction, a stored webhook body).
+3. **Our vocabulary.** The adapter reads it into `PaymentMethodRecord.bank_name` (a string that
+   is not one, holds a card or routing and account number, or is longer than 100 characters reads
+   as `""`); the method snapshot keeps it; `LeaseBilling.bank_name` (guarded text, 100, default
+   `""`; ledger migration 0067 with the PostgreSQL payment-data trigger) caches it beside
+   `bank_last4`, both set together from the linked method.
+4. **The display.** Where a bank account is shown with its last four (the LEASE card, the PAYMENT
+   card, the portal's store and bank pages), the name stands before the digits:
+   "Chase ····4821". Without a name nothing changes: "Bank ····4821" on the cards, "····4821" on
+   the portal. The name is printed as text (autoescaped).
+
+### Alternatives rejected
+
+- **A routing-number lookup table** (the institution from the ABA number): it brings routing
+  numbers into the app, which Rule 1 forbids.
+- **Staff-typed bank names** on the lease: a second truth beside the processor's method, which
+  goes stale when the method is replaced.
+
+### Consequences
+
+- Whether a dashboard-entered method carries a name, and in what form, is unknown until the first
+  real listing (TODO-VERIFY-074); until then many cards may keep "Bank ····4821".
+- A name the processor returns that looks like payment data, or is too long, is dropped to `""`;
+  the PostgreSQL trigger refuses a card number in `lease_billing.bank_name` whatever the path.

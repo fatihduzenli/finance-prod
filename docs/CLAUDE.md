@@ -72,8 +72,8 @@ internal tool into a compliance liability.
   bank-entry pages only — the lease's bank-entry page and, from PLAN-014 Batch H, the
   operator portal (owner, 2026-10-29; ADR-0015, ADR-0017). This app receives a payment-method
   ID, verifies it with the processor and links it to the lease's customer; it never renders a
-  field for an account or routing number, never receives one, and keeps the token and the last
-  four only. Stax.js runs on those pages and nowhere else (`test_stax_isolation` lists them).
+  field for an account or routing number, never receives one, and keeps the token, the last
+  four and the bank's institution name only (ADR-0019). Stax.js runs on those pages and nowhere else (`test_stax_isolation` lists them).
   Do not build a "pay now" form for cards, do not tokenize cards here. If a prompt asks for a
   card form, stop and escalate; it conflicts with this rule.
 - Free-text fields (notes, memos, descriptions) get a server-side validator that
@@ -83,7 +83,11 @@ internal tool into a compliance liability.
 - Never log request or response bodies from Stax verbatim. Log IDs, status codes,
   and our own correlation ID only. If a Stax response includes a `payment_method`
   object, keep at most `id`, `method`, `card_type`, `card_last_four`,
-  `card_exp` (month/year), and `nickname`. Drop everything else before persisting.
+  `card_exp` (month/year), `nickname` and `bank_name`. Drop everything else before persisting.
+  `bank_name` is the bank's institution name only, as the processor returns it, run through
+  the payment-data validator and at most 100 characters (ADR-0019, owner 2026-11-01); never
+  `bank_account`, `bank_routing`, `meta.accountDisplay`, `meta.routingDisplay` or
+  `bank_holder_type`.
 - Test fixtures use Stax's published sandbox test cards only, and only inside
   documented sandbox test flows. Never in a unit test that runs against our DB.
 - **Uploaded files (ADR-0008, PLAN-010c).** Documents on stores and leases live in a

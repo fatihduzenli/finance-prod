@@ -50,9 +50,9 @@ from payments.provider import (
     TransactionRecord,
     WebhookRecord,
 )
+from payments.redaction import BANK_NAME_MAX_LENGTH, payment_method_subset
 from payments.redaction import SENSITIVE_KEY as _SENSITIVE_KEY
 from payments.redaction import is_safe_text as _is_safe_text
-from payments.redaction import payment_method_subset
 
 _CENT = Decimal("0.01")
 
@@ -639,8 +639,8 @@ def schedule_record(data: object, fetched_at: datetime) -> ScheduleRecord:
     )
 
 
-#: Longest bank type or nickname kept from a payment-method object.
-PAYMENT_METHOD_TEXT_MAX_LENGTH = 100
+#: Longest bank type, nickname or bank name kept from a payment-method object.
+PAYMENT_METHOD_TEXT_MAX_LENGTH = BANK_NAME_MAX_LENGTH
 _LAST_FOUR = re.compile(r"[0-9]{4}")
 
 
@@ -657,14 +657,19 @@ def payment_method_record(data: object, fetched_at: datetime) -> PaymentMethodRe
     """Pages get-all-payment-methods-for-a-customer and get-a-payment-method-by-id.
 
     Only ``id``, ``method``, ``card_last_four`` (as ``last_four``), ``bank_type``,
-    ``nickname``, ``is_default``, ``deleted_at`` and ``purged_at`` are read; every other
-    key (``bank_name``, ``bank_holder_type``, ``card_type``, ``card_exp``,
-    ``person_name`` and anything not named in the specification) is dropped here and
-    never leaves this module (PLAN-007 D1, Rule 1).
+    ``bank_name``, ``nickname``, ``is_default``, ``deleted_at`` and ``purged_at`` are
+    read; every other key (``bank_account``, ``bank_routing``, ``bank_holder_type``,
+    ``meta`` with its ``accountDisplay`` and ``routingDisplay``, ``card_type``,
+    ``card_exp``, ``person_name`` and anything not named in the specification) is dropped
+    here and never leaves this module (PLAN-007 D1, Rule 1, ADR-0019).
 
     TODO-VERIFY-037: that ``card_last_four`` holds the last four digits of the account
     for a ``bank`` method, and that ``is_default`` is a boolean or 0/1. A last four that
     is not exactly four digits is dropped.
+
+    ``bank_name`` (get-a-payment-method-by-id, read 2026-11-01: listed, untyped) is the
+    bank's institution name only; one that is not a string, holds payment data or is longer
+    than :data:`PAYMENT_METHOD_TEXT_MAX_LENGTH` reads as ``""``.
     """
     obj = as_object(data)
     last_four = obj.get("card_last_four")
@@ -681,6 +686,9 @@ def payment_method_record(data: object, fetched_at: datetime) -> PaymentMethodRe
         bank_type=_safe_short_text(obj, "bank_type"),
         nickname=_safe_short_text(obj, "nickname"),
         is_default=is_default is True or (type(is_default) is int and is_default == 1),
+        # TODO-VERIFY-074: whether a bank method staff enter in the dashboard carries
+        # ``bank_name``, and in what form; "" when it does not (the card says "Bank").
+        bank_name=_safe_short_text(obj, "bank_name"),
     )
 
 

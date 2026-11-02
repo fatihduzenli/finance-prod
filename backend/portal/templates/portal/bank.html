@@ -1,5 +1,5 @@
 {% extends "portal/base.html" %}{% load static %}
-{% comment %}Bank account (PLAN-014 H5; portal.views.bank): the bank on file (its last four; a shared account names the store whose account it is), and the processor's hosted fields to add or replace it. The processor's script shows the account fields in its own frames, sends the account to the processor and gives this page only the new payment method's reference, the form's one field (payment_method_id; Rule 1: no account or routing number reaches this app). The script is ledger/bank_entry.js, the staff bank-entry page's, on the same element ids. Locally (the fake provider) one plain field takes a reference the fake knows. Without hosted fields one sentence says bank entry is not set up. Automatic debits are staff's: nothing here changes them.{% endcomment %}
+{% comment %}Bank account (PLAN-014 H5; portal.views.bank): the bank on file (its last four, after the bank's name when known, ADR-0019; a shared account names the store whose account it is), and the processor's hosted fields to add or replace it. The processor's script shows the account fields in its own frames, sends the account to the processor and gives this page only the new payment method's reference, the form's one field (payment_method_id; Rule 1: no account or routing number reaches this app). The script is ledger/bank_entry.js, the staff bank-entry page's, on the same element ids. Locally (the fake provider) one plain field takes a reference the fake knows. Without hosted fields one sentence says bank entry is not set up. Automatic debits are staff's: nothing here changes them.{% endcomment %}
 {% block title %}Bank account{% endblock %}
 {% block content %}
 {% include "portal/_store_title.html" %}
@@ -8,7 +8,7 @@
 {% if bank.change_text %}<p id="bank-change" class="{% if bank.change == 'done' %}portal-ok{% elif bank.change == 'failed' %}portal-error{% endif %}" role="status">{{ bank.change_text }}{% if bank.waiting %} This page refreshes every 5 seconds.{% endif %}</p>{% endif %}
 <section class="portal-card">
   <dl class="portal-facts">
-    <dt>Bank on file</dt><dd id="bank-on-file">{% if bank.last4 %}····{{ bank.last4 }}{% else %}none{% endif %}{% if bank.shared_with %} <span class="portal-muted" id="bank-shared">Shared with {{ bank.shared_with }}</span>{% endif %}</dd>
+    <dt>Bank on file</dt><dd id="bank-on-file">{% if bank.last4 %}{% if bank.bank_name %}{{ bank.bank_name }} {% endif %}····{{ bank.last4 }}{% else %}none{% endif %}{% if bank.shared_with %} <span class="portal-muted" id="bank-shared">Shared with {{ bank.shared_with }}</span>{% endif %}</dd>
   </dl>
   <p class="portal-muted" id="autopay-note">{{ bank.autopay_note }}</p>
 </section>
