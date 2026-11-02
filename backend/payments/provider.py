@@ -319,8 +319,9 @@ class ScheduleRecord:
 class PaymentMethodRecord:
     """A stored payment method, reduced to what staff may see (PLAN-007 D1, Rule 1).
 
-    Nothing else of the provider's object is kept: no holder name, bank name, expiry,
-    account or routing data, and no summary. ``method`` is the provider's string
+    Nothing else of the provider's object is kept: no holder name, expiry, account or
+    routing data, and no summary. ``bank_name`` is the bank's institution name only, as
+    the provider returns it, or ``""`` (ADR-0019). ``method`` is the provider's string
     (``bank`` or ``card``); only :data:`METHOD_BANK` may ever be used. ``raw_status`` is
     :data:`PAYMENT_METHOD_DELETED` when the provider marks the method deleted or purged,
     and empty otherwise (the object has no status field).
@@ -334,6 +335,7 @@ class PaymentMethodRecord:
     bank_type: str = ""
     nickname: str = ""
     is_default: bool = False
+    bank_name: str = ""
 
     @property
     def is_usable_bank(self) -> bool:

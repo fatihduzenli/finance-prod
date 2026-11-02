@@ -50,6 +50,7 @@ from ledger.models import (
     Invoice,
     InvoiceStatus,
     Lease,
+    LeaseBilling,
     Payment,
     PaymentMethod,
     PaymentStatus,
@@ -135,6 +136,8 @@ class StorePage:
     balance: Decimal
     autopay: bool
     bank_last4: str
+    #: The bank's institution name, ``""`` when unknown (ADR-0019).
+    bank_name: str
 
 
 def lease_of(user: PortalUser, store: Store) -> Lease | None:
@@ -148,14 +151,26 @@ def lease_of(user: PortalUser, store: Store) -> Lease | None:
     return next((lease for lease in leases if is_current(lease)), leases[0] if leases else None)
 
 
+def _account_billing(lease: Lease) -> LeaseBilling:
+    """The billing row of the lease whose bank the lease debits (its own, or the one it
+    shares)."""
+    billing = lease_sync.billing_of(lease)
+    shares = billing.shares_account_of
+    return lease_sync.billing_of(shares) if shares is not None else billing
+
+
 def bank_last4(lease: Lease | None) -> str:
     """The last four of the bank the lease debits (its own, or the account it shares)."""
     if lease is None:
         return ""
-    billing = lease_sync.billing_of(lease)
-    shares = billing.shares_account_of
-    owner = lease_sync.billing_of(shares) if shares is not None else billing
-    return str(owner.bank_last4 or "")
+    return str(_account_billing(lease).bank_last4 or "")
+
+
+def bank_name(lease: Lease | None) -> str:
+    """The institution name of the bank the lease debits, or ``""`` (ADR-0019)."""
+    if lease is None:
+        return ""
+    return str(_account_billing(lease).bank_name or "")
 
 
 def store_page(user: PortalUser, store: Store, today: date) -> StorePage:
@@ -169,6 +184,7 @@ def store_page(user: PortalUser, store: Store, today: date) -> StorePage:
         balance=receivables.total(rows),
         autopay=current and lease is not None and messaging.rent_schedule_active(lease.pk),
         bank_last4=bank_last4(lease),
+        bank_name=bank_name(lease),
     )
 
 

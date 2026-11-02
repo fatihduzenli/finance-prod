@@ -6,9 +6,10 @@ body (docs/qa/PLAN-008-webhooks.md D3). It lives outside ``payments.stax`` becau
 webhook receiver imports nothing from the adapter package.
 
 Rules (docs/CLAUDE.md Rule 1): a key that names account, routing, bank, card-number,
-token, secret or password data is dropped with its value; of a ``payment_method``
-object only :data:`PAYMENT_METHOD_KEYS` survive; any string, number or key whose text
-holds a card number or a routing and account number is dropped.
+token, secret or password data is dropped with its value, except ``bank_name`` (the bank's
+institution name, ADR-0019); of a ``payment_method`` object only
+:data:`PAYMENT_METHOD_KEYS` survive; any string, number or key whose text holds a card
+number or a routing and account number is dropped.
 """
 
 from __future__ import annotations
@@ -30,11 +31,14 @@ PAYMENT_METHOD_KEYS: tuple[str, ...] = (
     "card_last_four",
     "card_exp",
     "nickname",
+    "bank_name",
 )
-#: Keys whose values never enter a summary, whatever they hold.
+#: Keys whose values never enter a summary, whatever they hold. The one exception is the
+#: key exactly ``bank_name`` (lower case; ADR-0019): every other ``bank_*`` key still matches.
 SENSITIVE_KEY = re.compile(
+    r"\A(?!(?-i:bank_name)\Z).*"
     r"(account|routing|bank_|cvv|cvc|card_number|cardnumber|token|secret|password)",
-    re.IGNORECASE,
+    re.IGNORECASE | re.DOTALL,
 )
 
 

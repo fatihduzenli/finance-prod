@@ -69,6 +69,8 @@ RECORD_FIELDS = {
     "bank_type",
     "nickname",
     "is_default",
+    # ADR-0019: the bank's institution name.
+    "bank_name",
 }
 
 
@@ -98,10 +100,11 @@ def test_list_uses_the_verified_path_and_keeps_only_the_planned_fields(
         "checking",
     )
     assert (bank.nickname, bank.is_default, bank.raw_status) == ("Operating", True, "")
+    assert bank.bank_name == "Example Bank"
     assert bank.is_usable_bank
     assert (card.method, card.is_usable_bank) == ("card", False)
     everything = repr(bank) + repr(card) + caplog.text
-    for forbidden in (ACCOUNT, ROUTING, PERSON, "Example Bank", "business", "visa", "1229"):
+    for forbidden in (ACCOUNT, ROUTING, PERSON, "business", "visa", "1229"):
         assert forbidden not in everything
 
 
