@@ -9,12 +9,13 @@ many items there are."""
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
+from django.contrib.auth.models import User
 from django.db import connection
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
@@ -23,9 +24,18 @@ from accounts.roles import Role
 from ledger.models import (
     CalendarEntry,
     CalendarEntryKind,
+    ContactEntry,
+    ContactKind,
+    ContactStatus,
+    FeeType,
+    InstallmentPlan,
+    InsuranceCharge,
     Lease,
     OneOffCategory,
+    OneOffChargeStatus,
     Payment,
+    PaymentKind,
+    PaymentMethod,
     PaymentStatus,
     RentChargeStatus,
     Store,
@@ -213,14 +223,247 @@ def test_the_list_reads_a_fixed_number_of_queries_however_many_items() -> None:
             blocks.mini_calendar(OCT, TODAY)
         return len(captured.captured_queries)
 
-    # The Calendar's three, then the stores, the rent charges, the rent in effect and the
-    # re-debits behind the six rows shown: seven.
+    # The Calendar's three; the promises, the one-off charges and the insurance charges
+    # (three); then the stores, the rent charges, the rent in effect and the re-debits behind
+    # the six rows shown: ten.
     first = measured()
-    assert first == 3 + 4
+    assert first == 3 + 3 + 4
     for n in range(12):
         a_note(date(2026, 11, 3), f"More {n}", store=a_store(f"9{n:03d} Extra", 9000 + n))
     # Twelve more items (and stores) in the window: the same reads, never one per row.
     assert measured() == first
+
+
+def test_promises_installments_and_due_dates_read_a_fixed_number_of_queries() -> None:
+    money_world()
+
+    def measured() -> int:
+        with CaptureQueriesContext(connection) as captured:
+            blocks.mini_calendar(OCT, TODAY)
+        return len(captured.captured_queries)
+
+    # The Calendar's three; the promises, the one-off charges, the insurance charges and
+    # their re-debits (four); the rows' stores (one): eight.
+    first = measured()
+    assert first == 3 + 4 + 1
+    money_world(copies=5, start=1)  # five times the promises, installments and due dates
+    # Never more (the six rows are now store-less promises: no store read).
+    assert measured() <= first
+
+
+# --- Promises, installments and due dates (Fable's review of the owner's list) ------------------
+
+
+def a_promise(lease: Lease | None, operator: Any, day: date, amount: str, **fields: Any) -> None:
+    ContactEntry.objects.create(
+        operator=operator,
+        lease=lease,
+        kind=ContactKind.PROMISE,
+        happened_on=date(2026, 10, 20),
+        promised_date=day,
+        promised_amount=D(amount),
+        body="Friday.",
+        **fields,
+    )
+
+
+def a_plan(lease: Lease, status: str = "active") -> InstallmentPlan:
+    assert lease.operator is not None
+    parent = a_one_off_charge(
+        lease.operator, "1200.00", date(2026, 10, 30), lease=lease, description="Shelving"
+    )
+    extra: dict[str, Any] = {}
+    if status == "cancelled":
+        extra = {"cancelled_at": datetime(2026, 10, 1, tzinfo=UTC), "note": "Stopped."}
+    return InstallmentPlan.objects.create(
+        one_off_charge=parent,
+        operator=lease.operator,
+        lease=lease,
+        count=3,
+        first_due=date(2026, 10, 3),
+        cadence="monthly",
+        collection="manual",
+        status=status,
+        confirmed_at=datetime(2026, 9, 20, tzinfo=UTC),
+        **extra,
+    )
+
+
+def an_installment(plan: InstallmentPlan, number: int, day: date, **fields: Any) -> None:
+    assert plan.operator is not None
+    a_one_off_charge(
+        plan.operator,
+        "400.00",
+        day,
+        lease=plan.lease,
+        category=OneOffCategory.INSTALLMENT,
+        description=f"Installment {number} of 3: Shelving",
+        plan=plan,
+        installment_no=number,
+        **fields,
+    )
+
+
+def money_world(copies: int = 1, start: int = 0) -> dict[str, Any]:
+    """Each new kind in the window (Oct 28 to Nov 3) and on Nov 4, with the states left out:
+    a kept and a broken promise, a deleted one; a paid installment, one of a cancelled plan;
+    a deposit, a paid and a waived one-off charge, a plan's parent; a paid insurance charge."""
+    found: dict[str, Any] = {}
+    for n in range(start, start + copies):
+        operator = an_operator(f"Promise Ops {n}")
+        lease = a_lease(a_store(f"{5100 + n} Lagos", 5100 + n), operator, debit_day=15)
+        a_promise(lease, operator, date(2026, 11, 2), "3500.00")
+        a_promise(None, an_operator(f"Loose Ops {n}"), date(2026, 10, 29), "90.00")
+        a_promise(lease, operator, date(2026, 11, 4), "1.00")  # day eight
+        a_promise(lease, operator, date(2026, 10, 30), "2.00", status=ContactStatus.BROKEN)
+        a_promise(lease, operator, date(2026, 10, 30), "3.00", status=ContactStatus.KEPT)
+        plan = a_plan(lease)
+        an_installment(plan, 2, date(2026, 11, 3), status=OneOffChargeStatus.PARTIAL, paid="150.00")
+        an_installment(plan, 1, date(2026, 10, 29), status=OneOffChargeStatus.PAID, paid="400.00")
+        an_installment(plan, 3, date(2026, 11, 4))  # day eight
+        stopped = a_plan(a_lease(a_store(f"{5200 + n} Accra", 5200 + n), debit_day=15))
+        stopped.status, stopped.cancelled_at, stopped.note = (
+            "cancelled",
+            datetime(2026, 10, 1, tzinfo=UTC),
+            "Stopped.",
+        )
+        stopped.save(update_fields=["status", "cancelled_at", "note"])
+        an_installment(stopped, 1, date(2026, 10, 31))  # a cancelled plan's: left out
+        a_one_off_charge(operator, "80.00", date(2026, 10, 31), lease=lease, description="Key")
+        a_one_off_charge(
+            operator,
+            "60.00",
+            date(2026, 10, 31),
+            lease=lease,
+            description="Paid one",
+            status=OneOffChargeStatus.PAID,
+            paid="60.00",
+        )
+        a_one_off_charge(
+            operator,
+            "70.00",
+            date(2026, 10, 31),
+            lease=lease,
+            description="Waived one",
+            status=OneOffChargeStatus.WAIVED,
+            waived_at=datetime(2026, 10, 20, tzinfo=UTC),
+            waive_note="Goodwill.",
+        )
+        deposit_type = FeeType.objects.create(
+            code=f"deposit-{n}", name="Security deposit", refundable=True
+        )
+        a_one_off_charge(
+            operator,
+            "500.00",
+            date(2026, 10, 31),
+            lease=lease,
+            category=OneOffCategory.SETUP,
+            fee_type=deposit_type,
+            description="",
+        )
+        insurance = InsuranceCharge.objects.create(
+            lease=lease, policy_year=2026, due_on=date(2026, 11, 1), amount=D("695.00")
+        )
+        paid_insurance = InsuranceCharge.objects.create(
+            lease=lease, policy_year=2025, due_on=date(2026, 11, 1), amount=D("100.00")
+        )
+        Payment.objects.create(
+            insurance_charge=paid_insurance,
+            kind=PaymentKind.INSURANCE,
+            policy_year=2026,
+            method=PaymentMethod.ACH,
+            amount=D("100.00"),
+            status=PaymentStatus.SETTLED,
+            initiated_on=date(2026, 10, 1),
+            settled_on=date(2026, 10, 3),
+        )
+        Payment.objects.create(
+            insurance_charge=insurance,
+            kind=PaymentKind.INSURANCE,
+            policy_year=2026,
+            method=PaymentMethod.ACH,
+            amount=D("95.00"),
+            status=PaymentStatus.SETTLED,
+            initiated_on=date(2026, 10, 1),
+            settled_on=date(2026, 10, 3),
+        )
+        if not found:
+            found = {"lease": lease, "operator": operator, "plan": plan}
+    return found
+
+
+def test_promises_installments_and_due_dates_are_listed_with_their_amounts() -> None:
+    world = money_world()
+    upcoming = blocks.mini_calendar(OCT, TODAY).upcoming
+    assert rows_of(upcoming) == [
+        (date(2026, 10, 29), blocks.KIND_PROMISE, "Promise to pay", "Loose Ops 0", D("90.00")),
+        # A cancelled plan's parent is owed again; the live plan's parent is not listed.
+        (date(2026, 10, 30), blocks.KIND_DUE, "Shelving", "#5200 Accra", D("1200.00")),
+        (date(2026, 10, 31), blocks.KIND_DUE, "Key", "#5100 Lagos", D("80.00")),
+        (
+            date(2026, 11, 1),
+            blocks.KIND_DUE,
+            "Insurance, policy year 2026",
+            "#5100 Lagos",
+            D("600.00"),
+        ),
+        (date(2026, 11, 2), blocks.KIND_PROMISE, "Promise to pay", "#5100 Lagos", D("3500.00")),
+        (
+            date(2026, 11, 3),
+            blocks.KIND_INSTALLMENT,
+            "Installment 2 of 3",
+            "#5100 Lagos",
+            D("250.00"),
+        ),
+    ]
+    assert upcoming.more == 0  # the kept, broken, paid, waived, deposit, parent, day 8: out
+    links = {row.kind: row.url for row in upcoming.rows}
+    assert links[blocks.KIND_PROMISE] == f"/operators/{world['operator'].pk}/#contacts"
+    assert links[blocks.KIND_INSTALLMENT].startswith("/one-off-charges/")
+    assert upcoming.rows[0].store_url == ""  # a promise without a lease names its operator
+
+
+def test_a_deleted_promise_and_a_paused_plan_s_installment() -> None:
+    operator = an_operator("Paused Ops")
+    lease = a_lease(a_store("5300 Cairo", 5300), operator, debit_day=15)
+    a_promise(
+        lease,
+        operator,
+        date(2026, 10, 30),
+        "5.00",
+        deleted_at=datetime(2026, 10, 21, tzinfo=UTC),
+        delete_reason="Typo.",
+        deleted_by=User.objects.create_user("deleter"),
+    )
+    plan = a_plan(lease, status="paused")  # a paused plan's installments stay owed
+    an_installment(plan, 1, date(2026, 10, 30))
+    rows = blocks.mini_calendar(OCT, TODAY).upcoming.rows
+    assert [(row.kind, row.amount) for row in rows] == [(blocks.KIND_INSTALLMENT, D("400.00"))]
+
+
+def test_the_new_kinds_have_dots_a_legend_and_the_day_s_panel_lists_them() -> None:
+    money_world()
+    html = mini(page(client_for(Role.VIEWER)[0]))
+    start = html.index('data-day="2026-10-31"')
+    cell = html[start : html.index("</div>", start)]
+    assert 'class="mini-dot kind-due"' in cell
+    assert "Key: #5100 Lagos" in cell  # the day panel's words
+    assert "Waived one" not in cell and "Security deposit" not in cell
+    legend = html[html.index('id="mini-legend"') :]
+    for label in ("Promise to pay", "Due date"):
+        assert label in legend
+    october = blocks.mini_calendar(OCT, TODAY)
+    kinds = {item.kind for cell in october.days_with_items for item in cell.items}
+    assert {blocks.KIND_PROMISE, blocks.KIND_DUE} <= kinds
+    # Nov 2 and 3 are November's: the grid's November shows the promise and the installment.
+    november = blocks.mini_calendar(date(2026, 11, 1), TODAY)
+    by_day = {cell.day: {item.kind for item in cell.items} for cell in november.days_with_items}
+    assert blocks.KIND_PROMISE in by_day[date(2026, 11, 2)]
+    assert blocks.KIND_INSTALLMENT in by_day[date(2026, 11, 3)]
+    assert blocks.KIND_INSTALLMENT in by_day[date(2026, 11, 4)]  # the month, past the window
+    css = (BACKEND / "finance" / "static" / "finance" / "app.css").read_text()
+    for kind in ("promise", "installment", "due"):
+        assert f".mini-calendar .kind-{kind} {{ --dot-colour: var(--" in css
 
 
 # --- The page -------------------------------------------------------------------------------------
