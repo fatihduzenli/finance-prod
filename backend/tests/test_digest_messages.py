@@ -564,10 +564,12 @@ def test_0068_puts_lease_line_in_the_seeded_d_and_reverses() -> None:
         new = _migrate(AFTER)
         body = new.get_model("ledger", "MessageTemplate").objects.get(pk=row.pk).body
         assert body == seeded.replace(CURRENT, "{lease_line}")
-        audit = new.get_model("ledger", "AuditLog").objects.get(
-            action="message_template.lease_line_added", entity_id=str(row.pk)
+        # The seeded case writes no audit row (only an admin-edited D is reported).
+        assert not (
+            new.get_model("ledger", "AuditLog")
+            .objects.filter(action__startswith="message_template.lease_line", entity_id=str(row.pk))
+            .exists()
         )
-        assert audit.after == {"code": "overdue_day10", "placeholder": "{lease_line}"}
         back = _migrate(BEFORE)
         assert back.get_model("ledger", "MessageTemplate").objects.get(pk=row.pk).body == seeded
         again = _migrate(AFTER)

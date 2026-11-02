@@ -11,9 +11,11 @@ No text column is added, so no payment-data trigger changes (an empty ``GUARDED_
 Data, on ``message_templates``: the body of D (``overdue_day10``) gets the placeholder
 ``{lease_line}`` in place of the sentence seeded by ``0061``, "Continued non-payment may affect
 your lease.", **only when the body still holds that exact sentence**; a body an admin edited
-without it is left alone. Either way an ``audit_log`` row says what was done
-(``message_template.lease_line_added``, or ``message_template.lease_line_skipped`` with
-``{"reason": "edited"}``); no text of the body is copied into it.
+without it is left alone, and only then an ``audit_log`` row says so
+(``message_template.lease_line_skipped`` with ``{"reason": "edited"}``; no text of the body is
+copied into it), so the admin learns that D keeps its own wording. The seeded case writes no audit
+row: a fresh database holds the seeded D, and the suite's "writes nothing" tests read an empty
+audit log (gate of 2026-11-02).
 
 The reverse writes the sentence back wherever a template body holds ``{lease_line}`` (the
 current-lease reading of the placeholder, which the code before this migration does not know),
@@ -34,7 +36,6 @@ GUARDED_COLUMNS: dict[str, tuple[str, ...]] = {}
 D_CODE = "overdue_day10"
 SENTENCE = "Continued non-payment may affect your lease."
 PLACEHOLDER = "{lease_line}"
-ADDED = "message_template.lease_line_added"
 SKIPPED = "message_template.lease_line_skipped"
 #: What a combined row becomes on the reverse (an error is a class-name-shaped word).
 COMBINED_BACK = "Combined"
@@ -76,16 +77,14 @@ def add_lease_line(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
         return
     if SENTENCE in found.body:
         template.objects.filter(pk=found.pk).update(body=found.body.replace(SENTENCE, PLACEHOLDER))
-        action, after = ADDED, {"placeholder": PLACEHOLDER}
-    else:
-        action, after = SKIPPED, {"reason": "edited"}
+        return
     audit_log.objects.create(
         actor=None,
-        action=action,
+        action=SKIPPED,
         entity_type="message_template",
         entity_id=str(found.pk),
         before=None,
-        after={"code": D_CODE, **after},
+        after={"code": D_CODE, "reason": "edited"},
     )
 
 
