@@ -296,6 +296,7 @@ jobs:
       DATABASE_URL: postgresql://postgres@postgres:5432/finance_ci
       DJANGO_SECRET_KEY: ci-only-not-secret
       STAX_API_KEY: FAKE-CI-KEY-XYZ123
+      E2E_WEBKIT: "1"
 
     steps:
       - name: Check out the repository

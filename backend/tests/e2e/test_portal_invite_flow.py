@@ -12,6 +12,7 @@ path, is sent from a fresh context too. Each form's POST carries this site's ``O
 from __future__ import annotations
 
 import importlib
+import os
 import re
 from collections.abc import Iterator
 from datetime import date
@@ -35,7 +36,17 @@ pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
 PASSWORD = "e2e-only invite flow passphrase 2026"
 NEW_PASSWORD = "e2e-only reset flow passphrase 2026"
 EMAIL = "invite.flow@example.com"
-BROWSERS = ["chromium", "webkit"]
+#: WebKit runs in the CI image only (``E2E_WEBKIT=1`` in the e2e job): the frozen macOS 14 build
+#: does not speak this Playwright's protocol and hangs at the first page.
+BROWSERS = [
+    "chromium",
+    pytest.param(
+        "webkit",
+        marks=pytest.mark.skipif(
+            os.environ.get("E2E_WEBKIT") != "1", reason="WebKit e2e runs in the CI image"
+        ),
+    ),
+]
 
 
 @pytest.fixture(params=BROWSERS)
