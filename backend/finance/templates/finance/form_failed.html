@@ -1,0 +1,8 @@
+{% extends request.user.is_authenticated|yesno:"finance/base.html,two_factor/_base.html" %}
+{% comment %}Status 403 from finance.errors.csrf_failure (CSRF_FAILURE_VIEW) outside /portal/: a form that failed the CSRF check, nothing saved. The staff error card (finance/_error_card.html, the look of accounts/403.html) with "Try again" to the page the form was on (finance.errors.try_again). Django's reason is never shown.{% endcomment %}
+{% block title %}Try again{% endblock %}
+{% block header %}<div class="page-header"><h1>Try again</h1></div>{% endblock %}
+{% block content %}
+  {% if not request.user.is_authenticated %}<h1>Try again</h1>{% endif %}
+  {% include "finance/_error_card.html" with code="403" line="Something went wrong with the form" sentence="Nothing was saved. Open the page again and send the form once more." again=again %}
+{% endblock %}

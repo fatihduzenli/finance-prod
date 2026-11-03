@@ -33,6 +33,9 @@ def healthz(request: HttpRequest) -> JsonResponse:
     )
 
 
+# The styled 403 (finance.errors), never Django's plain page; the CSRF failure has its own view.
+handler403 = "finance.errors.permission_denied"
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("healthz", healthz, name="healthz"),

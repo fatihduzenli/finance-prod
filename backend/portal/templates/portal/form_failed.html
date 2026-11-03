@@ -1,0 +1,10 @@
+{% extends "portal/base.html" %}
+{% comment %}Status 403 from finance.errors.csrf_failure under /portal/ (portal.views.form_failed): a form that failed the CSRF check, nothing saved. "Try again" goes to the page the form was on, else Home. Django's reason is never shown.{% endcomment %}
+{% block title %}Try again{% endblock %}
+{% block content %}
+<section class="portal-card portal-narrow" id="form-failed">
+  <h1>Something went wrong with the form</h1>
+  <p id="form-failed-sentence">Nothing was saved. Open the page again and send the form once more.</p>
+  <p><a class="portal-button" id="form-failed-again" href="{{ again }}">Try again</a></p>
+</section>
+{% endblock %}
