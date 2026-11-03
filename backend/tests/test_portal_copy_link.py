@@ -4,7 +4,7 @@ Allowed (an admin, the sandbox, local or staging): the operator page answers wit
 holding a fresh one-time link, once, an invitation link while the account has no password,
 else a reset link, that expires 60 minutes after the click; the older link of that kind stops
 working; the audit row holds the kind and the expiry, never the link; the response is
-``no-store`` and ``no-referrer``; the link sets the password once. In production or with a live
+``no-store`` and ``same-origin``; the link sets the password once. In production or with a live
 key the route does not exist (the URL conf reloaded under those settings). Refused: billing and
 viewer (403), a GET (405), the service off the sandbox, an archived operator, a disabled
 account, no account; the button is hidden in each. The link is never in a log, a message, a
@@ -146,7 +146,7 @@ def test_an_invited_account_gets_a_fresh_invitation_link_shown_once(
     after = page(staff, operator)
     assert raw not in after and 'id="portal-copy-link-dialog"' not in after
     assert "no-store" in response["Cache-Control"]
-    assert response["Referrer-Policy"] == "no-referrer"
+    assert response["Referrer-Policy"] == "same-origin"
     assert list(get_messages(response.wsgi_request)) == []
     # The new token is the one live invitation; the older one is voided.
     token = PortalToken.objects.get(token_hash=tokens.digest(raw))

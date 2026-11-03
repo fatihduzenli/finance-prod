@@ -8,7 +8,9 @@ deposits.md H2): billing, POST only, each audited by :mod:`portal.invitations`.
 - ``ledger:operators:portal_copy_link``: "Copy invite link" (admin; the route exists on the
   sandbox only, ``ledger/urls.py``). Its answer is the operator page itself with a dialog open
   on the new one-time link: the link is in that one response only (no message, no redirect,
-  no log), which carries ``Cache-Control: no-store`` and ``Referrer-Policy: no-referrer``.
+  no log), which carries ``Cache-Control: no-store`` and ``Referrer-Policy: same-origin``
+  (the link is in the field, not the URL; ``no-referrer`` made Chrome send ``Origin: null``
+  with the page's forms).
 
 The operator in the URL is loaded first (404 otherwise); the outcome is a message on the page.
 """
@@ -94,5 +96,5 @@ def portal_copy_link(request: HttpRequest, pk: str) -> HttpResponse:
     context["copied_link"] = outcome
     response = render(request, "ledger/operators/detail.html", context)
     response["Cache-Control"] = "no-store"
-    response["Referrer-Policy"] = "no-referrer"
+    response["Referrer-Policy"] = "same-origin"
     return response
