@@ -193,11 +193,11 @@ def test_every_portal_post_is_csrf_protected(world: World, path: str) -> None:
     assert response.status_code == 403, path
 
 
-def test_the_portal_pages_are_not_indexed_and_the_link_pages_send_no_referrer(
+def test_the_portal_pages_are_not_indexed_and_the_link_pages_send_same_origin(
     world: World,
 ) -> None:
     client = portal_client(active_user(world.a))
     response: Any = client.get("/portal/")
     assert response["X-Robots-Tag"].startswith("noindex")
     gone: Any = Client().get("/portal/invite/bogus/")
-    assert gone.status_code == 404 and gone["Referrer-Policy"] == "no-referrer"
+    assert gone.status_code == 404 and gone["Referrer-Policy"] == "same-origin"

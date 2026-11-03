@@ -8,7 +8,10 @@ GET and POST), ``portal:reset_request`` (GET, POST: the same sentence whatever t
 ``portal:not_found`` (any other path under ``/portal/``: the portal's 404).
 A link page answers a refused token (unknown, used, expired, of an account that may not use
 it) with the same 404 sentence, never logged with its path (the token is in it), and is sent
-with ``Referrer-Policy: no-referrer``.
+with ``Referrer-Policy: same-origin``: the token never leaves this site (the pages load nothing
+from another), and the browser still sends the page's own ``Origin`` with its form, which the CSRF
+check needs (``no-referrer`` made Chrome send ``Origin: null``, refused; owner, 2026-11-03).
+A form that fails the CSRF check gets :func:`form_failed` (through ``finance.errors``).
 
 Signed in (``portal.middleware.PortalAuthMiddleware``): ``portal:home``, ``portal:store``,
 ``portal:invoices``, ``portal:payments`` (a store's id in the URL, answered only when the
@@ -79,15 +82,21 @@ def not_found(request: HttpRequest) -> HttpResponse:
     return _page(request, "portal/not_found.html", status=404)
 
 
+def form_failed(request: HttpRequest, again: str) -> HttpResponse:
+    """The portal's 403 for a form that failed the CSRF check (``finance.errors.csrf_failure``):
+    "Something went wrong with the form" and "Try again" to ``again``."""
+    return _page(request, "portal/form_failed.html", status=403, again=again)
+
+
 def _link_page(request: HttpRequest, template: str, **context: Any) -> HttpResponse:
     response = _page(request, template, **context)
-    response["Referrer-Policy"] = "no-referrer"
+    response["Referrer-Policy"] = "same-origin"
     return response
 
 
 def _link_gone(request: HttpRequest) -> HttpResponse:
     response = _page(request, "portal/link_gone.html", status=404, sentence=LINK_GONE)
-    response["Referrer-Policy"] = "no-referrer"
+    response["Referrer-Policy"] = "same-origin"
     # Django's request logger skips a response marked as logged: its line would carry the
     # path, and so the token.
     response._has_been_logged = True  # type: ignore[attr-defined]

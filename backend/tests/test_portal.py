@@ -298,7 +298,7 @@ def test_the_sent_invitation_carries_a_one_time_link_that_is_never_stored(
     assert not AuditLog.objects.filter(after__icontains=raw).exists()
     page = Client().get(path)
     assert page.status_code == 200 and "alpha.owner@example.com" in text(page)
-    assert page["Referrer-Policy"] == "no-referrer"
+    assert page["Referrer-Policy"] == "same-origin"
     client = Client()
     done = client.post(path, {"password": NEW_PASSWORD, "confirm": NEW_PASSWORD})
     assert done.status_code == 302 and done["Location"] == "/portal/"

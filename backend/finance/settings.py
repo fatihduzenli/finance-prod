@@ -80,6 +80,8 @@ DEBUG = _config.debug
 _base_url = urlsplit(APP_BASE_URL)
 ALLOWED_HOSTS = [_base_url.hostname] if _base_url.hostname else []
 CSRF_TRUSTED_ORIGINS = [f"{_base_url.scheme}://{_base_url.netloc}"]
+# A form that fails the CSRF check gets the styled 403 of its shell, never Django's page.
+CSRF_FAILURE_VIEW = "finance.errors.csrf_failure"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
