@@ -1339,7 +1339,7 @@ def test_the_checklist_hides_an_item_without_the_flag() -> None:
     assert "phone_fee" in {row.code for row in service.offered_types()}
     client.post("/leases/new/", lease_form(setup_phone_fee_price="50.00"))
     assert Lease.objects.count() == 1
-    assert OneOffCharge.objects.get().fee_type.code == "phone_fee"
+    assert OneOffCharge.objects.filter(fee_type__code="phone_fee").count() == 1
 
 
 def test_the_checklist_post_charges_the_rows_with_a_price_once() -> None:

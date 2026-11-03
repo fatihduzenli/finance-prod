@@ -155,7 +155,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
         "setup",
     ],
     "OneOffChargeStatus": ["owed", "paid", "partial", "voided", "waived"],
-    "PaymentChannel": ["other", "stax", "unknown", "wire", "zelle"],
+    # "invoice" added by ledger 0070 (PLAN-014b item 1, the New lease page's E-mail invoice).
+    "PaymentChannel": ["invoice", "other", "stax", "unknown", "wire", "zelle"],
     "PaymentKind": [
         "adjustment",
         "credit_refund",

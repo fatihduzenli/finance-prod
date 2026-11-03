@@ -813,7 +813,7 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
                     "extra": fee_type.pk in extras and not filled,
                     "deposit": fee_type == self.deposit_type,
                     "usual": (
-                        f"{Decimal(fee_type.default_price):,.2f}"
+                        format_amount(Decimal(fee_type.default_price)).removeprefix("$")
                         if fee_type.default_price is not None
                         else ""
                     ),
