@@ -13,17 +13,19 @@ reason at most :data:`~ledger.models.NOTE_DELETE_REASON_MAX_LENGTH`. Every refus
 :class:`NoteRefused` (:class:`NotAllowed` for the wrong person) with a sentence that never
 repeats the text.
 
-:func:`for_store` lists the store's live notes, newest first; :func:`pinned_for` the pinned
-ones, the latest pinned first, for the NOTES card.
+:func:`for_store` lists the store's live notes, newest first; :func:`card_for` what the store
+page's NOTES card shows (PLAN-014b item 3): the pinned notes, the latest pinned first, then the
+newest unpinned, at most :data:`CARD_SHOWN` in all, and how many live notes the store has.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from django.utils import timezone
 
 from accounts.display import staff_name
@@ -44,8 +46,11 @@ from ledger.validators import (
 )
 
 ENTITY_NOTE = "note"
-#: The NOTES card's most notes.
-PINNED_SHOWN = 5
+#: The NOTES card's most notes (PLAN-014b item 3).
+CARD_SHOWN = 3
+#: A body longer than this, or of more than :data:`CARD_LINES` lines, gets the card's "more".
+MORE_AFTER = 160
+CARD_LINES = 3
 BODY_REQUIRED = "Write the note first."
 BODY_TOO_LONG = f"A note is at most {NOTE_BODY_MAX_LENGTH:,} characters."
 PAYMENT_DATA = "A note cannot hold a card or account number."
@@ -232,6 +237,32 @@ def count_for_store(store: Store) -> int:
     return _live(store).count()
 
 
-def pinned_for(store: Store, limit: int = PINNED_SHOWN) -> list[Note]:
-    """The store's pinned live notes, the latest pinned first, at most ``limit``."""
-    return list(_live(store).filter(pinned=True).order_by("-pinned_at", "-id")[:limit])
+@dataclass(frozen=True)
+class NotesCard:
+    """The NOTES card: the notes it shows and how many live notes the store has."""
+
+    notes: list[Note]
+    total: int
+
+    @property
+    def entries(self) -> list[tuple[Note, bool]]:
+        """Each shown note with whether its body is cut (the card's "more" link)."""
+        return [(note, is_long(note.body)) for note in self.notes]
+
+
+def is_long(body: str) -> bool:
+    """Whether the card cuts ``body``: over :data:`MORE_AFTER` characters or
+    :data:`CARD_LINES` lines."""
+    return len(body) > MORE_AFTER or len(body.splitlines()) > CARD_LINES
+
+
+def card_for(store: Store) -> NotesCard:
+    """The pinned live notes, the latest pinned first, then the newest unpinned, at most
+    :data:`CARD_SHOWN`; and the store's live notes counted (two queries at most)."""
+    total = count_for_store(store)
+    if not total:
+        return NotesCard(notes=[], total=0)
+    shown = _live(store).order_by(
+        "-pinned", F("pinned_at").desc(nulls_last=True), "-created_at", "-id"
+    )[:CARD_SHOWN]
+    return NotesCard(notes=list(shown), total=total)

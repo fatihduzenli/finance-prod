@@ -102,10 +102,13 @@ def test_the_store_page_lease_card_notes_and_timeline_on_the_laptop(
     page.wait_for_load_state("networkidle")
     note = page.locator("li.note").first
     expect(note).to_contain_text("Owner prefers e-mail after 6 pm.")
-    assert page.locator("#notes-card").count() == 0
+    # PLAN-014b item 3 (re-pinned): the NOTES card lists the latest notes, pinned or not.
+    expect(page.locator("#notes-card")).to_contain_text("Owner prefers e-mail after 6 pm.")
+    assert page.locator("#notes-card .note-pin-glyph").count() == 0
     note.locator("button.note-pin").click()
     page.wait_for_load_state("networkidle")
     expect(page.locator("#notes-card")).to_contain_text("Owner prefers e-mail after 6 pm.")
+    assert page.locator("#notes-card .note-pin-glyph").count() == 1
     shot(page, f"store-notes-{theme}-laptop")
     # The timeline filter.
     page.locator("#timeline-filter a", has_text="E-mails").click()

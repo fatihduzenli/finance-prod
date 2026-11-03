@@ -1,7 +1,8 @@
 """A store's notes on the Notes & follow-ups tab (docs/qa/PLAN-014 B5).
 
-``ledger:notes:add`` (POST, billing) saves a note from the tab's form; ``ledger:notes:pin``
-(POST, billing) pins (``pinned=1``) or unpins it; ``ledger:notes:edit`` and
+``ledger:notes:add`` (POST, billing) saves a note from the tab's form or the NOTES card's
+(``from=card``, PLAN-014b item 3: a refused text comes back in the card's form);
+``ledger:notes:pin`` (POST, billing) pins (``pinned=1``) or unpins it; ``ledger:notes:edit`` and
 ``ledger:notes:delete`` open their dialog over the store page (GET) and save it (POST,
 billing in ``accounts.registry``; the author or an admin, :func:`ledger.services.notes.can_change`).
 Each answer goes back to the tab with its outcome as a message; a refused text is shown again
@@ -87,7 +88,9 @@ def note_add(request: HttpRequest, pk: str) -> HttpResponse:
             messages.success(request, notes.ADDED)
             return _tab(store, note)
     _emptied(request, form, "body")
-    return _page(request, store, "ledger/stores/detail.html", {"note_form": form})
+    # PLAN-014b item 3: a note refused from the NOTES card is shown again in the card's form.
+    name = "note_card_form" if request.POST.get("from") == "card" else "note_form"
+    return _page(request, store, "ledger/stores/detail.html", {name: form})
 
 
 @role_required

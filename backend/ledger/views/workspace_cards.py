@@ -8,8 +8,9 @@ the one line under it (the address and "Open since <date>", the parts that exist
 what the side cards read besides the workspace header: the store's cost in effect (STORE COST),
 its newest documents (DOCUMENTS, at most :data:`DOCUMENTS_SHOWN`, one query), the Documents
 tab's link for Upload (billing, while document storage is configured), the Autopay tab's
-link for "Set up", whether the LEASE card offers "Bill now" (billing), and the store's pinned
-notes for the NOTES card (PLAN-014 B5). Every value is text the template escapes.
+link for "Set up", whether the LEASE card offers "Bill now" (billing), and the NOTES card
+(PLAN-014b item 3: ledger.services.notes.card_for, the Notes & follow-ups tab's link and the
+page a note's "more" opens at the note). Every value is text the template escapes.
 """
 
 from __future__ import annotations
@@ -55,6 +56,7 @@ def side_cards(request: HttpRequest, store: Store, today: date) -> dict[str, Any
     from ledger.views.documents import feature_on  # ledger.views.documents imports views
 
     can_upload = meets(role_of(request.user), Role.BILLING) and feature_on()
+    tab_url = workspace.tab_url(store.pk, workspace.TAB_CONTACTS)
     return {
         "cost": store_costs.current_cost(store, today),
         "side_documents": [
@@ -70,7 +72,9 @@ def side_cards(request: HttpRequest, store: Store, today: date) -> dict[str, Any
         "can_bill": meets(role_of(request.user), Role.BILLING),
         # PLAN-014 C4: the LEASE card's "Add a bank account" / "Replace" (no query).
         "bank_entry_available": get_hosted_fields().available(),
-        # PLAN-014 B5: the NOTES card (one query), "All ›" to the Notes & follow-ups tab.
-        "pinned_notes": notes.pinned_for(store),
-        "notes_tab_url": workspace.tab_url(store.pk, workspace.TAB_CONTACTS),
+        # PLAN-014b item 3: the NOTES card (two queries), "All notes (n) ›" to the Notes &
+        # follow-ups tab, a note's "more" to the tab at the note (#note-<pk>).
+        "notes_card": notes.card_for(store),
+        "notes_tab_url": tab_url,
+        "notes_page_url": tab_url.split("#", 1)[0],
     }

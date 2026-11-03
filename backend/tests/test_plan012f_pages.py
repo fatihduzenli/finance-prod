@@ -360,7 +360,8 @@ def test_the_four_side_cards_read_the_lease() -> None:
     html = page(client_for(Role.BILLING)[0], f"/stores/{lease.store_id}/")
     side = html[html.index('<section id="workspace-header"') :]
     labels = re.findall(r'<h2 class="section-label"[^>]*>([^<]+)</h2>', side)
-    assert labels == ["Lease", "Next", "Store cost", "Documents"]
+    # PLAN-014b item 3 (re-pinned): the NOTES card always follows the LEASE card.
+    assert labels == ["Lease", "Notes", "Next", "Store cost", "Documents"]
     assert '<dd id="header-rent"><strong>$2,000.00</strong> / month</dd>' in side
     assert 'id="header-since"' not in side  # PLAN-014 B3: the Lease link carries the date
     assert '<dd id="header-debit-day">1st</dd>' in side
@@ -414,7 +415,8 @@ def test_the_operator_page_has_its_selector_in_the_header_and_the_same_cards() -
     side = html[html.index('<aside class="workspace-side') :]
     side = side[side.index('id="selected-store-label"') :]
     labels = re.findall(r'<h2 class="section-label"[^>]*>([^<]+)</h2>', side)
-    assert labels == ["Lease", "Next", "Store cost", "Documents"]
+    # PLAN-014b item 3 (re-pinned): the NOTES card always follows the LEASE card.
+    assert labels == ["Lease", "Notes", "Next", "Store cost", "Documents"]
     assert 'id="header-store"' in side and 'id="header-operator-balance">$2,000.00<' in side
     assert 'id="action-bar"' in side
 

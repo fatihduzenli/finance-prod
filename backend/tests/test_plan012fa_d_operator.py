@@ -653,6 +653,7 @@ def test_the_side_column_lists_the_operators_cards_then_the_selected_stores() ->
         "Portal",
         "1991",
         "Lease",
+        "Notes",  # PLAN-014b item 3 (re-pinned): the NOTES card always follows LEASE
         "Next",
         "Store cost",
         "Documents",
