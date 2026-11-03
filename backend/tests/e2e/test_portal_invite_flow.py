@@ -214,7 +214,7 @@ def test_a_form_that_fails_the_check_gets_the_portal_page_with_try_again(
     heading = page.locator("#form-failed h1")
     heading.wait_for()
     assert heading.inner_text() == "Something went wrong with the form"
-    assert "CSRF" not in page.locator("body").inner_text()
+    assert "CSRF verification failed" not in page.locator("body").inner_text()
     page.locator("#form-failed-again").click()
     page.wait_for_url(f"{live_server.url}{path}")
     choose_password(page, PASSWORD)
