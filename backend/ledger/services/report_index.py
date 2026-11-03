@@ -8,7 +8,8 @@ that a figure always equals what the report itself shows (never a parallel query
   number of store rows (the "No store" rows hold one-off charges without a lease: they count
   in the total, not as stores).
 - Payments by method: :func:`reports.payments_by_method` for this month, its total.
-- Bank account check: :func:`reports.unmatched_items`, how many.
+- Bank account check: :func:`reports.unmatched_items`, how many, and the day the oldest was
+  found (the page lists every open finding whatever its range, so "since" is that day).
 - Revenue by month: :func:`reports.revenue_by_month` for this month, its total billed.
 - Profit and loss: :func:`pnl.total` of :func:`pnl.rows` for this month, its billed margin
   (``None`` when a cost is unknown, with the unknown inputs named).
@@ -34,17 +35,21 @@ NOTHING_SCHEDULED = "nothing scheduled"
 
 @dataclass(frozen=True, slots=True)
 class ReportFigures:
+    #: The first day of this month: the month of the ranged figures.
+    month: date
     aging_total: Decimal
     aging_stores: int
     collected_month: Decimal
     unmatched: int
+    #: The day the oldest open finding was found; ``None`` when there is none.
+    unmatched_since: date | None
     billed_month: Decimal
     #: ``None`` when a cost of the month is unknown (:attr:`margin_missing` says which).
     margin_month: Decimal | None
     #: The unknown inputs, comma-separated ("landlord rent, fee costs"); empty when known.
     margin_missing: str
     calendar_week: int
-    #: "<title> · <day>" of the next item, or :data:`NOTHING_SCHEDULED`.
+    #: "<day> · <title>" of the next item, or :data:`NOTHING_SCHEDULED`.
     calendar_next: str
 
 
@@ -57,13 +62,16 @@ def figures(today: date) -> ReportFigures:
     upcoming = calendar.next_days(found, today)
     first = upcoming[0].items[0] if upcoming else None
     upcoming_text = (
-        f"{first.title} · {day_short_text(first.on)}" if first is not None else NOTHING_SCHEDULED
+        f"{day_short_text(first.on)} · {first.title}" if first is not None else NOTHING_SCHEDULED
     )
+    unmatched = reports.unmatched_items()
     return ReportFigures(
+        month=month,
         aging_total=aging.totals.total,
         aging_stores=sum(1 for row in aging.rows if row.store_id is not None),
         collected_month=reports.payments_by_method(this_month).total.total,
-        unmatched=len(reports.unmatched_items()),
+        unmatched=len(unmatched),
+        unmatched_since=unmatched[0].found_on if unmatched else None,
         billed_month=reports.revenue_by_month(this_month).total.total_billed,
         margin_month=margin.margin_billed,
         margin_missing=", ".join(margin.unknown),

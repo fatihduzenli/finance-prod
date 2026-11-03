@@ -1,6 +1,7 @@
 """The Reports index of docs/qa/PLAN-014b item 2: three groups of cards, each one link with its
-icon, title, description, live figure and sub-line, and "Open ›"; the Customer statement card's
-operator search beside its link; the header line. Every figure equals what its report's own
+icon and title on one row, description, live figure and sub-line beside "Open ›" (as
+docs/design/reports-dark-laptop.png); the Customer statement card's operator search under its
+link; the header line. Every figure equals what its report's own
 page shows for the same day or month (the reconciliation tests); the query count does not grow
 with the data; the figures run under the reports' statement timeout."""
 
@@ -20,6 +21,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.roles import Role
+from finance.dates import day_short_text
 from finance.templatetags.money import money
 from ledger.models import (
     CalendarEntry,
@@ -139,7 +141,7 @@ def test_the_aging_figure_is_the_aging_pages_total_and_store_count() -> None:
     assert (figures.aging_total, figures.aging_stores) == (report.totals.total, len(stores))
     assert figures.aging_total == D("3") * (D("1000.00") + D("600.00") + D("125.00"))
     html = get(client, INDEX).content.decode()
-    assert value_and_sub(html, "aging") == (money(report.totals.total), "3 stores")
+    assert value_and_sub(html, "aging") == (money(report.totals.total), "unpaid · 3 stores")
     assert 'class="report-value tone-unpaid"' in card(html, "aging")
 
 
@@ -151,7 +153,7 @@ def test_the_collected_figure_is_payments_by_method_for_this_month() -> None:
     figures = get(client, INDEX).context["live"]
     assert figures.collected_month == report.total.total == D("800.00")
     html = get(client, INDEX).content.decode()
-    assert value_and_sub(html, "payments-by-method") == ("$800.00", "collected this month")
+    assert value_and_sub(html, "payments-by-method") == ("$800.00", "collected in October")
 
 
 def test_the_unmatched_figure_is_the_bank_account_checks_list() -> None:
@@ -164,7 +166,10 @@ def test_the_unmatched_figure_is_the_bank_account_checks_list() -> None:
     figures = get(client, INDEX).context["live"]
     assert figures.unmatched == len(report.unmatched) == 3
     html = get(client, INDEX).content.decode()
-    assert value_and_sub(html, "deposits") == ("3 unmatched", "items to review")
+    since = day_short_text(report.unmatched[0].found_on)
+    assert figures.unmatched_since == report.unmatched[0].found_on
+    assert value_and_sub(html, "deposits") == ("3 unmatched", f"since {since}")
+    assert 'class="report-value tone-pending"' in card(html, "deposits")
 
 
 def test_the_billed_figure_is_revenue_by_month_for_this_month() -> None:
@@ -175,7 +180,7 @@ def test_the_billed_figure_is_revenue_by_month_for_this_month() -> None:
     assert figures.billed_month == report.total.total_billed
     assert figures.billed_month > 0
     html = get(client, INDEX).content.decode()
-    assert value_and_sub(html, "revenue") == (money(report.total.total_billed), "billed this month")
+    assert value_and_sub(html, "revenue") == (money(report.total.total_billed), "billed in October")
 
 
 def test_the_margin_figure_is_the_pnl_pages_billed_margin_for_this_month() -> None:
@@ -186,7 +191,8 @@ def test_the_margin_figure_is_the_pnl_pages_billed_margin_for_this_month() -> No
     assert total.margin_billed is not None
     assert (figures.margin_month, figures.margin_missing) == (total.margin_billed, "")
     html = get(client, INDEX).content.decode()
-    assert value_and_sub(html, "pnl") == (money(total.margin_billed), "margin this month")
+    assert value_and_sub(html, "pnl") == (money(total.margin_billed), "October margin")
+    assert 'class="report-value tone-paid"' in card(html, "pnl")
 
 
 def test_an_unknown_cost_shows_a_dash_and_names_what_is_missing() -> None:
@@ -199,6 +205,18 @@ def test_an_unknown_cost_shows_a_dash_and_names_what_is_missing() -> None:
     assert figures.margin_missing == ", ".join(total.unknown) != ""
     html = get(client, INDEX).content.decode()
     assert value_and_sub(html, "pnl") == ("—", f"margin unknown: {', '.join(total.unknown)}")
+
+
+def test_a_negative_margin_takes_the_unpaid_tone() -> None:
+    lease = a_lease(a_store("Loss", 802), an_operator("Loss Co"))
+    a_rent_charge(lease, OCT, RentChargeStatus.UNPAID, "100.00")
+    a_cost(lease.store, "900.00")
+    client = viewer()
+    total = get(client, "/reports/pnl/", THIS_MONTH).context["total"]
+    html = get(client, INDEX).content.decode()
+    assert total.margin_billed is not None and total.margin_billed < 0
+    assert value_and_sub(html, "pnl") == (money(total.margin_billed), "October margin")
+    assert 'class="report-value tone-unpaid"' in card(html, "pnl")
 
 
 def test_the_calendar_figure_is_the_calendar_pages_next_seven_days() -> None:
@@ -215,11 +233,11 @@ def test_the_calendar_figure_is_the_calendar_pages_next_seven_days() -> None:
     assert figures.calendar_week == sum(group.count for group in groups) == 3
     first = groups[0].items[0]
     assert (first.title, first.on) == ("Call the landlord", date(2026, 10, 8))
-    assert figures.calendar_next == "Call the landlord · Oct 8"
+    assert figures.calendar_next == "Oct 8 · Call the landlord"
     html = get(client, INDEX).content.decode()
     assert value_and_sub(html, "calendar") == (
-        "3 items this week",
-        "next: Call the landlord · Oct 8",
+        "3 this week",
+        "next: Oct 8 · Call the landlord",
     )
 
 
@@ -259,22 +277,23 @@ def test_a_one_off_charge_without_a_lease_counts_in_the_total_but_not_as_a_store
 
 def test_with_no_data_every_card_shows_its_zero_state() -> None:
     html = get(viewer(), INDEX).content.decode()
-    assert value_and_sub(html, "aging") == ("$0.00", "0 stores")
+    assert value_and_sub(html, "aging") == ("$0.00", "unpaid · 0 stores")
     assert "tone-unpaid" not in card(html, "aging")
-    assert value_and_sub(html, "payments-by-method") == ("$0.00", "collected this month")
+    assert value_and_sub(html, "payments-by-method") == ("$0.00", "collected in October")
     assert value_and_sub(html, "deposits") == ("0 unmatched", "nothing to review")
-    assert value_and_sub(html, "revenue") == ("$0.00", "billed this month")
-    assert value_and_sub(html, "pnl") == ("$0.00", "margin this month")
-    assert value_and_sub(html, "calendar") == ("0 items this week", "nothing scheduled")
+    assert value_and_sub(html, "revenue") == ("$0.00", "billed in October")
+    assert value_and_sub(html, "pnl") == ("$0.00", "October margin")
+    assert "tone-" not in card(html, "pnl")
+    assert value_and_sub(html, "calendar") == ("0 this week", "nothing scheduled")
 
 
 def test_one_store_and_one_item_are_singular() -> None:
     build(1)
     CalendarEntry.objects.all().delete()
     html = get(viewer(), INDEX).content.decode()
-    assert value_and_sub(html, "aging")[1] == "1 store"
-    assert value_and_sub(html, "deposits") == ("1 unmatched", "item to review")
-    assert value_and_sub(html, "calendar")[0] == "1 item this week"
+    assert value_and_sub(html, "aging")[1] == "unpaid · 1 store"
+    assert value_and_sub(html, "deposits")[0] == "1 unmatched"
+    assert value_and_sub(html, "calendar")[0] == "1 this week"
 
 
 # --- The page ---------------------------------------------------------------------------------
@@ -322,8 +341,9 @@ def test_three_groups_each_card_one_link_with_open_and_its_id() -> None:
     assert parser.nested == []
     expected = {f"report-{slug}" for slug in (*CARDS, "statement")}
     assert set(parser.links) == expected
+    # The statement card's link holds no "Open ›" (the reference shows the search instead).
     for name, text in parser.links.items():
-        assert text.count("Open ›") == 1, name
+        assert text.count("Open ›") == (0 if name == "report-statement" else 1), name
     hrefs = dict(re.findall(r'id="(report-[a-z-]+)" href="([^"]+)"', html))
     assert hrefs == {
         "report-aging": "/reports/aging/",
@@ -354,9 +374,13 @@ def test_the_statement_card_searches_the_operator_list() -> None:
     form = re.search(r'<form class="report-statement-form"[^>]*>(.*?)</form>', html, re.S)
     assert form is not None
     assert 'method="get" action="/operators/"' in form.group(0)
-    assert '<label for="report-statement-q">Operator</label>' in form.group(1)
+    assert '<label class="visually-hidden" for="report-statement-q">Operator</label>' in (
+        form.group(1)
+    )
     assert 'name="q" id="report-statement-q"' in form.group(1)
-    assert '<button class="btn" type="submit">Find</button>' in form.group(1)
+    assert 'placeholder="Find an operator…"' in form.group(1)
+    # One field: Enter submits it (implicit submission), no button.
+    assert "<button" not in form.group(1)
     found = get(client, "/operators/", {"q": "Findable"}).content.decode()
     assert "Findable Fuels" in found and "Other Oils" not in found
 
