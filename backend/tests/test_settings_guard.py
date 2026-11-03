@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib
 import uuid
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -48,6 +49,7 @@ from tests.test_collections import at
 from tests.test_collections import clock as clock  # noqa: PLC0414 (the fixture, re-exported)
 from tests.test_collections import memory as memory  # noqa: PLC0414 (the fixture, re-exported)
 from tests.test_operator_views import client_for
+from tests.test_plan014_e4_rent_months import autopay
 from tests.test_plan014_e_reminders import billed_lease, managers
 
 pytestmark = pytest.mark.django_db
@@ -315,7 +317,9 @@ def test_a_placeholder_with_no_value_holds_the_message_and_names_it() -> None:
     assert (c.status, c.held_reason) == (MessageStatus.HELD, HeldReason.MISSING_VALUE)
     assert "#{store_number} No number" in c.rendered_subject
     assert messaging.missing(c) == ["store_number"]
-    assert messaging.status_text(c) == "Held (Missing value: {store_number})"
+    assert messaging.status_text(c) == (
+        "Held (Missing value: {store_number} — give store No number a number in its settings)"
+    )
     assert jobs_for(c) == 0
 
 
@@ -390,9 +394,9 @@ def test_send_all_held_for_settings_releases_exactly_those_holds_audited(
     page = client.get(OUTBOX).content.decode()
     assert 'id="outbox-send-held-for-settings"' in page
     assert "Send all held for settings (2)" in page
-    assert "Send the 2 messages held for the settings?" in page
+    assert "Send all held for settings: 2 held messages → 2 e-mails, 0 superseded?" in page
     response = client.post(RELEASE, {"count": "2"}, follow=True)
-    assert "2 held messages will be sent now." in response.content.decode()
+    assert "Sent now: 2 held messages → 2 e-mails, 0 superseded." in response.content.decode()
     for message in held:
         message.refresh_from_db()
         assert (message.status, message.held_reason) == (MessageStatus.QUEUED, "")
@@ -530,3 +534,113 @@ def test_the_banner_is_not_on_other_pages_nor_the_sign_in_page() -> None:
     from django.test import Client
 
     assert BANNER not in Client().get(reverse("two_factor:login")).content.decode()
+
+
+# --- The release is grouped as the daily job groups (Fable's review, 2026-11-02) ----------------
+
+NOV = date(2026, 11, 1)
+
+
+def held_on(
+    clock: Any, on: date, lease: Lease, subject: Any, code: str, rule: str
+) -> OutboundMessage:
+    """A message queued (and held: the settings are blank) on ``on``."""
+    clock(at(on))
+    template = MessageTemplate.objects.get(code=code)
+    context = messaging.context_for(lease, subject, rule, today=on)
+    message = messaging.queue(rule, lease, subject, template, context)
+    assert message is not None and message.held_reason == HeldReason.SETTINGS_INCOMPLETE
+    return message
+
+
+def test_two_weeks_of_holds_go_as_one_combined_d_per_lease(
+    clock: Any, memory: MemoryMailSender
+) -> None:
+    support("")
+    lease = billed_lease(3501)
+    assert lease.operator is not None
+    late = a_one_off_charge(
+        lease.operator, "80.00", date(2026, 11, 7), lease=lease, description="Late"
+    )
+    shelf = a_one_off_charge(
+        lease.operator, "40.00", date(2026, 11, 14), lease=lease, description="Shelf"
+    )
+    b = held_on(clock, date(2026, 11, 4), lease, late, "reminder_due", MessageRule.B)
+    c = held_on(clock, date(2026, 11, 12), lease, late, "overdue_day5", MessageRule.C)
+    d = held_on(clock, date(2026, 11, 17), lease, late, "overdue_day10", MessageRule.D)
+    c2 = held_on(clock, date(2026, 11, 19), lease, shelf, "overdue_day5", MessageRule.C)
+    other = billed_lease(3502)
+    autopay(other)
+    month = messaging.RentMonth(other, NOV, date(2026, 11, 5), Decimal("3500.00"))
+    a = held_on(clock, date(2026, 11, 2), other, month, "reminder_autopay", MessageRule.A)
+    support(SUPPORT)
+    clock(at(date(2026, 11, 20)))
+    client, _ = client_for(Role.ADMIN)
+    page = client.get(OUTBOX).content.decode()
+    assert "5 held messages → 1 e-mail, 3 superseded" in page
+    response = client.post(RELEASE, {"count": "5"}, follow=True)
+    assert "Sent now: 5 held messages → 1 e-mail, 3 superseded." in response.content.decode()
+    rows = {m.pk: m for m in OutboundMessage.objects.filter(pk__in=[a.pk, b.pk, c.pk, d.pk, c2.pk])}
+    assert (rows[d.pk].status, rows[d.pk].held_reason) == (MessageStatus.QUEUED, "")
+    assert (rows[c2.pk].status, rows[c2.pk].combined_into_id) == (MessageStatus.COMBINED, d.pk)
+    assert (rows[b.pk].status, rows[b.pk].error) == (MessageStatus.SUPPRESSED, "Superseded")
+    assert (rows[c.pk].status, rows[c.pk].error) == (MessageStatus.SUPPRESSED, "Superseded")
+    assert (rows[a.pk].status, rows[a.pk].error) == (MessageStatus.SUPPRESSED, "DebitPassed")
+    assert jobs_for(rows[d.pk]) == 1
+    assert Job.objects.filter(kind=JobKind.MESSAGE_SEND).count() == 1
+    assert rows[d.pk].rendered_body.endswith(
+        "\n\nCharges (2): charge · amount · due date · days late\n"
+        "- Late · $80.00 · Nov 7, 2026 · 13\n"
+        "- Shelf · $40.00 · Nov 14, 2026 · 6\n"
+        "Total: $120.00"
+    )
+    messaging.send(d.pk)
+    [sent] = memory.sent
+    assert sent.to == "store@example.com" and f"contact us at {SUPPORT}" in sent.text
+    assert "{support_email}" not in sent.text
+
+
+def test_a_single_held_row_is_released_unchanged(memory: MemoryMailSender) -> None:
+    support("")
+    lease = billed_lease(3503)
+    d = queue_d(lease, overdue(lease))
+    body = d.rendered_body
+    support(SUPPORT)
+    admin = client_for(Role.ADMIN)[1]
+    outcome = messaging.send_held_for_settings(admin, 1)
+    assert outcome.message == "Sent now: 1 held message → 1 e-mail, 0 superseded."
+    d.refresh_from_db()
+    assert (d.status, d.rendered_body) == (MessageStatus.QUEUED, body)
+    assert jobs_for(d) == 1
+
+
+def test_send_now_on_one_held_row_combines_the_lease_s_other_holds(
+    clock: Any, memory: MemoryMailSender
+) -> None:
+    support("")
+    lease = billed_lease(3504)
+    assert lease.operator is not None
+    late = a_one_off_charge(
+        lease.operator, "80.00", date(2026, 11, 7), lease=lease, description="Late"
+    )
+    shelf = a_one_off_charge(
+        lease.operator, "40.00", date(2026, 11, 14), lease=lease, description="Shelf"
+    )
+    d = held_on(clock, date(2026, 11, 17), lease, late, "overdue_day10", MessageRule.D)
+    c = held_on(clock, date(2026, 11, 19), lease, shelf, "overdue_day5", MessageRule.C)
+    elsewhere = billed_lease(3505)
+    apart = queue_d(elsewhere, overdue(elsewhere))
+    support(SUPPORT)
+    clock(at(date(2026, 11, 20)))
+    admin = client_for(Role.ADMIN)[1]
+    assert messaging.send_now(c.pk, admin).message == messaging.SEND_NOW_QUEUED
+    d.refresh_from_db()
+    c.refresh_from_db()
+    apart.refresh_from_db()
+    assert d.status == MessageStatus.QUEUED and "Charges (2)" in d.rendered_body
+    assert (c.status, c.combined_into_id) == (MessageStatus.COMBINED, d.pk)
+    assert (apart.status, apart.held_reason) == (
+        MessageStatus.HELD,
+        HeldReason.SETTINGS_INCOMPLETE,
+    )
+    assert Job.objects.filter(kind=JobKind.MESSAGE_SEND).count() == 1

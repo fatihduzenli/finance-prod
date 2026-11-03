@@ -14,8 +14,10 @@
 - ``ledger:outbox:send_now`` (admin, POST): "Send now" on a held message
   (:func:`ledger.services.messaging.send_now`); the outcome is a message on the page.
 - ``ledger:outbox:send_held_for_settings`` (admin, POST; owner, 2026-11-02): "Send all held for
-  settings", shown while messages are held ``settings_incomplete``, with their number, which
-  the admin confirms and the form posts back (``count``): every one is queued again
+  settings", shown while messages are held ``settings_incomplete``, with their number; the
+  confirmation says what it will do ("5 held messages → 2 e-mails, 3 superseded",
+  :func:`ledger.services.messaging.release_preview`) and the form posts the number back
+  (``count``): they are released grouped as at the daily job
   (:func:`ledger.services.messaging.send_held_for_settings`); the outcome is a message on the
   page.
 """
@@ -76,6 +78,7 @@ def outbox_page(request: HttpRequest) -> HttpResponse:
     found = messaging.outbox(status=status, since=since, until=until, held_reason=reason)
     page = Paginator(found, PAGE_SIZE).get_page(request.GET.get("page"))
     managers = messaging.managers_to()
+    held_for_settings = messaging.held_for_settings().count()
     accepted = {
         "status": status,
         "reason": reason,
@@ -111,7 +114,8 @@ def outbox_page(request: HttpRequest) -> HttpResponse:
             "reason_choices": HeldReason.choices,
             "selected": {"status": status, "reason": reason, "from": since, "to": until},
             "mail_set_up": mail.is_set_up(),
-            "held_for_settings": messaging.held_for_settings().count(),
+            "held_for_settings": held_for_settings,
+            "release": messaging.release_preview() if held_for_settings else None,
         },
     )
 

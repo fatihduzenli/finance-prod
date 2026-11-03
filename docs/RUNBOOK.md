@@ -822,10 +822,14 @@ a red banner, "Set the company name and support e-mail before mail goes live.", 
 that is not the internal one (the operator's reminders, the final statement, the portal's
 invitation and reset) is held in the Outbox as "Settings incomplete: …"; the internal E still
 goes. A message whose text names a placeholder that has no value (a store without a number,
-say) is held as "Missing value: {store_number}": the stored text shows the placeholder in place
-of the gap. Once both settings are set, **Send all held for settings** on the Outbox (admin; it
-asks you to confirm the number) queues every message held for the settings again, with the
-settings written in; **Send now** does the same for one. The Outbox's preview marks such rows
+say) is held as "Missing value: {store_number} — give store … a number in its settings": the
+stored text shows the placeholder in place of the gap. Once both settings are set, **Send all
+held for settings** on the Outbox (admin; its confirmation says what it will do, "5 held
+messages → 1 e-mail, 3 superseded") releases them grouped as the daily job groups: per lease one
+e-mail under the most urgent of D, C, B, A listing the charges still open, with the settings
+written in; an A whose debit has passed, a charge since paid, and every older message about a
+charge that has a more urgent one are not sent (suppressed). A portal message or a final
+statement goes as it is. **Send now** on one such message releases its lease's the same way. The Outbox's preview marks such rows
 "Would queue (held: settings incomplete)".
 
 **Admin › Settings › Mail.** *Send as* (the company mailbox the Workspace key impersonates),
