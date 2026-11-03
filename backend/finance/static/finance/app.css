@@ -513,6 +513,10 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .side-list dd[class^="side-"] > a:not(.card-link) { color: inherit; }
 .side-list dd > .card-link { margin-left: var(--space-1); font-size: var(--fs-sm); }
 .side-note.warning { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-ctl); background: var(--flash-warning-bg); color: var(--flash-warning-text); font-size: var(--fs-sm); }
+/* Owner, 2026-11-02: the Admin pages' banner while the company name or support e-mail is blank
+   (finance/base.html #settings-incomplete): the documented pair --unpaid-text on --unpaid-bg. */
+.settings-banner { margin: 0 0 var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-ctl); background: var(--unpaid-bg); color: var(--unpaid-text); font-weight: 600; }
+.settings-banner a { color: inherit; text-decoration: underline; }
 .side-strong { font-weight: 700; }
 .doc-list { list-style: none; margin: 0; padding: 0; font-size: var(--fs-base); }
 .doc-list li { display: flex; align-items: center; gap: var(--space-2); padding: 3px 0; }

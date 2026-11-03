@@ -314,6 +314,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:settings:template_preview": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Admin › Outbox (PLAN-014 D5): "Send now" on a held message.
     "ledger:outbox:send_now": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Owner, 2026-11-02: "Send all held for settings".
+    "ledger:outbox:send_held_for_settings": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Admin › Settings › Bank deposits' switches (PLAN-014 I2).
     "ledger:settings:bank_save": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Admin › Bank deposits (PLAN-014 I2, I4): recording a deposit and Fetch now need billing;

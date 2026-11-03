@@ -810,6 +810,23 @@ meanwhile is dropped (suppressed). B and A never wait. Template D ends with `{le
 "Continued non-payment may affect your lease." while the lease is current, "Please contact us to
 settle this balance." once it has ended (ledger 0068 put the placeholder in place of the sentence
 only where D's text still had it; an edited D is left as it is, and the audit log says so).
+Since ledger 0069 D's payment sentence is one placeholder, `{pay_line}`: "Please pay today at
+{pay_link} or contact us at {support_email} to arrange payment. Continued non-payment may affect
+your lease." while the lease is current, "Please pay at {pay_link} or contact us at
+{support_email} to settle this balance." once it has ended (put in place of the seeded sentences
+only where D still had them; an edited D is left alone and the audit log says so).
+
+**No message leaves with an empty placeholder** (owner, 2026-11-02). While the company name or
+the support e-mail is blank (Admin › System settings › Company settings), every Admin page shows
+a red banner, "Set the company name and support e-mail before mail goes live.", and every message
+that is not the internal one (the operator's reminders, the final statement, the portal's
+invitation and reset) is held in the Outbox as "Settings incomplete: …"; the internal E still
+goes. A message whose text names a placeholder that has no value (a store without a number,
+say) is held as "Missing value: {store_number}": the stored text shows the placeholder in place
+of the gap. Once both settings are set, **Send all held for settings** on the Outbox (admin; it
+asks you to confirm the number) queues every message held for the settings again, with the
+settings written in; **Send now** does the same for one. The Outbox's preview marks such rows
+"Would queue (held: settings incomplete)".
 
 **Admin › Settings › Mail.** *Send as* (the company mailbox the Workspace key impersonates),
 *Reply-To*, *Managers* (one address per line; they receive the internal 30-days message) and the
@@ -824,14 +841,14 @@ written in source.
 **Admin › Settings › Message templates.** The subject and text of every template, with the
 placeholders each may use (`{operator_name} {store_number} {store_name} {amount} {charge_name}
 {due_date} {debit_date} {retry_date} {days_late} {bank_last4} {return_reason} {pay_link}
-{store_link} {support_email} {company_name} {lease_line}`). An unknown placeholder is refused on save with its
+{store_link} {support_email} {company_name} {lease_line} {pay_line}`). An unknown placeholder is refused on save with its
 name; nothing else of the text is repeated. **Preview** renders the text with a chosen store's
 current lease and sample amounts and queues nothing. Until the operator portal exists,
 `{pay_link}` is a signed link to the operator's statement. Every change is audited.
 
 **Admin › Outbox** (`/admin-settings/outbox/`). Every message, newest first, with its status and
-reason, recipient, template and the time the window lets it go; filters by status and by the days
-queued; each row opens its stored text. **Send now** sends a held message again, and is refused
+reason, recipient, template and the time the window lets it go; filters by status, by the reason
+a message is held and by the days queued; each row opens its stored text. **Send now** sends a held message again, and is refused
 with a sentence while mail is not set up or, on the sandbox, while the address is not on the
 allowlist. A message to an operator marked *Handled personally* is held ("operator handled
 personally"); a lease without a billing e-mail holds its messages ("no billing e-mail"); an empty

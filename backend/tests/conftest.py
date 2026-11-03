@@ -129,3 +129,45 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         shard = ROUNDTRIP_SHARDS.get(item.name.split("[", 1)[0])
         if shard is not None:
             item.add_marker(getattr(pytest.mark, f"shard{shard}"))
+
+
+# --- The support e-mail of the messaging tests (owner, 2026-11-02) ---------------------------
+#: No message to an operator goes while the company name or support e-mail is blank, and the
+#: migrations seed an empty support e-mail. The tests of these files send messages as they did
+#: before: each starts with this placeholder address in the settings row (a test of the hold
+#: blanks it again). Re-pinned by Opus for the settings guard.
+SUPPORT_EMAIL = "support@example.com"
+SUPPORT_EMAIL_FILES = frozenset(
+    {
+        "test_collections.py",
+        "test_collections_adversarial.py",
+        "test_digest_messages.py",
+        "test_lease_end.py",
+        "test_messaging_engine.py",
+        "test_outbox_preview.py",
+        "test_plan012e_adversarial.py",
+        "test_plan014_d_messaging.py",
+        "test_plan014_e4_rent_months.py",
+        "test_plan014_e_reminders.py",
+        "test_plan014_f_returns.py",
+        "test_portal.py",
+        "test_reminders.py",
+        "test_returns_nsf.py",
+    }
+)
+
+
+@pytest.fixture(autouse=True)
+def _support_email_set(request: pytest.FixtureRequest) -> None:
+    """Fill the support e-mail for a database test of :data:`SUPPORT_EMAIL_FILES`."""
+    if request.node.path.name not in SUPPORT_EMAIL_FILES:
+        return
+    if request.node.get_closest_marker("django_db") is None and not {
+        "db",
+        "transactional_db",
+    } & set(request.fixturenames):
+        return
+    from ledger.models import CompanySettings
+
+    row = CompanySettings.current()
+    CompanySettings.objects.filter(pk=row.pk).update(support_email=SUPPORT_EMAIL)

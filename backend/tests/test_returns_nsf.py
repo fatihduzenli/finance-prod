@@ -45,6 +45,7 @@ from ledger.models import (
     PaymentStatus,
     RetryState,
     ReviewReason,
+    Store,
 )
 from ledger.services import attention, business_days, contacts, nsf, refunds
 from payments.fake import FakeProvider
@@ -114,6 +115,9 @@ def a_world(fake: FakeProvider, *, bank: bool = True) -> World:
     """The webhook world (a rent charge of $1,500.00 on an invoice), its lease's account
     holding a linked bank method unless ``bank`` is false."""
     world = make_world(fake)
+    # Re-pinned (Opus, owner 2026-11-02): F names {store_number}, and a message whose
+    # placeholder has no value is held (missing_value); the store gets a number.
+    Store.objects.filter(pk=world.lease.store_id).update(store_number=101)
     if bank:
         ExternalRef.objects.create(
             entity_type="lease",

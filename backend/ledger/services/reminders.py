@@ -53,10 +53,12 @@ would queue, writing nothing: per lease month and open charge its rule, template
 store), operator, amount and outcome (:class:`Planned`) — it would be queued, paused by a
 promise, or skipped and why (no lease or operator to bill, no active template, the month
 settled, already queued); a message that would be queued to a lease without a billing e-mail
-says it will be held. :func:`queue_due` queues exactly the planned items that would be queued,
-so the Outbox's preview of the next 30 days (:mod:`ledger.services.outbox_preview`) and the
-daily job can never disagree, but for a template that cannot be rendered, which only the queue
-finds (counted skipped).
+says it will be held, as does one that is not internal while the company name or support
+e-mail is blank (``held: settings incomplete``,
+:func:`ledger.services.messaging.settings_incomplete`). :func:`queue_due` queues exactly the
+planned items that would be queued, so the Outbox's preview of the next 30 days
+(:mod:`ledger.services.outbox_preview`) and the daily job can never disagree, but for a
+template that cannot be rendered, which only the queue finds (counted skipped).
 
 **Queue** (:func:`queue_due`). The lease months first, then the open balances. The lease
 that bills a charge is
@@ -107,6 +109,7 @@ from ledger.models import (
     ChargeEntityType,
     CollectionSchedule,
     CollectionStatus,
+    CompanySettings,
     InsuranceCharge,
     Lease,
     LeaseBilling,
@@ -377,6 +380,9 @@ OUTCOME_TEXT: Mapping[str, str] = {
 }
 #: Added to "Would queue" when the lease has no billing e-mail: the send holds it.
 HELD_NO_EMAIL = "held: no billing e-mail"
+#: Added to "Would queue" for a message that is not internal while the company name or support
+#: e-mail is blank (owner, 2026-11-02): it is held ``settings_incomplete``.
+HELD_SETTINGS = "held: settings incomplete"
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,7 +391,8 @@ class Planned:
     an open charge (``row`` its open balance; ``subject`` ``None`` when the charge was not
     found), with the lease that bills it, its operator, the rule's active template, the amount
     and the outcome (:data:`OUTCOME_TEXT`). ``no_email``: the lease has no billing e-mail (an
-    operator-facing message would be held)."""
+    operator-facing message would be held); ``settings_held``: it is not internal and the
+    company name or support e-mail is blank (it would be held ``settings_incomplete``)."""
 
     day: date
     rule: Rule
@@ -397,6 +404,7 @@ class Planned:
     amount: Decimal
     outcome: str
     no_email: bool = False
+    settings_held: bool = False
 
     @property
     def queues(self) -> bool:
@@ -414,6 +422,8 @@ class Planned:
     @property
     def outcome_text(self) -> str:
         text = OUTCOME_TEXT[self.outcome]
+        if self.queues and self.settings_held:
+            return f"{text} ({HELD_SETTINGS})"
         return f"{text} ({HELD_NO_EMAIL})" if self.queues and self.no_email else text
 
 
@@ -548,17 +558,23 @@ def plan(today: date) -> list[Planned]:
 
 
 def _with_queued_and_emails(items: list[Planned]) -> list[Planned]:
-    """``items`` with the ones a row holds already marked so, and the e-mail-less marked."""
+    """``items`` with the ones a row holds already marked so, and the e-mail-less and the ones
+    held for the company settings marked."""
     candidates = [item for item in items if item.queues]
     queued = _already_queued(candidates)
     emails = _billing_emails(candidates)
+    incomplete = bool(candidates) and bool(messaging.settings_incomplete(CompanySettings.read()))
     found: list[Planned] = []
     for item in items:
         if item.queues and _row_key(item) in queued:
             item = replace(item, outcome=ALREADY_QUEUED)
         elif item.queues and item.lease is not None and item.template is not None:
             internal = item.template.internal
-            item = replace(item, no_email=not internal and not emails.get(item.lease.pk))
+            item = replace(
+                item,
+                no_email=not internal and not emails.get(item.lease.pk),
+                settings_held=not internal and incomplete,
+            )
         found.append(item)
     return found
 

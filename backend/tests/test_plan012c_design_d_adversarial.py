@@ -128,12 +128,15 @@ FROZEN_CHOICES: dict[str, list[str]] = {
         "manual",
         "portal",
     ],
+    # "missing_value" and "settings_incomplete" added by ledger 0069 (owner, 2026-11-02).
     "HeldReason": [
         "handled_personally",
+        "missing_value",
         "no_address",
         "no_manager_list",
         "not_set_up",
         "sandbox",
+        "settings_incomplete",
     ],
     # "check" added by PLAN-012e-3, "cash" by PLAN-012f-b Batch C.
     "MoneyMethod": ["ach", "cash", "check", "other", "wire", "zelle"],
@@ -223,8 +226,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: (ledger:leases:alias_add and alias_remove, the billing details dialog's sender names); 314
 #: since PLAN-014 I-b (ledger:leases:insurance_bill, the LEASE card's insurance "Bill now"); 315
 #: since the Outbox's "Preview next 30 days" (ledger:outbox:preview) and "Copy invite link"
-#: (ledger:operators:portal_copy_link), owner, 2026-11-01.
-FROZEN_ROUTES = (316, "9a7f7b9e86b22d58d81b3778ed1fcc9c9c2684446cf94e040a3115154c502e9c")
+#: (ledger:operators:portal_copy_link), owner, 2026-11-01; 317 since the Outbox's "Send all held
+#: for settings" (ledger:outbox:send_held_for_settings), owner, 2026-11-02.
+FROZEN_ROUTES = (317, "41828d1d6f17a91bfa3855a84d47f90eb0f602de031c9b32d679694a57654aab")
 
 
 # --- what is stored or addressed never changes ------------------------------------------
