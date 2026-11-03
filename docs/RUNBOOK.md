@@ -797,6 +797,20 @@ resume with the next rule day. Paid, waived and voided charges get nothing, each
 a plan is reminded on its own due date, and no rule adds a fee. The job's line counts the messages queued per rule, the charges paused by a promise and
 the ones not queued (already queued that day, or no lease to bill).
 
+**One e-mail per store per day, and the 3-day fold** (owner, 2026-11-02). When several of A to D
+fire for one lease on one day, the operator gets one e-mail: the most urgent rule's template and
+subject (D, then C, then B, then A) with, under its text, every charge listed (charge · amount ·
+due date · days late) and the total. Each rule still has its own row, so nothing is ever queued
+twice; in the Outbox the other rows read "Combined into the D message: …" with that message's
+outcome and link to it. E (to the managers) and F (after a return) are never combined. A lease
+gets at most one overdue e-mail (C or D) every three days: a C or D that comes due within three
+days of the lease's last one waits ("Waiting for the 3-day fold (until …)", no Send now) and goes
+on the first day after, combined with whatever is due that day or on its own; a charge paid
+meanwhile is dropped (suppressed). B and A never wait. Template D ends with `{lease_line}`:
+"Continued non-payment may affect your lease." while the lease is current, "Please contact us to
+settle this balance." once it has ended (ledger 0068 put the placeholder in place of the sentence
+only where D's text still had it; an edited D is left as it is, and the audit log says so).
+
 **Admin › Settings › Mail.** *Send as* (the company mailbox the Workspace key impersonates),
 *Reply-To*, *Managers* (one address per line; they receive the internal 30-days message) and the
 *Sandbox allowlist* (one address per line). The card says whether mail is set up here from three
@@ -810,7 +824,7 @@ written in source.
 **Admin › Settings › Message templates.** The subject and text of every template, with the
 placeholders each may use (`{operator_name} {store_number} {store_name} {amount} {charge_name}
 {due_date} {debit_date} {retry_date} {days_late} {bank_last4} {return_reason} {pay_link}
-{store_link} {support_email} {company_name}`). An unknown placeholder is refused on save with its
+{store_link} {support_email} {company_name} {lease_line}`). An unknown placeholder is refused on save with its
 name; nothing else of the text is repeated. **Preview** renders the text with a chosen store's
 current lease and sample amounts and queues nothing. Until the operator portal exists,
 `{pay_link}` is a signed link to the operator's statement. Every change is audited.
@@ -825,8 +839,10 @@ managers' list holds the internal message ("no manager list").
 **Preview next 30 days** (`/admin-settings/outbox/preview/`, admin; or `manage.py outbox_preview
 [--days 30]` on staging, tab-separated, no addresses) runs the daily job's own planner for each
 coming day against today's data and queues nothing: day, rule, template, store, operator, charge,
-amount and whether it would be queued, paused by a promise or skipped and why (rent charges are
-not made yet, so rent shows as A or B by lease and month; F follows a return and only the
+amount and whether it would be queued, paused by a promise or skipped and why, grouped as the job
+sends them (one row per e-mail, a combined e-mail's charges under it with due date and days late,
+"Would send combined" or "Waits for the 3-day fold until …"; the command's last column, `group`,
+numbers the e-mail each line goes in) (rent charges are not made yet, so rent shows as A or B by lease and month; F follows a return and only the
 re-debits due in the window are listed). The old collections ladder is retired for good: nothing
 can queue its rule or an inactive template any more, and its past rows stay in the Outbox as
 history with no store ("—").

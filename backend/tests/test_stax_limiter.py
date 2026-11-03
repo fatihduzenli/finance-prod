@@ -7,7 +7,6 @@ limiter, or the time each request reached the mock transport.
 from __future__ import annotations
 
 import threading
-import time
 from collections import Counter
 from collections.abc import Iterator
 
@@ -99,11 +98,15 @@ def test_departures_at_the_transport_are_spaced() -> None:
 
 
 def test_six_calls_with_a_real_clock_take_at_least_two_seconds() -> None:
+    """Six acquisitions at two per second span at least two seconds of the limiter's own
+    clock. Measured on the departure times the limiter returns (integer milliseconds of
+    ``SYSTEM_CLOCK``): a float ``time.monotonic()`` taken before the first acquisition reads
+    up to a millisecond more than the limiter's truncated clock, which failed CI once by
+    0.7 ms (PR #40, 2026-11-02) although the limiter had paced correctly."""
     limiter = RateLimiter(SYSTEM_CLOCK)
-    started = time.monotonic()
-    for _ in range(6):
-        limiter.acquire()
-    assert time.monotonic() - started >= 2.0
+    departures = [limiter.acquire() for _ in range(6)]
+    assert departures[-1] - departures[0] >= 2_000
+    assert departures == sorted(departures)
 
 
 def test_a_wait_beyond_max_wait_raises_without_sleeping() -> None:

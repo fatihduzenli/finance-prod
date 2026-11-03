@@ -2748,6 +2748,12 @@ class MessageStatus(models.TextChoices):
     SUPPRESSED = "suppressed", "Suppressed"
     CATCH_ALL = "catch_all", "Sent to the test inbox"
     HELD = "held", "Held"
+    #: Owner, 2026-11-02: an overdue rule's message (C, D) for a lease that had one within
+    #: the last three days waits, unsent, to go out combined on the first day after them.
+    WAITING = "waiting", "Waiting for the 3-day fold"
+    #: Owner, 2026-11-02: listed in another message of the same lease and day
+    #: (``combined_into``), never sent on its own.
+    COMBINED = "combined", "Combined"
 
 
 class HeldReason(models.TextChoices):
@@ -2854,6 +2860,11 @@ class OutboundMessage(GuardedModel):
     (``portal_user``), has no lease and goes to ``to_address``, the account's e-mail. Its
     stored body carries :data:`ledger.services.messaging.LINK_ADDED_AT_SEND` where the
     one-time link goes: the link is made when the message is delivered and never stored.
+
+    One e-mail per lease and day (owner, 2026-11-02): the reminder rules' rows of one lease
+    and day are still one row each, but one of them (the most urgent) is sent listing every
+    charge; the others are ``combined`` into it (``combined_into``, CHECK). An overdue row
+    held back by the 3-day fold is ``waiting`` until ``scheduled_for``'s day.
     """
 
     operator = models.ForeignKey(
@@ -2897,6 +2908,11 @@ class OutboundMessage(GuardedModel):
     #: for a rule.
     sent_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    #: Owner, 2026-11-02: the message of the same lease and day that lists this one's charge
+    #: and is sent for both (status ``combined``); null otherwise.
+    combined_into = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="combined"
     )
 
     class Meta:
@@ -2974,6 +2990,12 @@ class OutboundMessage(GuardedModel):
                 condition=(Q(status=MessageStatus.HELD) & ~Q(held_reason=""))
                 | (~Q(status=MessageStatus.HELD) & Q(held_reason="")),
                 name="outbound_messages_held_has_reason",
+            ),
+            # A combined message names the message sent for it; no other does.
+            models.CheckConstraint(
+                condition=(Q(status=MessageStatus.COMBINED) & Q(combined_into__isnull=False))
+                | (~Q(status=MessageStatus.COMBINED) & Q(combined_into__isnull=True)),
+                name="outbound_messages_combined_has_message",
             ),
             models.CheckConstraint(
                 condition=Q(body_sha256__regex=r"^([0-9a-f]{64})?$"),

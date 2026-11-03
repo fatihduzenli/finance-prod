@@ -221,6 +221,7 @@ def sample_context(template: MessageTemplate, lease: Lease, today: date) -> dict
         "store_link": messaging.store_link(lease),
         "support_email": str(company.support_email or ""),
         "company_name": str(company.name),
+        "lease_line": messaging.lease_line(lease, today),
     }
 
 

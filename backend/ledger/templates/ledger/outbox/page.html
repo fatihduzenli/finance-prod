@@ -3,7 +3,7 @@
 {% block title %}Outbox{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><h1>Outbox</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} message{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><a class="btn" id="outbox-preview" href="{% url 'ledger:outbox:preview' %}">Preview next 30 days</a></div></div>{% endblock %}
 {% block content %}
-  {% comment %}Admin › Outbox (docs/qa/PLAN-014 D5): every message, newest first, 50 a page; filters by status and by the days queued. A row opens its stored subject and body. "Send now" sends a held message again once mail is set up (and, on the sandbox, its address is on the allowlist); the service refuses otherwise with a sentence.{% endcomment %}
+  {% comment %}Admin › Outbox (docs/qa/PLAN-014 D5): every message, newest first, 50 a page; filters by status and by the days queued. A row opens its stored subject and body (a combined message's lists every charge); a row combined into another links to it and reads its outcome. "Send now" sends a held message again once mail is set up (and, on the sandbox, its address is on the allowlist); the service refuses otherwise with a sentence.{% endcomment %}
   <div class="card filter-card">{% filters active=active_filters %}
       <span class="filter-field"><label for="status">Status</label>
       <select name="status" id="status">
@@ -29,7 +29,7 @@
           <td>{{ message.operator.display_name }}</td>
           <td><details class="message-text"><summary>{{ message.template.display_name }}</summary><p><strong>{{ message.rendered_subject|default:"—" }}</strong></p><pre class="message-body">{{ message.rendered_body }}</pre></details></td>
           <td>{{ message.get_rule_display }}</td>
-          <td>{{ status }}</td>
+          <td>{% if message.combined_into_id %}<a href="#message-{{ message.combined_into_id }}">{{ status }}</a>{% else %}{{ status }}{% endif %}</td>
           <td>{{ to|default:"—" }}</td>
           <td>{% if message.scheduled_for %}{{ message.scheduled_for|moment }}{% else %}—{% endif %}</td>
           <td>{% if message.status == "held" %}<form method="post" action="{% url 'ledger:outbox:send_now' pk=message.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-sm" type="submit">Send now</button></form>{% endif %}</td>

@@ -300,10 +300,12 @@ def test_the_preview_lists_each_rule_with_its_store_operator_charge_amount_and_o
     clock(at(TODAY))
     rows = {(row.rule, row.store): row for row in outbox_preview.preview(TODAY).rows}
     plain_b = rows[("B", "#101 Store 101 Elm")]
+    # Re-pinned (Opus, owner 2026-11-02): on Nov 7 the lease's B goes with the late charge's D,
+    # as one message.
     assert (plain_b.charge, plain_b.amount, plain_b.outcome) == (
         "Rent November 2026",
         D("1200.00"),
-        "Would queue",
+        "Would send combined",
     )
     assert plain_b.day == date(2026, 11, 7) and plain_b.operator == "First Op"
     auto_a = rows[("A", "#102 Store 102 Elm")]
@@ -501,9 +503,10 @@ def test_the_command_prints_the_same_rows_as_tab_separated_text_without_addresse
         "charge",
         "amount",
         "outcome",
+        "group",  # Re-pinned (Opus, owner 2026-11-02): the send each row goes in.
     ]
     assert len(lines) == 1 + len(found.rows) + len(found.redebits)
-    assert all(len(line.split("\t")) == 8 for line in lines)
+    assert all(len(line.split("\t")) == 9 for line in lines)
     assert "2026-11-07\tB\tB — Payment due\t#101 Store 101 Elm\tFirst Op\tRent November 2026\t" in (
         out.getvalue()
     )

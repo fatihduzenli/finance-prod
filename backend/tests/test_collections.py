@@ -530,8 +530,9 @@ def test_every_placeholder_is_accepted_and_literal_braces_stay() -> None:
     text = " ".join(f"{{{name}}}" for name in merge.FIELDS) + " {{x}}"
     saved(MessageTemplate(code="test_all_fields", subject="Hi {operator_name}", body=text))
     values = {name: f"<{name}>" for name in merge.FIELDS}
-    assert merge.render(text, values).endswith("<company_name> {x}")
-    assert len(merge.FIELDS) == 15
+    # Re-pinned (Opus, owner 2026-11-02): {lease_line} is the sixteenth, and the last.
+    assert merge.render(text, values).endswith("<lease_line> {x}")
+    assert len(merge.FIELDS) == 16
 
 
 def test_a_value_is_never_read_as_a_template() -> None:
