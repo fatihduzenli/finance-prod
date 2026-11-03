@@ -143,6 +143,7 @@ SUPPORT_EMAIL_FILES = frozenset(
         "test_collections_adversarial.py",
         "test_digest_messages.py",
         "test_lease_end.py",
+        "test_messaging_14_d.py",  # e2e: the Outbox holds its message for "mail not set up"
         "test_messaging_engine.py",
         "test_outbox_preview.py",
         "test_plan012e_adversarial.py",
