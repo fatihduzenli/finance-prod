@@ -1,0 +1,7 @@
+{% comment %}After New lease (docs/qa/PLAN-014b item 1, decision 6; ledger.views.leases.created_dialog): the {% dialog %} frame open over the store page's Invoices tab, the question naming the operator, then Not now (back to the tab; the move-in draft stays under Drafts with its own "Send by e-mail") and Send e-mail (a single-submit POST to ledger:invoices:send, as the Drafts table's button). Context: created_dialog.{% endcomment %}{% load components %}{% dialog id="lease-created" title=created_dialog.title size="sm" open=True return_url=created_dialog.return_url %}
+<p id="lease-created-question">{{ created_dialog.question }}</p>
+<form method="post" action="{{ created_dialog.send_url }}" class="js-single-submit" id="lease-created-form">
+  {% csrf_token %}
+  <div class="dialog-foot"><a class="btn" id="lease-created-later" href="{{ created_dialog.return_url }}">Not now</a><button class="btn btn-primary" type="submit" id="lease-created-send">Send e-mail</button></div>
+</form>
+{% enddialog %}

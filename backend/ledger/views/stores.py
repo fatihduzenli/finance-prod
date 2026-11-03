@@ -90,7 +90,7 @@ from ledger.services import (
 from ledger.services import stores as service
 from ledger.services.csv_export import CsvWriter
 from ledger.views import contact_log, documents, workspace_cards
-from ledger.views.leases import _admin_only
+from ledger.views.leases import _admin_only, created_dialog
 from ledger.views.operators import (
     PAGE_SIZE,
     _actor,
@@ -265,6 +265,9 @@ def _detail_context(
         # PLAN-012f D8: the header's lines and the side cards.
         **workspace_cards.header_lines(store, space.header.operator),
         **workspace_cards.side_cards(request, store, today),
+        # PLAN-014b item 1 (decision 6): after New lease, "Lease created. Send the move-in
+        # invoice to ... now?" over the Invoices tab (``?lease_created=<draft>``).
+        "created_dialog": created_dialog(request, store),
     }
     if tab in (workspace.TAB_CONTACTS, workspace.TAB_CHARGES):
         # PLAN-012 D3: Log contact (the dialog's URL).

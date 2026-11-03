@@ -22,6 +22,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from finance.dates import day_text
+from finance.templatetags.phones import phone_text
 from finance.us_states import US_STATES
 from ledger.models import (
     AUTOPAY_COUNT_MAX,
@@ -57,16 +58,27 @@ from ledger.models import (
     RefundMethod,
     Store,
 )
-from ledger.services import autopay_plans, installments, invoice_builder, one_off_charges, rent_run
+from ledger.services import (
+    autopay_plans,
+    installments,
+    invoice_builder,
+    one_off_charges,
+    proration,
+    rent_run,
+)
 from ledger.services.contacts import PROMISE_FIELDS_REQUIRED
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import (
     ACCOUNT_ENTER,
     ACCOUNT_LATER,
+    ACCOUNT_NOT_SHAREABLE,
+    ACCOUNT_SAME,
     END_DATE_REQUIRED,
     SharedAccount,
 )
 from ledger.services.one_off_charges import ChargeInput
+from ledger.services.stores import crumb as store_crumb
+from ledger.services.workspace_cards import initials
 from ledger.validators import validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_sentence
 from payments.lease_sync import normalise_phone
@@ -318,6 +330,10 @@ COPIED_FIELDS: tuple[str, ...] = (
 ACCOUNT_LATER_LABEL = "Later"
 ACCOUNT_ENTER_LABEL = "Enter a bank account"
 ACCOUNT_SAME_LABEL = "Use the same account as #{store}{last4}"
+#: The New lease page's bank-account segments (PLAN-014b item 1, the owner's reference): Later |
+#: Use #1991's account | Enter a new account.
+NEW_LEASE_ENTER_LABEL = "Enter a new account"
+NEW_LEASE_SAME_LABEL = "Use {store}'s account"
 
 
 def copied_attrs(operator: Operator | None) -> dict[str, str]:
@@ -333,13 +349,32 @@ def copied_attrs(operator: Operator | None) -> dict[str, str]:
 
 class OperatorContactSelect(forms.Select):
     """The New lease page's operator select: each option carries the operator's contact
-    details as ``data-*`` attributes for "Copy from operator" (PLAN-014 C4)."""
+    details as ``data-*`` attributes for "Copy from operator" (PLAN-014 C4), and for the
+    operator card (PLAN-014b item 1, decision 3) its initials (``data-initials``), its phone
+    as shown (``data-phone-text``) and its other current stores (``data-stores``, "#no Name"
+    comma-separated, and ``data-store-count``) from ``stores`` (read once for every operator
+    by the view)."""
+
+    def __init__(
+        self, attrs: dict[str, Any] | None = None, stores: dict[uuid.UUID, list[str]] | None = None
+    ) -> None:
+        super().__init__(attrs)
+        self.stores = stores or {}
 
     def create_option(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         option = super().create_option(*args, **kwargs)
         instance = getattr(option["value"], "instance", None)
         if isinstance(instance, Operator):
             option["attrs"].update(copied_attrs(instance))
+            found = self.stores.get(instance.pk, [])
+            option["attrs"].update(
+                {
+                    "data-initials": initials(instance.display_name),
+                    "data-phone-text": phone_text(instance.phone),
+                    "data-stores": ", ".join(found),
+                    "data-store-count": str(len(found)),
+                }
+            )
         return option
 
 
@@ -353,6 +388,10 @@ class BillingStepMixin(_BillingStepBase):
     shared_accounts: list[SharedAccount]
     enter_refusal: str
     same_shown_when: str
+    #: The labels of "Enter a bank account" and of a ``same:`` option (the New lease page
+    #: words them as the owner's reference, PLAN-014b item 1).
+    enter_label: str = ACCOUNT_ENTER_LABEL
+    short_same_label: bool = False
 
     def add_billing_step(
         self,
@@ -378,7 +417,7 @@ class BillingStepMixin(_BillingStepBase):
             initial=ACCOUNT_LATER,
             choices=[
                 (ACCOUNT_LATER, ACCOUNT_LATER_LABEL),
-                (ACCOUNT_ENTER, ACCOUNT_ENTER_LABEL),
+                (ACCOUNT_ENTER, self.enter_label),
                 *((found.value, found.value) for found in self.shared_accounts),
             ],
             widget=forms.RadioSelect,
@@ -398,6 +437,13 @@ class BillingStepMixin(_BillingStepBase):
         value = str(self.cleaned_data.get("account") or "") or ACCOUNT_LATER
         if value == ACCOUNT_ENTER and self.enter_refusal:
             raise forms.ValidationError(self.enter_refusal, code="enter")
+        if value.startswith(ACCOUNT_SAME) and "operator" in self.fields:
+            # PLAN-014b item 1 (decision 4): the account of another operator's lease is refused
+            # here already; the service checks it again under the row lock.
+            chosen = self.cleaned_data.get("operator")
+            shared = next((found for found in self.shared_accounts if found.value == value), None)
+            if shared is None or chosen is None or shared.lease.operator_id != chosen.pk:
+                raise forms.ValidationError(ACCOUNT_NOT_SHAREABLE, code="not_shareable")
         return value
 
     def billing_values(self) -> dict[str, str]:
@@ -415,21 +461,27 @@ class BillingStepMixin(_BillingStepBase):
         chosen = str(self["account"].value() or ACCOUNT_LATER)
         options: list[dict[str, Any]] = [
             {"value": ACCOUNT_LATER, "label": ACCOUNT_LATER_LABEL},
-            {"value": ACCOUNT_ENTER, "label": ACCOUNT_ENTER_LABEL, "reason": self.enter_refusal},
+            {"value": ACCOUNT_ENTER, "label": self.enter_label, "reason": self.enter_refusal},
         ]
         for found in self.shared_accounts:
             options.append(
                 {
                     "value": found.value,
-                    "label": ACCOUNT_SAME_LABEL.format(
-                        store=found.lease.store.external_label,
-                        last4=f" (····{found.last4})" if found.last4 else "",
+                    "label": (
+                        NEW_LEASE_SAME_LABEL.format(store=store_crumb(found.lease.store))
+                        if self.short_same_label
+                        else ACCOUNT_SAME_LABEL.format(
+                            store=found.lease.store.external_label,
+                            last4=f" (····{found.last4})" if found.last4 else "",
+                        )
                     ),
                     "shown_when": (
                         f"{self.same_shown_when}={found.lease.operator_id}"
                         if self.same_shown_when
                         else ""
                     ),
+                    # PLAN-014b item 1 (decision 4): the lease's operator, on every same: radio.
+                    "operator": str(found.lease.operator_id),
                 }
             )
         for index, option in enumerate(options):
@@ -437,6 +489,7 @@ class BillingStepMixin(_BillingStepBase):
             option["checked"] = option["value"] == chosen and not option.get("reason")
             option.setdefault("reason", "")
             option.setdefault("shown_when", "")
+            option.setdefault("operator", "")
         return options
 
 
@@ -457,6 +510,9 @@ def _twice_monthly(second_debit_day: forms.BoundField) -> bool:
 
 class LeaseForm(_LeaseFormBase):
     """Create and edit a lease. Rent is a separate field: a change writes history (D5)."""
+
+    #: The status of a form without the Status field (the New lease page saves ``active``).
+    fixed_status: str | None = None
 
     debit_day = forms.IntegerField(min_value=1, max_value=31, required=False)
     second_debit_day = forms.IntegerField(
@@ -544,7 +600,7 @@ class LeaseForm(_LeaseFormBase):
             self.add_error("second_debit_day", "Set the first debit day first.")
         elif second is not None and second == day:
             self.add_error("second_debit_day", "The second debit day must differ from the first.")
-        if data.get("collection_status") == CollectionStatus.ACTIVE:
+        if data.get("collection_status", self.fixed_status) == CollectionStatus.ACTIVE:
             if data.get("operator") is None:
                 self.add_error("operator", "An active lease needs an operator.")
             if day is None:
@@ -552,6 +608,45 @@ class LeaseForm(_LeaseFormBase):
             if data.get("payment_channel") == PaymentChannel.UNKNOWN:
                 self.add_error("payment_channel", "An active lease needs a known channel.")
         return data
+
+
+def ordinal(day: int) -> str:
+    """``1st``, ``2nd``, ``3rd``, ``4th`` ... ``11th`` ... ``21st`` (the Debit day select)."""
+    suffix = "th" if 11 <= day % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+#: PLAN-014b item 1 (decision 2): the New lease page's Debit day, the 1st to the 28th.
+DEBIT_DAY_CHOICES: tuple[tuple[int, str], ...] = tuple((day, ordinal(day)) for day in range(1, 29))
+#: Decision 1: the New lease page's three payment-channel cards, each its stored value, its
+#: title and its muted line (the provider's name from the settings, Rule 8).
+CHANNEL_CARDS: tuple[tuple[str, Any, Any, Any], ...] = (
+    (
+        PaymentChannel.PROVIDER_ACH,
+        "Autopay (bank debit)",
+        "Debited from the store's bank account",
+        "Autopay",
+    ),
+    (
+        PaymentChannel.INVOICE,
+        "E-mail invoice",
+        provider_sentence("{provider} e-mails each month's invoice"),
+        "E-mail invoice",
+    ),
+    (
+        PaymentChannel.OTHER,
+        provider_sentence("Paid outside {provider}"),
+        "Zelle, wire or check, recorded by staff",
+        provider_sentence("Paid outside {provider}"),
+    ),
+)
+#: The Summary card's empty value.
+NO_VALUE = "\u2014"
+CHANNEL_REFUSED = provider_sentence(
+    "Choose Autopay (bank debit), E-mail invoice or Paid outside {provider}."
+)
+#: The Terms card's label of the refundable fee type's price (decision 2).
+DEPOSIT_LABEL = "Deposit"
 
 
 class LeaseCreateForm(BillingStepMixin, LeaseForm):
@@ -564,24 +659,60 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
 
     PLAN-014 C4: the Billing details (:class:`BillingStepMixin`), shown once an operator
     is chosen; the operator select's options carry the contact details "Copy from
-    operator" fills in the browser."""
+    operator" fills in the browser.
+
+    PLAN-014b item 1 (Fable's decisions 1 to 4): no Status (the lease is saved ``active``
+    and the active lease's rules apply); the Debit day a select of the 1st to the 28th (the
+    1st by default); the channel one of the three cards (:data:`CHANNEL_CARDS`; Zelle, Wire
+    and Unknown are refused here, the Edit lease form keeps them); the deposit is the price
+    field of the first refundable fee type (:attr:`deposit_type`); "+ Add item" offers one row
+    per active fee type not in the checklist (:attr:`extra_types`), charged as a checklist row
+    is, only with a price. ``stores``: the operator's other current stores per operator id,
+    for the options' ``data-stores``."""
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
+    fixed_status = CollectionStatus.ACTIVE
+    enter_label = NEW_LEASE_ENTER_LABEL
+    short_same_label = True
 
     def __init__(
         self,
         *args: Any,
         accounts: Sequence[SharedAccount] = (),
         enter_refusal: str = "",
+        stores: dict[uuid.UUID, list[str]] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
+        del self.fields["collection_status"]
+        self.instance.collection_status = CollectionStatus.ACTIVE
+        self.fields["debit_day"] = _QuietTypedChoiceField(
+            label="Debit day", choices=DEBIT_DAY_CHOICES, coerce=int, initial=1
+        )
+        self.fields["payment_channel"] = _QuietChoiceField(
+            label="Payment channel",
+            choices=[(value, title) for value, title, _, _ in CHANNEL_CARDS],
+            initial=PaymentChannel.PROVIDER_ACH,
+            widget=forms.RadioSelect,
+            error_messages={"invalid_choice": CHANNEL_REFUSED},
+        )
+        prorate = self.fields["prorate_first_month"]
+        prorate.label = "Prorate the first month"
+        prorate.widget.attrs.update({"class": "switch", "role": "switch"})
         operator = self.fields["operator"]
-        operator.widget = OperatorContactSelect(attrs=operator.widget.attrs)
+        operator.widget = OperatorContactSelect(attrs=operator.widget.attrs, stores=stores)
         if isinstance(operator, forms.ChoiceField):
             operator.widget.choices = operator.choices
         self.add_billing_step(accounts, enter_refusal=enter_refusal, shown_when="id_operator")
-        self.fee_types = one_off_charges.checklist_types()
+        checklist = one_off_charges.checklist_types()
+        listed = {fee_type.pk for fee_type in checklist}
+        self.extra_types = [
+            fee_type for fee_type in one_off_charges.offered_types() if fee_type.pk not in listed
+        ]
+        self.fee_types = [*checklist, *self.extra_types]
+        self.deposit_type = next(
+            (fee_type for fee_type in self.fee_types if fee_type.refundable), None
+        )
         for fee_type in self.fee_types:
             name = _setup_name(fee_type)
             self.fields[f"{name}_cost"] = _money_field(
@@ -592,25 +723,111 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             self.fields[f"{name}_due_date"] = forms.DateField(
                 label="Due date", required=False, widget=forms.DateInput(attrs={"type": "date"})
             )
+        if self.deposit_type is not None:
+            self.fields[f"{_setup_name(self.deposit_type)}_price"].label = DEPOSIT_LABEL
 
-    def setup_rows(self) -> list[dict[str, Any]]:
-        """The checklist, one row of bound fields per checklist fee type."""
+    def channel_cards(self) -> list[dict[str, Any]]:
+        """The three channel cards, each a radio with its title and muted line."""
+        chosen = str(self["payment_channel"].value() or "")
         return [
             {
-                "fee_type": fee_type,
-                **{
-                    part: self[f"{_setup_name(fee_type)}_{part}"]
-                    for part in ("cost", "price", "vendor", "due_date")
-                },
+                "value": value,
+                "title": title,
+                "note": note,
+                "short": short,
+                "id": f"id_payment_channel_{index}",
+                "checked": value == chosen,
             }
-            for fee_type in self.fee_types
+            for index, (value, title, note, short) in enumerate(CHANNEL_CARDS)
         ]
 
+    def _value(self, name: str) -> Any:
+        """The field's value as the form holds it, cleaned; ``None`` when it does not clean."""
+        bound = self[name]
+        try:
+            return bound.field.clean(bound.value())
+        except forms.ValidationError:
+            return None
+
+    def summary(self) -> dict[str, str]:
+        """The Summary card (decision 5) from what the form holds: the operator, the start,
+        the rent, who collects, the first month (prorated when the toggle is on and the
+        lease starts after the 1st, as :func:`ledger.services.rent_run.first_month`), the
+        move-in charges (every priced row, the deposit included) and the first invoice's
+        total. The page's script keeps it live; this is the page without it."""
+        operator = self._value("operator")
+        start: date | None = self._value("started_on")
+        rent: Decimal | None = self._value("rent")
+        day = self._value("debit_day")
+        second = self._value("second_debit_day")
+        chosen = str(self["payment_channel"].value() or "")
+        short = next((card[3] for card in CHANNEL_CARDS if card[0] == chosen), "")
+        days = " and ".join(ordinal(int(value)) for value in (day, second) if value)
+        first: Decimal | None = rent
+        prorated = False
+        if (
+            rent is not None
+            and start is not None
+            and start.day > 1
+            and self._value("prorate_first_month")
+        ):
+            month = start.replace(day=1)
+            first = proration.prorated(rent, month, start.day, proration.days_in(month)).amount
+            prorated = True
+        moving_in = self.setup_total()
+        return {
+            "operator": operator.display_name if isinstance(operator, Operator) else NO_VALUE,
+            "starts": day_text(start) if start is not None else NO_VALUE,
+            "rent": format_amount(rent) if rent is not None else NO_VALUE,
+            "collected_by": " \u00b7 ".join(part for part in (str(short), days) if part)
+            or NO_VALUE,
+            "first_month_label": "First month (prorated)" if prorated else "First month",
+            "first_month": format_amount(first) if first is not None else NO_VALUE,
+            "move_in": format_amount(moving_in),
+            "total": format_amount(first + moving_in) if first is not None else NO_VALUE,
+        }
+
+    def deposit_field(self) -> forms.BoundField | None:
+        """The deposit's price field (the Terms card's "Deposit"), or ``None``."""
+        if self.deposit_type is None:
+            return None
+        return self[f"{_setup_name(self.deposit_type)}_price"]
+
+    def setup_rows(self) -> list[dict[str, Any]]:
+        """The checklist, one row of bound fields per checklist fee type, then the rows "+ Add
+        item" reveals (``extra``; shown when one holds a value or an error)."""
+        extras = {fee_type.pk for fee_type in self.extra_types}
+        rows = []
+        for fee_type in self.fee_types:
+            parts = {
+                part: self[f"{_setup_name(fee_type)}_{part}"]
+                for part in ("cost", "price", "vendor", "due_date")
+            }
+            filled = any(
+                str(bound.value() or "").strip() or bound.errors
+                for bound in (parts["price"], parts["vendor"], parts["due_date"])
+            )
+            rows.append(
+                {
+                    "fee_type": fee_type,
+                    "extra": fee_type.pk in extras and not filled,
+                    "deposit": fee_type == self.deposit_type,
+                    "usual": (
+                        f"{Decimal(fee_type.default_price):,.2f}"
+                        if fee_type.default_price is not None
+                        else ""
+                    ),
+                    **parts,
+                }
+            )
+        return rows
+
     def setup_total(self) -> Decimal:
-        """The sum of the prices typed so far (the total line under the checklist)."""
+        """The sum of the prices typed so far (the move-in charges, the deposit included)."""
         return _setup_total(self, self.fee_types)
 
     def clean(self) -> dict[str, Any]:
+        self.cleaned_data["collection_status"] = CollectionStatus.ACTIVE
         data = super().clean()
         started = data.get("started_on")
         for fee_type in self.fee_types:
