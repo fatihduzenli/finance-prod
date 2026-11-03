@@ -451,6 +451,13 @@ class PaymentChannel(models.TextChoices):
     ZELLE = "zelle", "Zelle"
     UNKNOWN = "unknown", "Unknown"
     OTHER = "other", "Other"
+    #: PLAN-014b item 1 (ledger migration 0070): the New lease page's "E-mail invoice" card.
+    INVOICE = "invoice", "E-mail invoice"
+
+
+#: The channel values added after ``0046``: the earlier migrations that read the channels from
+#: this model leave them out, so their state is what they applied (ledger 0070 adds them).
+LATER_CHANNELS: tuple[str, ...] = (PaymentChannel.INVOICE,)
 
 
 class Lease(GuardedModel):

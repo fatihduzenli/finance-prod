@@ -33,8 +33,13 @@ import ledger.validators
 GUARDED_COLUMNS: dict[str, tuple[str, ...]] = {"lease_transfers": ("setup_lines",)}
 #: The lease's payment channels (``leases.payment_channel``, created in ``0001`` and
 #: unchanged since); read from the model so that the provider's name is written in one
-#: place (the provider isolation test).
-CHANNELS = list(ledger.models.PaymentChannel.choices)
+#: place (the provider isolation test), without the values later migrations added (``0070``'s
+#: ``invoice``), so this migration's state stays what it applied.
+CHANNELS = [
+    choice
+    for choice in ledger.models.PaymentChannel.choices
+    if choice[0] not in ledger.models.LATER_CHANNELS
+]
 CANNOT_REVERSE = (
     "Lease transfers in progress or confirmed exist; this migration refuses to reverse."
 )
