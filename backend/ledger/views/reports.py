@@ -64,6 +64,7 @@ from ledger.services import (
     stores,
     workspace,
 )
+from ledger.services import report_index as index_figures
 from ledger.views.operators import csv_response, role_required
 
 logger = logging.getLogger(__name__)
@@ -236,8 +237,19 @@ def _span(selected: reports.ReportRange) -> str:
 @role_required
 @require_safe
 def report_index(request: HttpRequest) -> HttpResponse:
-    """``ledger:reports:index``: every report, the P&L included."""
-    return render(request, "ledger/reports/index.html")
+    """``ledger:reports:index``: every report as a card with its live figure (PLAN-014b
+    item 2), the figures computed under the reports' statement timeout; when it cancels
+    them, the cards show without figures and the page says so."""
+    today = timezone.localdate()
+    try:
+        figures: index_figures.ReportFigures | None = bounded(lambda: index_figures.figures(today))
+    except ReportTooSlow:
+        figures = None
+    return render(
+        request,
+        "ledger/reports/index.html",
+        {"live": figures, "too_slow": TOO_SLOW if figures is None else ""},
+    )
 
 
 # --- Aging (PLAN-014 G1) ----------------------------------------------------------------

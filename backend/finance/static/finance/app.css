@@ -1414,6 +1414,32 @@ td.cell-chevron a:hover { color: var(--text); }
 .pnl-foot { font-size: var(--fs-sm); }
 .pnl-explained { font-size: var(--fs-sm); }
 
+/* The Reports index (PLAN-014b item 2): three .report-group sections, each a grid of cards
+   (16 rem tracks: three across on a laptop, one column on a
+   390 px phone, so no media query). A card (.report-card) is one link: the
+   icon on the current month's tint (.report-icon, the link colour: a documented pair), the
+   title, the one-line muted description, the live figure (.report-value; the Aging total in
+   the unpaid text colour when above zero) and its muted sub-line, "Open ›" at the bottom. The
+   Customer statement card (.report-card-form) is an article: its link fills the top and the
+   operator search form (.report-statement-form) sits beside it, never inside it. */
+.report-group { margin: 0 0 var(--space-6); }
+.report-group h2 { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.report-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--space-4); }
+.report-card { display: flex; flex-direction: column; gap: var(--space-1); box-sizing: border-box; min-width: 0; padding: 18px 20px; border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface); color: var(--text); text-decoration: none; }
+a.report-card:hover, .report-card-form:hover { border-color: var(--input-border); }
+.report-card-link { display: flex; flex: 1 1 auto; flex-direction: column; gap: var(--space-1); color: inherit; text-decoration: none; }
+.report-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 0 0 var(--space-2); border-radius: var(--radius-ctl); background: var(--month-current); color: var(--link); }
+.report-title { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+.report-desc { color: var(--muted); font-size: var(--fs-base); }
+.report-value { margin: var(--space-2) 0 0; font-size: 22px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.report-value.tone-unpaid { color: var(--unpaid-text); }
+.report-sub { color: var(--muted); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.report-open { margin-top: auto; padding-top: var(--space-3); color: var(--link); font-size: var(--fs-sm); font-weight: 600; }
+.report-statement-form { margin: var(--space-3) 0 0; }
+.report-statement-form label { display: block; margin: 0 0 var(--space-1); color: var(--muted); font-size: var(--fs-sm); }
+.report-statement-row { display: flex; gap: var(--space-2); align-items: center; }
+.report-statement-row input { flex: 1 1 auto; min-width: 0; }
+
 /* --- Daily charges (PLAN-012f-b E-2) --------------------------------------------------------
    DESIGN-SPEC §4 Daily charges, daily-charges-laptop.png. The result strip (.run-strip): the
    icon, the sentence and "Nightly check →" at the right on a 10 px tinted bar, green

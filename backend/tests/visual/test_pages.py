@@ -101,6 +101,8 @@ PAGES: dict[str, Callable[[Site], str]] = {
     "settings": lambda site: "/admin-settings/",
     # PLAN-014 G1: the Aging report by store (billing), with its filters and buckets.
     "aging": lambda site: "/reports/aging/",
+    # PLAN-014b item 2: the Reports index, its cards with the data set's live figures.
+    "reports": lambda site: reverse("ledger:reports:index"),
     # PLAN-014 D4, D5: the message templates and the Outbox (one held message), admins only.
     "message-templates": lambda site: "/admin-settings/templates/",
     "outbox": lambda site: "/admin-settings/outbox/",
