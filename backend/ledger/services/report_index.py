@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from finance.dates import day_short_text
+from finance.dates import day_short_text, month_name_text
 from ledger.services import calendar, pnl, receivables, reports
 
 NOTHING_SCHEDULED = "nothing scheduled"
@@ -35,8 +35,8 @@ NOTHING_SCHEDULED = "nothing scheduled"
 
 @dataclass(frozen=True, slots=True)
 class ReportFigures:
-    #: The first day of this month: the month of the ranged figures.
-    month: date
+    #: This month's name ("October"): the month of the ranged figures.
+    month_name: str
     aging_total: Decimal
     aging_stores: int
     collected_month: Decimal
@@ -66,7 +66,7 @@ def figures(today: date) -> ReportFigures:
     )
     unmatched = reports.unmatched_items()
     return ReportFigures(
-        month=month,
+        month_name=month_name_text(month),
         aging_total=aging.totals.total,
         aging_stores=sum(1 for row in aging.rows if row.store_id is not None),
         collected_month=reports.payments_by_method(this_month).total.total,

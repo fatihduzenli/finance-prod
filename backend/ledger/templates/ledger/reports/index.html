@@ -16,7 +16,7 @@
       <a class="report-card" id="report-payments-by-method" href="{% url 'ledger:reports:payments_by_method' %}">
         <span class="report-head"><span class="report-icon">{% icon "banknote" %}</span><h3 class="report-title">Payments by method</h3></span>
         <span class="report-desc">Settled payments per month: ACH, Zelle, wire, check.</span>
-        <span class="report-foot"><span class="report-numbers">{% if live %}<span class="report-value">{{ live.collected_month|money }}</span><span class="report-sub">collected in {{ live.month|date:"F" }}</span>{% endif %}</span><span class="report-open">Open ›</span></span>
+        <span class="report-foot"><span class="report-numbers">{% if live %}<span class="report-value">{{ live.collected_month|money }}</span><span class="report-sub">collected in {{ live.month_name }}</span>{% endif %}</span><span class="report-open">Open ›</span></span>
       </a>
       <a class="report-card" id="report-deposits" href="{% url 'ledger:reports:deposits' %}">
         <span class="report-head"><span class="report-icon">{% icon "check" %}</span><h3 class="report-title">Bank account check</h3></span>
@@ -31,12 +31,12 @@
       <a class="report-card" id="report-revenue" href="{% url 'ledger:reports:revenue' %}">
         <span class="report-head"><span class="report-icon">{% icon "reports" %}</span><h3 class="report-title">Revenue by month</h3></span>
         <span class="report-desc">Billed and collected: rent, insurance and other fees.</span>
-        <span class="report-foot"><span class="report-numbers">{% if live %}<span class="report-value">{{ live.billed_month|money }}</span><span class="report-sub">billed in {{ live.month|date:"F" }}</span>{% endif %}</span><span class="report-open">Open ›</span></span>
+        <span class="report-foot"><span class="report-numbers">{% if live %}<span class="report-value">{{ live.billed_month|money }}</span><span class="report-sub">billed in {{ live.month_name }}</span>{% endif %}</span><span class="report-open">Open ›</span></span>
       </a>
       <a class="report-card" id="report-pnl" href="{% url 'ledger:reports:pnl' %}">
         <span class="report-head"><span class="report-icon">{% icon "circle-half" %}</span><h3 class="report-title">Profit and loss</h3></span>
         <span class="report-desc">By store, operator or month, with costs and margins.</span>
-        <span class="report-foot"><span class="report-numbers">{% if live %}{% if live.margin_month is None %}<span class="report-value">—</span><span class="report-sub">margin unknown: {{ live.margin_missing }}</span>{% else %}<span class="report-value{% if live.margin_month > 0 %} tone-paid{% elif live.margin_month < 0 %} tone-unpaid{% endif %}">{{ live.margin_month|money }}</span><span class="report-sub">{{ live.month|date:"F" }} margin</span>{% endif %}{% endif %}</span><span class="report-open">Open ›</span></span>
+        <span class="report-foot"><span class="report-numbers">{% if live %}{% if live.margin_month is None %}<span class="report-value">—</span><span class="report-sub">margin unknown: {{ live.margin_missing }}</span>{% else %}<span class="report-value{% if live.margin_month > 0 %} tone-paid{% elif live.margin_month < 0 %} tone-unpaid{% endif %}">{{ live.margin_month|money }}</span><span class="report-sub">{{ live.month_name }} margin</span>{% endif %}{% endif %}</span><span class="report-open">Open ›</span></span>
       </a>
     </div>
   </section>
