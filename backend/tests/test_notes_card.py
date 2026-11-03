@@ -87,8 +87,9 @@ def test_card_for_takes_two_queries_whatever_the_data() -> None:
 
 
 def test_more_follows_the_length_and_the_lines() -> None:
+    assert notes.MORE_AFTER == 120  # three lines at the card's width (~45 characters a line)
     assert notes.is_long("x" * 200) and not notes.is_long("x" * 50)
-    assert not notes.is_long("x" * notes.MORE_AFTER)
+    assert notes.is_long("x" * 121) and not notes.is_long("x" * 120)
     assert notes.is_long("a\nb\nc\nd") and not notes.is_long("a\nb\nc")
 
 
@@ -102,7 +103,7 @@ def test_an_empty_store_shows_the_form_and_no_notes_yet_without_all_notes() -> N
     assert 'id="note-card-form"' in html and 'placeholder="Add a note…"' in html
     assert 'id="note-card-save"' in html and ">Save</button>" in html
     assert '<p class="muted">No notes yet.</p>' in html
-    assert 'id="notes-card-all"' not in html and 'class="card-note"' not in html
+    assert 'id="notes-card-all"' not in html and 'class="note-item"' not in html
 
 
 def test_a_viewer_sees_the_notes_but_no_form() -> None:
@@ -122,12 +123,12 @@ def test_the_card_lists_author_day_pin_and_all_notes_with_the_total() -> None:
         a_note(store, f"Older {n}.", minutes=-10 - n)
     client, _ = a_user(Role.BILLING)
     html = card(page(client, store_url(store)))
-    first = section(html, f"card-note-{pinned.pk}", "</li>")
+    first = section(html, f"note-item-{pinned.pk}", "</li>")
     assert 'class="note-pin-glyph"' in first and "· Oct 1, 2026" in first
     assert pinned.author_label in first
-    assert 'class="note-pin-glyph"' not in section(html, f"card-note-{plain.pk}", "</li>")
+    assert 'class="note-pin-glyph"' not in section(html, f"note-item-{plain.pk}", "</li>")
     assert html.index("Pinned one.") < html.index("Plain one.")
-    assert html.count('class="card-note"') == 3
+    assert html.count('class="note-item"') == 3
     link = section(html, "notes-card-all", "</a>")
     assert "All notes (5) ›" in link
     assert workspace.tab_url(store.pk, workspace.TAB_CONTACTS).replace("&", "&amp;") in html
@@ -135,15 +136,17 @@ def test_the_card_lists_author_day_pin_and_all_notes_with_the_total() -> None:
 
 def test_more_links_a_long_body_to_the_note_on_the_tab_and_not_a_short_one() -> None:
     store, _, _ = a_store_with_lease()
-    long = a_note(store, "L" * 200, minutes=2)
+    long = a_note(store, "L" * 200, minutes=3)
+    edge = a_note(store, "E" * 121, minutes=2)
     short = a_note(store, "S" * 50, minutes=1)
     client, _ = a_user(Role.BILLING)
     html = card(page(client, store_url(store)))
-    entry = section(html, f"card-note-{long.pk}", "</li>")
-    assert 'class="card-link card-note-more"' in entry
+    entry = section(html, f"note-item-{long.pk}", "</li>")
+    assert 'class="card-link note-item-more"' in entry
     assert f'href="/stores/{store.pk}/?tab=contacts#note-{long.pk}"' in entry
     assert "L" * 200 in entry  # the text is whole; CSS cuts it to three lines
-    assert "card-note-more" not in section(html, f"card-note-{short.pk}", "</li>")
+    assert "note-item-more" not in section(html, f"note-item-{short.pk}", "</li>")
+    assert "note-item-more" in section(html, f"note-item-{edge.pk}", "</li>")
 
 
 def test_the_card_follows_the_lease_card_on_every_tab() -> None:

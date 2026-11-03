@@ -366,15 +366,15 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .note-card-form .field { margin: 0; }
 .note-card-row { display: flex; gap: var(--space-2); align-items: center; }
 .note-card-row input[type=text] { flex: 1 1 auto; min-width: 0; }
-.card-notes { list-style: none; margin: 0; padding: 0; }
-.card-notes .card-note { margin: 0; padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); font-size: var(--fs-base); }
-.card-notes .card-note:first-child { padding-top: 0; }
-.card-notes .card-note:last-child { border-bottom: 0; padding-bottom: 0; }
-.card-note .card-note-body { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-base); }
-.card-note .card-note-more { font-size: var(--fs-sm); }
-.card-note .card-note-meta { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-sm); }
-.card-note-meta .note-pin-glyph { margin-right: var(--space-1); vertical-align: -2px; }
-.card-notes-all { margin: var(--space-3) 0 0; font-size: var(--fs-sm); }
+.note-list { list-style: none; margin: 0; padding: 0; }
+.note-list .note-item { margin: 0; padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); font-size: var(--fs-base); }
+.note-list .note-item:first-child { padding-top: 0; }
+.note-list .note-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.note-item .note-item-body { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-base); }
+.note-item .note-item-more { font-size: var(--fs-sm); }
+.note-item .note-item-meta { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-sm); }
+.note-item-meta .note-pin-glyph { margin-right: var(--space-1); vertical-align: -2px; }
+.note-list-all { margin: var(--space-3) 0 0; font-size: var(--fs-sm); }
 
 /* --- Grid cell block ---------------------------------------------------------------------
    td.cell (ledger.views.dashboard.cell_html): a month of the grid. .cell-block: a rounded

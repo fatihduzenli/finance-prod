@@ -610,7 +610,7 @@ def test_pinned_notes_lead_the_notes_card_newest_pin_first_up_to_three() -> None
             made.append(note)
     html = page(client, f"/stores/{store.pk}/")
     card = section(html, "notes-card", "</section>")
-    assert card.count('class="card-note"') == 3
+    assert card.count('class="note-item"') == 3
     assert (
         card.index("Note number 5.") < card.index("Note number 4.") < card.index("Note number 3.")
     )

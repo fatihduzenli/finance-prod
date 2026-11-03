@@ -48,8 +48,10 @@ from ledger.validators import (
 ENTITY_NOTE = "note"
 #: The NOTES card's most notes (PLAN-014b item 3).
 CARD_SHOWN = 3
-#: A body longer than this, or of more than :data:`CARD_LINES` lines, gets the card's "more".
-MORE_AFTER = 160
+#: A body longer than this, or of more than :data:`CARD_LINES` lines, gets the card's "more":
+#: the card's column (the side column at 1280 px, the phone at 390 px) fits about 45 characters
+#: a line, so three lines hold about 120 before the CSS clamp cuts the text.
+MORE_AFTER = 120
 CARD_LINES = 3
 BODY_REQUIRED = "Write the note first."
 BODY_TOO_LONG = f"A note is at most {NOTE_BODY_MAX_LENGTH:,} characters."
