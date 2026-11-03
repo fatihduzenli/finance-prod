@@ -45,6 +45,7 @@ from ledger.models import (
     LeaseBilling,
     LeaseEnd,
     MessageTemplate,
+    Note,
     OneOffCategory,
     Operator,
     PaymentStatus,
@@ -58,6 +59,7 @@ from ledger.services import (
     invoice_builder,
     lease_end,
     messaging,
+    notes,
     store_costs,
 )
 from ledger.services.invoice_builder import LineInput
@@ -307,6 +309,21 @@ def _build() -> World:
         lease=lease,
         defaults={"company_name": "Northwind Stores LLC", "email": "maple@example.com"},
     )
+    # PLAN-014b item 3: two notes for the store page's NOTES card — one pinned, one long enough
+    # for its "more" link — stamped on fixed days so a shot is the same every run.
+    pinned = notes.add(
+        store,
+        "Landlord agreed to repaint the front in spring; confirm the week with the operator "
+        "before the sign fee is billed and note who signs off on the colour.",
+        user,
+    )
+    notes.pin(pinned, user)
+    Note.objects.filter(pk=pinned.pk).update(
+        created_at=datetime(2026, 10, 2, 14, 0, tzinfo=UTC),
+        pinned_at=datetime(2026, 10, 2, 14, 5, tzinfo=UTC),
+    )
+    latest = notes.add(store, "Called about the October rent: a wire is promised by Friday.", user)
+    Note.objects.filter(pk=latest.pk).update(created_at=datetime(2026, 10, 18, 9, 30, tzinfo=UTC))
     unpaid = (
         RentCharge.objects.filter(lease=lease, status=RentChargeStatus.UNPAID)
         .order_by("due_on")
