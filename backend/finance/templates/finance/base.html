@@ -45,6 +45,10 @@ prefers-color-scheme, so no script and no flash); a page that must stay light (t
 preview) overrides {% block theme %} and {% block theme_color %}. The theme-color meta follows it (finance/_theme_color.html).
 The Light · Dark · System control (finance/_theme_switch.html) sits at the bottom of the sidebar
 above the user card, under "Appearance", and as the first row of the More sheet.
+The Admin group's pages show a red banner (#settings-incomplete, --unpaid-text on --unpaid-bg)
+while the company name or support e-mail is blank (company.settings_incomplete; owner,
+2026-11-02: no operator message goes until both are set), with a link to the company settings
+for an admin.
 {% endcomment %}{% load icons roles shell static %}<!DOCTYPE html>
 <html lang="en" data-theme="{% block theme %}{{ theme }}{% endblock %}">
 <head>
@@ -119,6 +123,7 @@ above the user card, under "Appearance", and as the first row of the More sheet.
     </header>
     <main class="{% block main_class %}{% endblock %}">
       {% now "M j, Y" as printed_on %}<div class="print-only print-header" id="print-header"><span class="print-company">{{ company.name }}</span> <span class="print-date">{{ printed_on }}</span></div>
+      {% if nav_group == "admin" and company.settings_incomplete %}<p class="settings-banner" id="settings-incomplete" role="alert">Set the company name and support e-mail before mail goes live.{% if request.user|is_admin %} <a href="{% url 'admin:ledger_companysettings_change' object_id=1 %}" id="settings-incomplete-link">Open the company settings</a>{% endif %}</p>{% endif %}
       {% if messages %}
         <ul class="toasts" id="toasts" aria-live="polite">
           {% for message in messages %}<li class="toast {{ message.tags }}" role="status"><span class="toast-icon">{% if message.level_tag == "success" %}{% icon "check" 16 %}{% elif message.level_tag == "warning" %}{% icon "alert" 16 %}{% elif message.level_tag == "error" %}{% icon "dot" 16 %}{% else %}{% icon "info" 16 %}{% endif %}</span><span class="toast-text">{{ message }}</span><button type="button" class="toast-dismiss" aria-label="Dismiss this message">&times;</button></li>{% endfor %}

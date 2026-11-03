@@ -512,13 +512,19 @@ def test_d_for_an_ended_lease_asks_to_settle_the_balance(clock: Any) -> None:
     )
     run(clock, TODAY)
     body = rows_of(lease)["D"].rendered_body
-    assert ENDED in body and CURRENT not in body
+    # Re-pinned (Opus, owner 2026-11-02): ledger 0069's {pay_line} carries D's ended-lease
+    # sentence ({lease_line}'s own is no longer in the seeded D).
+    assert messaging.PAY_LINE_ENDED.split(" {pay_link}", 1)[0] in body
+    assert "to settle this balance." in body and CURRENT not in body
 
 
 def test_lease_line_is_a_placeholder_the_template_editor_accepts() -> None:
     assert "lease_line" in merge.fields_for("overdue_day10")
     row = MessageTemplate.objects.get(code="overdue_day10")
-    assert "{lease_line}" in row.body
+    # Re-pinned (Opus, owner 2026-11-02): ledger 0069 put {pay_line} in place of D's payment
+    # sentence and its {lease_line}; {lease_line} stays a placeholder D may use.
+    assert "{pay_line}" in row.body and "{lease_line}" not in row.body
+    row.body = row.body.replace("{pay_line}", "{lease_line}")
     row.full_clean()
 
 

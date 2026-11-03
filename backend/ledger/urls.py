@@ -484,6 +484,12 @@ outbox_patterns = (
         path("", outbox.outbox_page, name="page"),
         # Owner, 2026-11-01: what the reminder job would queue in the next 30 days.
         path("preview/", outbox.preview_page, name="preview"),
+        # Owner, 2026-11-02: every message held for the company settings, once they are set.
+        path(
+            "send-held-for-settings/",
+            outbox.send_held_for_settings,
+            name="send_held_for_settings",
+        ),
         path("<str:pk>/send-now/", outbox.send_now, name="send_now"),
     ],
     "outbox",

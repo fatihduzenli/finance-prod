@@ -76,6 +76,7 @@ PLACEHOLDERS = {
     "company_name",
     # Re-pinned (Opus, owner 2026-11-02): D's wording for an ended lease.
     "lease_line",
+    "pay_line",
 }
 NO_RETRY = "Please contact us within 2 business days to set up a new payment method."
 OUTBOX = "/admin-settings/outbox/"
@@ -146,8 +147,12 @@ def plan_templates() -> dict[str, tuple[str, str]]:
 def test_the_seeded_template_is_the_owners_text_byte_for_byte(letter: str) -> None:
     subject, body = plan_templates()[letter]
     row = template(CODES[letter])
-    if letter == "D":  # Re-pinned (Opus, owner 2026-11-02): ledger 0068's {lease_line}.
-        body = body.replace("Continued non-payment may affect your lease.", "{lease_line}")
+    if letter == "D":  # Re-pinned (Opus, owner 2026-11-02): ledger 0068's and 0069's {pay_line}.
+        body = body.replace(
+            "Please pay today at {pay_link} or contact us at {support_email} to arrange payment. "
+            "Continued non-payment may affect your lease.",
+            "{pay_line}",
+        )
     assert row.subject == subject
     assert row.body == body
     assert row.active and row.internal is (letter == "E")
@@ -174,9 +179,9 @@ def test_the_old_ladder_templates_are_inactive_and_the_steps_table_is_gone() -> 
 
 
 def test_the_placeholder_set_is_exactly_the_fifteen() -> None:
-    # Re-pinned (Opus, owner 2026-11-02): fifteen and {lease_line}.
+    # Re-pinned (Opus, owner 2026-11-02): fifteen, {lease_line} and {pay_line}.
     assert set(merge.FIELDS) == PLACEHOLDERS
-    assert len(merge.FIELDS) == 16
+    assert len(merge.FIELDS) == 17
 
 
 @pytest.mark.parametrize(

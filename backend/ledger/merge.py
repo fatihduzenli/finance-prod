@@ -1,8 +1,8 @@
 """Placeholders of the message templates (docs/qa/PLAN-011b D4, PLAN-012e D8, PLAN-014 D4).
 
 A template's subject and body may name exactly the placeholders of its code's list, each as
-``{name}``: :data:`FIELDS` (the closed set of PLAN-014 D4, and ``{lease_line}`` since
-2026-11-02) for every message about a charge,
+``{name}``: :data:`FIELDS` (the closed set of PLAN-014 D4, and ``{lease_line}`` and
+``{pay_line}`` since 2026-11-02) for every message about a charge,
 :data:`FINAL_STATEMENT_FIELDS` for the template ``final_statement``, and for the two portal
 messages of PLAN-014 H2 :data:`PORTAL_INVITE_FIELDS` (``portal_invite``, whose own placeholder
 ``{set_password_link}`` no other template may use) and :data:`PORTAL_RESET_FIELDS`
@@ -47,6 +47,9 @@ FIELDS: tuple[str, ...] = (
     # Owner, 2026-11-02: "Continued non-payment may affect your lease." for a current lease,
     # "Please contact us to settle this balance." once the charge's lease has ended (D's text).
     "lease_line",
+    # Owner, 2026-11-02: D's payment sentence, one for a current lease and one, without the
+    # warning about the lease, once the lease has ended (``messaging.pay_line``).
+    "pay_line",
 )
 #: The template code of the final statement e-mail (PLAN-012e D8) and its fields.
 FINAL_STATEMENT_CODE = "final_statement"

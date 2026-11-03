@@ -2765,6 +2765,11 @@ class HeldReason(models.TextChoices):
     NO_ADDRESS = "no_address", "no billing e-mail"
     NO_MANAGER_LIST = "no_manager_list", "no manager list"
     HANDLED_PERSONALLY = "handled_personally", "operator handled personally"
+    #: Owner, 2026-11-02: no message leaves with an empty placeholder. The company name or
+    #: the support e-mail is blank (every operator-facing message waits until both are set),
+    #: or a placeholder the text names has no value (the Outbox names it).
+    SETTINGS_INCOMPLETE = "settings_incomplete", "settings incomplete"
+    MISSING_VALUE = "missing_value", "missing value"
 
 
 class MessageRule(models.TextChoices):

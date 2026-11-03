@@ -9,7 +9,9 @@ bottom bar marks the item that holds it (PLAN-012f D4). It reads the request onl
 no setting.
 
 :func:`company` exposes the company settings row's display values (``company.name``,
-``short_name``, ``provider_name``, ``logo_url``, ``logo_is_override``) and the shell's theme
+``short_name``, ``provider_name``, ``logo_url``, ``logo_is_override``), whether the company name
+or support e-mail is blank (``settings_incomplete``: the Admin pages' red banner, owner
+2026-11-02, :func:`ledger.services.messaging.settings_incomplete`) and the shell's theme
 colours (light and dark) to every template; :func:`theme` exposes the user's stored theme
 (PLAN-012g A2: ``light``, ``dark`` or ``system``) for ``<html data-theme>``. ``logo_url`` is the
 brand's dark logo unless the row names a live PNG or JPEG document, then that document's preview
@@ -32,6 +34,7 @@ from django.urls import reverse
 from accounts.themes import preference_for
 from finance import pwa
 from ledger.models import LOGO_CONTENT_TYPES, CompanySettings, Document
+from ledger.services.messaging import settings_incomplete
 
 #: The sidebar's and the phone bar's logo when the row has no override: the transparent
 #: variant for dark backgrounds (PLAN-012f D3; the opaque monvera_logo_dark has a navy
@@ -126,6 +129,9 @@ class Company:
     logo_url: str
     #: The logo is the row's own document, not the brand logo (PLAN-012c D3).
     logo_is_override: bool = False
+    #: The company name or support e-mail is blank: no operator message goes (owner,
+    #: 2026-11-02), and the Admin pages say so.
+    settings_incomplete: bool = False
 
 
 def logo_url(row: CompanySettings) -> str:
@@ -167,6 +173,7 @@ def company(request: HttpRequest) -> dict[str, object]:
             provider_name=str(row.processor_name),
             logo_url=url,
             logo_is_override=url != static(BRAND_LOGO),
+            settings_incomplete=bool(settings_incomplete(row)),
         )
         setattr(request, _COMPANY_ATTRIBUTE, shown)
     return {

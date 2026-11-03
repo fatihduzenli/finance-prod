@@ -36,6 +36,7 @@ from banking.models import BankTransaction, Kind, Source
 from ledger.models import (
     Brand,
     CalendarEntry,
+    CompanySettings,
     ContactKind,
     DeductionKind,
     InstallmentCadence,
@@ -188,6 +189,12 @@ def _build() -> World:
     # transaction tests flush them, so the world writes them again.
     for order, name in enumerate(("iFixandRepair", "Techy", "Talk&Fix"), start=1):
         Brand.objects.update_or_create(name=name, defaults={"active": True, "sort_order": order})
+    # The settings a company has before mail goes live: a support e-mail (owner, 2026-11-02:
+    # without one every operator message is held and the Admin pages carry the red banner; the
+    # baselines show the pages as they are once set up; the sign-in page then has its help links).
+    CompanySettings.objects.filter(pk=CompanySettings.current().pk).update(
+        support_email="support@example.com"
+    )
     user, device = make_user(USERNAME, Role.BILLING)
     assert device is not None
     operator = make_operator(email="northwind@example.com", customer="cus-visual-1")

@@ -205,7 +205,7 @@ def sample_context(template: MessageTemplate, lease: Lease, today: date) -> dict
         }
     store = lease.store
     due = today + timedelta(days=3)
-    return {
+    values = {
         "operator_name": str(operator.display_name) if operator is not None else "",
         "store_number": str(store.store_number) if store.store_number is not None else "",
         "store_name": str(store.external_label),
@@ -222,7 +222,10 @@ def sample_context(template: MessageTemplate, lease: Lease, today: date) -> dict
         "support_email": str(company.support_email or ""),
         "company_name": str(company.name),
         "lease_line": messaging.lease_line(lease, today),
+        "pay_line": "",
     }
+    values["pay_line"] = messaging.pay_line(lease, today, values)
+    return values
 
 
 def preview(

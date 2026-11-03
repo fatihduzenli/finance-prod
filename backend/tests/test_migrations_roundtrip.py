@@ -85,6 +85,7 @@ GUARD_MODULES = (
     "ledger.migrations.0066_operator_state_codes",
     "ledger.migrations.0067_lease_billing_bank_name",
     "ledger.migrations.0068_combined_messages_and_lease_line",
+    "ledger.migrations.0069_pay_line_and_settings_holds",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",
