@@ -198,7 +198,8 @@ def test_the_promise_cells_and_the_closed_sentence_are_formatted() -> None:
     assert "Closed $2,000.00 by Oct 1, 2026 as Kept" in log
     assert "$12,500.00 by Oct 20, 2026" in log
     header = page(client, f"/stores/{store.pk}/").split('id="workspace-header"')[1]
-    header = header.split("</section>")[0]
+    # PLAN-014b item 3 (re-pinned): the NOTES card, a <section>, now always comes before NEXT.
+    header = header.split('id="store-cost"')[0]
     assert "$12,500.00 by Oct 20, 2026" in header  # the open promise
     assert '<dd id="header-rent"><strong>$3,500.00</strong> / month</dd>' in header  # 12f D8
     assert closer.pk and open_one.pk

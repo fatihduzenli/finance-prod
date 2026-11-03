@@ -594,10 +594,12 @@ def test_deleting_needs_a_reason_keeps_the_trail_and_hides_the_note() -> None:
     assert notes.for_store(store) == []
 
 
-def test_pinned_notes_fill_the_notes_card_newest_pin_first_up_to_five() -> None:
+def test_pinned_notes_lead_the_notes_card_newest_pin_first_up_to_three() -> None:
+    # Re-pinned for PLAN-014b item 3: the card always shows (with "No notes yet." while empty)
+    # and holds three notes at most, the pinned first (was: pinned only, five, absent if none).
     store, _, _ = a_store_with_lease()
     client, user = a_user(Role.BILLING)
-    assert 'id="notes-card"' not in page(client, f"/stores/{store.pk}/")
+    assert "No notes yet." in section(page(client, f"/stores/{store.pk}/"), "notes-card")
     made = []
     for n in range(7):
         client.post(f"/stores/{store.pk}/notes/", {"body": f"Note number {n}."})
@@ -608,10 +610,12 @@ def test_pinned_notes_fill_the_notes_card_newest_pin_first_up_to_five() -> None:
             made.append(note)
     html = page(client, f"/stores/{store.pk}/")
     card = section(html, "notes-card", "</section>")
-    assert card.count('class="pinned-note"') == 5
-    assert card.index("Note number 5.") < card.index("Note number 1.")
-    assert "Note number 0." not in card  # the sixth pin, the oldest, is beyond the cap
-    assert "Note number 6." not in card  # never pinned
+    assert card.count('class="note-item"') == 3
+    assert (
+        card.index("Note number 5.") < card.index("Note number 4.") < card.index("Note number 3.")
+    )
+    assert "Note number 0." not in card  # older pins are beyond the cap
+    assert "Note number 6." not in card  # never pinned, behind six pins
     notes.unpin(made[5], user)
     assert "Note number 5." not in section(
         page(client, f"/stores/{store.pk}/"), "notes-card", "</section>"

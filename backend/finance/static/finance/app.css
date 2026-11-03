@@ -360,12 +360,21 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .note-pin { display: inline-flex; align-items: center; gap: var(--space-1); }
 .note-pin[aria-pressed="true"] { background: var(--pending-bg); color: var(--pending-text); }
 .note-pin-glyph { display: inline-flex; color: var(--pending-text); }
-.pinned-notes { list-style: none; margin: 0; padding: 0; }
-.pinned-note { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); }
-.pinned-note:last-child { border-bottom: 0; padding-bottom: 0; }
-.pinned-note .pinned-note-body { margin: 0; }
-.pinned-note-body { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-base); }
-.pinned-note .pinned-note-meta { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-sm); }
+/* PLAN-014b item 3: the NOTES card — the one-line "Add a note…" form, then each note (the pin
+   icon when pinned, the text cut to three lines, "more", the author and day), "All notes (n) ›". */
+.note-card-form { margin: 0 0 var(--space-3); }
+.note-card-form .field { margin: 0; }
+.note-card-row { display: flex; gap: var(--space-2); align-items: center; }
+.note-card-row input[type=text] { flex: 1 1 auto; min-width: 0; }
+.note-list { list-style: none; margin: 0; padding: 0; }
+.note-list .note-item { margin: 0; padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); font-size: var(--fs-base); }
+.note-list .note-item:first-child { padding-top: 0; }
+.note-list .note-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.note-item .note-item-body { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-base); }
+.note-item .note-item-more { font-size: var(--fs-sm); }
+.note-item .note-item-meta { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-sm); }
+.note-item-meta .note-pin-glyph { margin-right: var(--space-1); vertical-align: -2px; }
+.note-list-all { margin: var(--space-3) 0 0; font-size: var(--fs-sm); }
 
 /* --- Grid cell block ---------------------------------------------------------------------
    td.cell (ledger.views.dashboard.cell_html): a month of the grid. .cell-block: a rounded
