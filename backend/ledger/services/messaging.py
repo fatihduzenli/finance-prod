@@ -80,7 +80,29 @@ outcome on the rows combined into it (:func:`status_text`).
 
 **D for an ended lease.** ``{lease_line}`` (:func:`lease_line`) reads "Continued non-payment may
 affect your lease." while the charge's lease is current and "Please contact us to settle this
-balance." once it has ended (its status ended, or its end date today or before).
+balance." once it has ended (its status ended, or its end date today or before). ``{pay_line}``
+(:func:`pay_line`, D's since ledger 0069) is D's whole payment sentence: "Please pay today at
+{pay_link} or contact us at {support_email} to arrange payment. Continued non-payment may affect
+your lease." for a current lease, "Please pay at {pay_link} or contact us at {support_email} to
+settle this balance." once it has ended, rendered through the same merge.
+
+**No empty placeholder leaves** (owner, 2026-11-02). A placeholder whose value is empty is
+rendered as itself (``{support_email}``, :func:`with_gaps`), so the stored text shows the gap.
+While the company name or the support e-mail is blank (:func:`settings_incomplete`), every
+message that is not internal (the operator's, the final statement, the portal's) is held
+``settings_incomplete``; the internal E still goes. A text that still shows a placeholder of its
+template (:func:`missing`) is held ``missing_value``, the Outbox naming it ("Missing value:
+{support_email}"). Both are checked when the message is stored (:func:`queue`,
+:func:`queue_portal`; for the daily job's rows, queued without their job, when :func:`combine`
+picks the one to send) and again at the send, where a setting's placeholder is first filled
+from the settings as they stand (:func:`fill_settings`). A held message goes with *Send now*,
+and :func:`send_held_for_settings` (the Outbox's "Send all held for settings") releases every
+message held ``settings_incomplete`` once both settings are set. Such a release (and *Send now*
+on such a hold, with the other holds of its lease) is grouped as the daily job groups
+(:func:`plan_release`): per lease one e-mail under the most urgent of A to D listing the charges
+still open, the others combined into it; a row whose charge closed or month settled, an A whose
+debit has passed, and every row about a charge but its most urgent (``Superseded``) are
+suppressed. A portal message, a final statement or an F goes as it is.
 
 **By hand.** :func:`send_by_hand` (billing, the charge page's "Send a message now") queues a
 ``manual`` row of an active, not internal template for an open charge, through the same
@@ -210,6 +232,27 @@ SEND_NOW_NOT_ALLOWED = (
     "stays held."
 )
 SEND_NOW_NO_ADDRESS = "The message has no address to send to: it stays held."
+SEND_NOW_SETTINGS = (
+    "Set the company name and support e-mail (Admin › System settings) first: the message "
+    "stays held."
+)
+#: The Outbox's "Send all held for settings" (owner, 2026-11-02).
+RELEASE_QUEUED = "Sent now: {text}."
+RELEASE_TEXT = (
+    "{held} held message{held_plural} → {emails} e-mail{emails_plural}, {suppressed} superseded"
+)
+SEND_NOW_SUPPRESSED = "The message is no longer to be sent ({cause})."
+#: Why a row released from a settings hold is not sent (owner, 2026-11-02): another row about
+#: the same charge goes instead, or the debit an A announces has happened.
+SUPERSEDED = "Superseded"
+DEBIT_PASSED = "DebitPassed"
+RELEASE_NONE = "No message is held for the settings."
+RELEASE_STILL_INCOMPLETE = (
+    "Set the company name and support e-mail (Admin › System settings) first: nothing was sent."
+)
+RELEASE_COUNT_CHANGED = (
+    "The number of messages held for the settings changed: check the Outbox and try again."
+)
 NO_LEASE = "A message belongs to a lease."
 #: Owner, 2026-11-01: the retired ladder queues nothing; an inactive template neither.
 RETIRED_RULE = "The old collections ladder is retired: it queues no message."
@@ -232,6 +275,36 @@ NO_VALUE = "—"
 #: ``{lease_line}`` (owner, 2026-11-02): a current lease, and a lease that has ended.
 LEASE_LINE_CURRENT = "Continued non-payment may affect your lease."
 LEASE_LINE_ENDED = "Please contact us to settle this balance."
+#: ``{pay_line}`` (owner, 2026-11-02): D's payment sentence for a current lease, and for one
+#: that has ended; each rendered through the merge.
+PAY_LINE_CURRENT = (
+    "Please pay today at {pay_link} or contact us at {support_email} to arrange payment. "
+    "Continued non-payment may affect your lease."
+)
+PAY_LINE_ENDED = "Please pay at {pay_link} or contact us at {support_email} to settle this balance."
+
+#: The company settings no message to an operator goes without (owner, 2026-11-02).
+REQUIRED_SETTINGS: tuple[str, ...] = ("name", "support_email")
+#: The placeholders whose value is a company setting: filled again at the send.
+SETTING_PLACEHOLDERS: Mapping[str, str] = {
+    "company_name": "name",
+    "company": "name",
+    "support_email": "support_email",
+}
+#: How the Outbox reads the two holds of an empty placeholder.
+SETTINGS_INCOMPLETE_TEXT = (
+    "Settings incomplete: set the company name and support e-mail in Admin › System settings"
+)
+MISSING_VALUE_TEXT = "Missing value: {name}"
+#: What staff do about a placeholder without a value, when it is data.
+MISSING_VALUE_FIX: Mapping[str, str] = {
+    "store_number": "give store {store} a number in its settings",
+    "store_name": "give store {store} a name in its settings",
+    "operator_name": "give operator {operator} a name on its page",
+    "support_email": "set the support e-mail in Admin › System settings",
+    "company_name": "set the company name in Admin › System settings",
+    "company": "set the company name in Admin › System settings",
+}
 
 #: The operator's rules sent as one message per lease and day, most urgent first: the first
 #: present gives the message its template and subject (owner, 2026-11-02).
@@ -501,6 +574,67 @@ def lease_line(lease: Lease, today: date) -> str:
     return LEASE_LINE_ENDED if lease_ended(lease, today) else LEASE_LINE_CURRENT
 
 
+def pay_line(lease: Lease, today: date, values: Mapping[str, str]) -> str:
+    """``{pay_line}``: :data:`PAY_LINE_ENDED` once ``lease`` has ended, else
+    :data:`PAY_LINE_CURRENT`, rendered with ``values`` (every placeholder of :data:`FIELDS
+    <ledger.merge.FIELDS>`; an empty one shows as itself, :func:`with_gaps`)."""
+    sentence = PAY_LINE_ENDED if lease_ended(lease, today) else PAY_LINE_CURRENT
+    return merge.render(sentence, with_gaps({**values, "pay_line": ""}))
+
+
+# --- No empty placeholder leaves (owner, 2026-11-02) --------------------------------------------
+
+
+def gap(name: str) -> str:
+    """How an empty placeholder reads in a stored text: itself, ``{name}``."""
+    return "{" + name + "}"
+
+
+def with_gaps(values: Mapping[str, str]) -> dict[str, str]:
+    """``values`` with each empty value replaced by its placeholder (:func:`gap`)."""
+    return {name: value if value != "" else gap(name) for name, value in values.items()}
+
+
+def settings_incomplete(company: CompanySettings) -> list[str]:
+    """The company settings among :data:`REQUIRED_SETTINGS` that are blank."""
+    return [name for name in REQUIRED_SETTINGS if not str(getattr(company, name) or "").strip()]
+
+
+def missing(message: OutboundMessage) -> list[str]:
+    """The placeholders of the message's template its stored subject or body still shows
+    (an empty value, :func:`with_gaps`), in the order of the template's list."""
+    text = f"{message.rendered_subject}\n{message.rendered_body}"
+    return [name for name in merge.fields_for(message.template.code) if gap(name) in text]
+
+
+def hold_reason(message: OutboundMessage, company: CompanySettings | None = None) -> str:
+    """``settings_incomplete`` for a message that is not internal while a required setting
+    is blank; ``missing_value`` for a text that shows a placeholder; ``""`` when it may go."""
+    row = company or CompanySettings.read()
+    if not message.template.internal and settings_incomplete(row):
+        return HeldReason.SETTINGS_INCOMPLETE
+    if missing(message):
+        return HeldReason.MISSING_VALUE
+    return ""
+
+
+def fill_settings(message: OutboundMessage, company: CompanySettings) -> None:
+    """Write the settings as they stand into the placeholders of a setting that the stored
+    text shows (a message held while a setting was blank)."""
+    fields = merge.fields_for(message.template.code)
+    subject, body = message.rendered_subject, message.rendered_body
+    for name, setting in SETTING_PLACEHOLDERS.items():
+        value = str(getattr(company, setting) or "").strip()
+        if name in fields and value:
+            subject = subject.replace(gap(name), value)
+            body = body.replace(gap(name), value)
+    if (subject, body) == (message.rendered_subject, message.rendered_body):
+        return
+    message.rendered_subject = one_line(subject)[:SUBJECT_MAX_LENGTH]
+    message.rendered_body = body
+    message.body_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 def context_for(
     lease: Lease,
     charge: Subject,
@@ -514,14 +648,14 @@ def context_for(
     return_reason: str = "",
     company: CompanySettings | None = None,
 ) -> dict[str, str]:
-    """The 16 placeholder values of a message about ``charge`` billed through ``lease``
-    (D4; ``{lease_line}`` reads the charge's own lease, else ``lease``). ``amount`` is the
-    charge's balance unless given; ``debit_date`` its due date unless given; ``days_late``
-    counted from the due date (never below zero); ``retry_date`` and ``return_reason`` empty
-    unless given (rule F). ``{pay_link}`` is the
-    portal's Pay page of the store when the operator has a portal account that can sign in,
-    else a new signed statement link (:func:`pay_link`, PLAN-014 H4). ``rule`` is accepted for
-    the rules that will shape a value of their own. For a :class:`RentMonth` the amount is
+    """The 17 placeholder values of a message about ``charge`` billed through ``lease``
+    (D4; ``{lease_line}`` and ``{pay_line}`` read the charge's own lease, else ``lease``).
+    ``amount`` is the charge's balance unless given; ``debit_date`` its due date unless given;
+    ``days_late`` counted from the due date (never below zero); ``retry_date`` and
+    ``return_reason`` empty unless given (rule F). ``{pay_link}`` is the portal's Pay page
+    of the store when the operator has a portal account that can sign in, else a new signed
+    statement link (:func:`pay_link`, PLAN-014 H4). ``rule`` is accepted for the rules that
+    will shape a value of their own. For a :class:`RentMonth` the amount is
     the scheduled one and both dates the scheduled debit (E4)."""
     row = company or CompanySettings.read()
     operator = operator_of(lease, charge)
@@ -529,7 +663,8 @@ def context_for(
     due = due_of(charge)
     late = days_late if days_late is not None else max((today - due).days, 0)
     last4 = lease_sync.billing_of(lease).bank_last4
-    return {
+    own = getattr(charge, "lease", None) or lease
+    values = {
         "operator_name": str(operator.display_name) if operator is not None else "",
         "store_number": str(store.store_number) if store.store_number is not None else "",
         "store_name": str(store.external_label),
@@ -545,8 +680,11 @@ def context_for(
         "store_link": store_link(lease),
         "support_email": str(row.support_email or ""),
         "company_name": str(row.name),
-        "lease_line": lease_line(getattr(charge, "lease", None) or lease, today),
+        "lease_line": lease_line(own, today),
+        "pay_line": "",
     }
+    values["pay_line"] = pay_line(own, today, values)
+    return values
 
 
 # --- Queue (D3, D7) -------------------------------------------------------------------------
@@ -629,8 +767,11 @@ def queue(
     stored as ``failed`` (``PaymentDataRefused``) without its text, and gets no job.
     ``ValueError`` and nothing written when ``lease`` is ``None``, the rule is retired or the
     template inactive (:func:`refuse_retired`). A :class:`RentMonth` is stored by its lease
-    and month (``lease_month``, ``period_month``; E4). ``job=False`` stores the row without
-    its job: the daily job's :func:`combine` or :func:`wait_for_fold` decides what goes."""
+    and month (``lease_month``, ``period_month``; E4). A message that may not go yet
+    (:func:`hold_reason`: a required company setting blank, a placeholder without a value) is
+    stored ``held``, without its job. ``job=False`` stores the row without its job and
+    without that check: the daily job's :func:`combine` or :func:`wait_for_fold` decides what
+    goes (and :func:`combine` holds the message it sends)."""
     refuse_retired(rule, template)
     if lease is None:
         raise ValueError(NO_LEASE)
@@ -639,8 +780,9 @@ def queue(
     if operator is None:
         raise ValueError("A message needs the operator billed.")
     moment = now or timezone.now()
-    subject = one_line(merge.render(template.subject, context))[:SUBJECT_MAX_LENGTH]
-    body = merge.render(template.body, context)
+    values = with_gaps(context)
+    subject = one_line(merge.render(template.subject, values))[:SUBJECT_MAX_LENGTH]
+    body = merge.render(template.body, values)
     final = rule == MessageRule.FINAL_STATEMENT
     address = ""
     if template.internal:
@@ -686,11 +828,13 @@ def queue_portal(
     ``actor``) when a staff member asked for it, else (the portal's own reset form) by no one.
     Raises :class:`ChannelUnavailable` for an SMS template and
     :class:`~ledger.merge.TemplateRefused` when ``context`` is not the template's
-    placeholders; ``ValueError`` and nothing written for an inactive template."""
+    placeholders; ``ValueError`` and nothing written for an inactive template. Held, without
+    its job, while a required company setting is blank (:func:`hold_reason`)."""
     refuse_retired(MessageRule.PORTAL, template)
     channel_for(template.channel)
-    subject = one_line(merge.render(template.subject, context))[:SUBJECT_MAX_LENGTH]
-    body = merge.render(template.body, context)
+    values = with_gaps(context)
+    subject = one_line(merge.render(template.subject, values))[:SUBJECT_MAX_LENGTH]
+    body = merge.render(template.body, values)
     message = OutboundMessage(
         operator=operator,
         lease=None,
@@ -724,16 +868,39 @@ def _refuse_payment_data(message: OutboundMessage) -> None:
         message.error = PAYMENT_DATA_REFUSED
 
 
+#: The audit action of a stored message, by its status.
+STORED_ACTIONS: Mapping[str, str] = {
+    MessageStatus.QUEUED: "message.queued",
+    MessageStatus.HELD: "message.held",
+}
+
+
+def _hold_if_gaps(message: OutboundMessage) -> bool:
+    """Hold a queued (or waiting) message that may not go yet (:func:`hold_reason`); whether
+    it was."""
+    reason = hold_reason(message)
+    if not reason:
+        return False
+    message.status = MessageStatus.HELD
+    message.held_reason = reason
+    return True
+
+
 def _store(
     message: OutboundMessage, actor: User | None, *, job: bool = True
 ) -> OutboundMessage | None:
     """Save a rendered message and its ``message_send`` job (unless ``job`` is false),
     audited; ``None`` when the unique constraint finds the row already there. A text holding
     payment data is stored as ``failed`` (``PaymentDataRefused``) without its text, and gets
-    no job."""
+    no job; one with its job that may not go yet (:func:`hold_reason`) is stored ``held``,
+    without a job."""
     _refuse_payment_data(message)
+    if job and message.status == MessageStatus.QUEUED:
+        _hold_if_gaps(message)
     audited: dict[str, object] = {"status": message.status, "error": message.error}
-    if message.status == MessageStatus.FAILED:  # as a send's failure reads
+    if message.status == MessageStatus.HELD:
+        audited["held_reason"] = message.held_reason
+    if message.status in (MessageStatus.FAILED, MessageStatus.HELD):  # as a send's reads
         audited["recipients"] = 0
     try:
         with transaction.atomic():
@@ -742,12 +909,7 @@ def _store(
                 jobs.enqueue(
                     JobKind.MESSAGE_SEND, message, None, actor, run_after=message.scheduled_for
                 )
-            _audit(
-                "message.queued" if message.status == MessageStatus.QUEUED else "message.failed",
-                message,
-                actor,
-                audited,
-            )
+            _audit(STORED_ACTIONS.get(message.status, "message.failed"), message, actor, audited)
     except IntegrityError:
         return None
     return message
@@ -939,7 +1101,8 @@ def combine(
     """Send the first of ``rows`` for all of them (the module docstring; the caller puts the
     most urgent first): with more than one, its body gains :func:`charges_text` and the
     others become ``combined`` into it. Its ``message_send`` job is queued (a waiting row is
-    queued again, for the send window from ``now``)."""
+    queued again, for the send window from ``now``), unless it may not go yet
+    (:func:`hold_reason`): then it is ``held``, audited ``message.held``, without a job."""
     primary = rows[0][0]
     if len(rows) > 1:
         lines = [line for _, line in rows]
@@ -950,7 +1113,15 @@ def combine(
     if primary.status == MessageStatus.WAITING:
         primary.status = MessageStatus.QUEUED
         primary.scheduled_for = scheduled_for(now or timezone.now())
+    held = primary.status == MessageStatus.QUEUED and _hold_if_gaps(primary)
     primary.save()
+    if held:
+        _audit(
+            "message.held",
+            primary,
+            None,
+            {"status": primary.status, "held_reason": primary.held_reason, "recipients": 0},
+        )
     if primary.status == MessageStatus.QUEUED:
         jobs.enqueue(JobKind.MESSAGE_SEND, primary, None, None, run_after=primary.scheduled_for)
     for message, _ in rows[1:]:
@@ -1158,6 +1329,11 @@ def send(message_id: uuid.UUID, now: datetime | None = None) -> Outcome:
                 True,
                 _finish(message, Disposition(MessageStatus.HELD, HeldReason.HANDLED_PERSONALLY)),
             )
+        company = CompanySettings.read()
+        fill_settings(message, company)
+        gaps = hold_reason(message, company)
+        if gaps:
+            return Outcome(True, _finish(message, Disposition(MessageStatus.HELD, gaps)))
         recipients = _recipients(message)
         if not recipients:
             held = HeldReason.NO_MANAGER_LIST if internal else HeldReason.NO_ADDRESS
@@ -1246,8 +1422,11 @@ def send_by_hand(
 
 def send_now(message_id: uuid.UUID, actor: User) -> Outcome:
     """Send a held message again (the Outbox's "Send now", admin): refused while mail is not
-    set up, or, on the sandbox, while its address is not on the allowlist; otherwise the row
-    is queued again and its job runs at once. Audited ``message.send_now``."""
+    set up, while a required company setting is blank (a message that is not internal), or, on
+    the sandbox, while its address is not on the allowlist; otherwise the row is queued again
+    and its job runs at once. Audited ``message.send_now``. A message held
+    ``settings_incomplete`` is released with the other such holds of its lease, grouped as at
+    the daily job (:func:`plan_release`)."""
     with transaction.atomic():
         message = (
             OutboundMessage.objects.select_for_update(of=("self",))
@@ -1262,11 +1441,15 @@ def send_now(message_id: uuid.UUID, actor: User) -> Outcome:
         found = mail.mail_settings()
         if not mail.is_set_up(found):
             return Outcome(False, SEND_NOW_NOT_SET_UP)
+        if not message.template.internal and settings_incomplete(CompanySettings.read()):
+            return Outcome(False, SEND_NOW_SETTINGS)
         recipients = _recipients(message)
         if not recipients:
             return Outcome(False, SEND_NOW_NO_ADDRESS)
         if not all(allowlisted(address, found) for address in recipients):
             return Outcome(False, SEND_NOW_NOT_ALLOWED)
+        if message.held_reason == HeldReason.SETTINGS_INCOMPLETE:
+            return _send_now_for_settings(message, actor)
         before = {"status": message.status, "held_reason": message.held_reason}
         message.status = MessageStatus.QUEUED
         message.held_reason = ""
@@ -1281,6 +1464,230 @@ def send_now(message_id: uuid.UUID, actor: User) -> Outcome:
             after={"status": message.status},
         )
     return Outcome(True, SEND_NOW_QUEUED)
+
+
+def held_for_settings() -> QuerySet[OutboundMessage]:
+    """The messages held ``settings_incomplete``, oldest first."""
+    return OutboundMessage.objects.filter(
+        status=MessageStatus.HELD, held_reason=HeldReason.SETTINGS_INCOMPLETE
+    ).order_by("queued_at", "id")
+
+
+@dataclass(frozen=True, slots=True)
+class Release:
+    """What releasing the messages held for the settings does (owner, 2026-11-02): ``held``
+    rows (the holds counted), ``sends`` (each one e-mail: the message to send first, then the
+    rows combined into it) and ``suppressed`` (each row and why it no longer goes)."""
+
+    held: int
+    sends: list[list[OutboundMessage]]
+    suppressed: list[tuple[OutboundMessage, str]]
+
+    @property
+    def emails(self) -> int:
+        return len(self.sends)
+
+    @property
+    def text(self) -> str:
+        """ "3 held messages → 1 e-mail, 2 superseded"."""
+        return RELEASE_TEXT.format(
+            held=self.held,
+            held_plural="" if self.held == 1 else "s",
+            emails=self.emails,
+            emails_plural="" if self.emails == 1 else "s",
+            suppressed=len(self.suppressed),
+        )
+
+
+def _groups(message: OutboundMessage) -> bool:
+    """Whether ``message`` is released grouped with its lease's (an operator's A to D)."""
+    return (
+        message.kind == MessageKind.LADDER
+        and message.rule in COMBINED_RULES
+        and message.lease_id is not None
+    )
+
+
+def _charge_key(message: OutboundMessage) -> tuple[object, ...]:
+    """What ``message`` is about, for the release: its charge; a lease month's rent charge
+    once it exists (so its B and the charge's C or D are one), else the month."""
+    if message.period_month is None or message.lease_id is None:
+        return (message.charge_entity_type, message.charge_entity_id)
+    rent = (
+        RentCharge.objects.filter(
+            lease_id=message.lease_id, period_month=message.period_month, seq=1
+        )
+        .values_list("pk", flat=True)
+        .first()
+    )
+    if rent is not None:
+        return (ChargeEntityType.RENT_CHARGE, rent)
+    return (ChargeEntityType.LEASE_MONTH, message.lease_id, message.period_month)
+
+
+def _overtaken(message: OutboundMessage, today: date) -> str:
+    """``DebitPassed`` for an A whose debit date is before ``today``; ``""`` otherwise."""
+    lease = message.lease
+    if message.rule != MessageRule.A or message.period_month is None or lease is None:
+        return ""
+    if lease.debit_day is None:
+        return ""
+    debit = rent_run.debit_date(lease, message.period_month, lease.debit_day)
+    return DEBIT_PASSED if debit < today else ""
+
+
+def plan_release(held: list[OutboundMessage], today: date) -> Release:
+    """How ``held`` (messages held ``settings_incomplete``) go on ``today``, writing nothing:
+    an operator's A to D per lease as at the daily job, with the rows combined into them —
+    a row whose charge closed or month settled (:func:`_suppress_reason`), or an A whose debit
+    has passed, is suppressed; of the rows about one charge only the most urgent stays (D > C
+    > B > A; the others ``Superseded``); the rest is one e-mail under the most urgent. Any
+    other message (a portal message, a final statement, F) goes as it is."""
+    found = list(held)
+    members = found + list(
+        OutboundMessage.objects.filter(
+            status=MessageStatus.COMBINED, combined_into__in=[row.pk for row in found]
+        ).select_related("operator", "lease", "template")
+    )
+    sends: list[list[OutboundMessage]] = []
+    suppressed: list[tuple[OutboundMessage, str]] = []
+    by_lease: dict[uuid.UUID, list[OutboundMessage]] = {}
+    for row in members:
+        if _groups(row) and row.lease_id is not None:
+            by_lease.setdefault(row.lease_id, []).append(row)
+        else:
+            sends.append([row])
+
+    def rank(row: OutboundMessage) -> tuple[int, datetime, uuid.UUID]:
+        return (COMBINED_RULES.index(row.rule), row.queued_at, row.pk)
+
+    for rows in by_lease.values():
+        by_charge: dict[tuple[object, ...], list[OutboundMessage]] = {}
+        for row in rows:
+            reason = _suppress_reason(row) or _overtaken(row, today)
+            if reason:
+                suppressed.append((row, reason))
+            else:
+                by_charge.setdefault(_charge_key(row), []).append(row)
+        still: list[OutboundMessage] = []
+        for same in by_charge.values():
+            same.sort(key=rank)
+            still.append(same[0])
+            suppressed.extend((row, SUPERSEDED) for row in same[1:])
+        if still:
+            sends.append(sorted(still, key=rank))
+    return Release(len(found), sends, suppressed)
+
+
+def _apply_release(release: Release, actor: User, today: date) -> None:
+    """Write ``release``: each send's first message queued with its job at once (its body
+    listing every charge of the send when there is more than one, as :func:`combine`), the
+    others combined into it, the suppressed rows suppressed; audited."""
+    for group in release.sends:
+        primary, rest = group[0], group[1:]
+        before = {"status": primary.status, "held_reason": primary.held_reason}
+        primary.status = MessageStatus.QUEUED
+        primary.held_reason = ""
+        primary.combined_into = None
+        if _groups(primary):
+            body = primary.rendered_body
+            if _list_start(body) >= 0:
+                body = body[: _list_start(body)]
+            if rest:
+                charges = charges_of(row for row in group if row.period_month is None)
+                lines = [
+                    _month_line(row, today)
+                    if row.period_month is not None
+                    else line_for(charges[row.pk], balance_of(charges[row.pk]), today)
+                    for row in group
+                ]
+                body = f"{body}\n\n{charges_text(lines)}"
+            primary.rendered_body = body
+            primary.body_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
+            _refuse_payment_data(primary)
+        primary.save()
+        if primary.status == MessageStatus.QUEUED:
+            jobs.enqueue(JobKind.MESSAGE_SEND, primary, None, actor)
+        AuditLog.objects.create(
+            actor=actor,
+            action="message.send_held_for_settings",
+            entity_type=ENTITY,
+            entity_id=str(primary.pk),
+            before=before,
+            after={"status": primary.status, "combined": len(rest)},
+        )
+        for row in rest:
+            row.status = MessageStatus.COMBINED
+            row.held_reason = ""
+            row.combined_into = primary
+            row.save(update_fields=["status", "held_reason", "combined_into"])
+            _audit("message.combined", row, actor, {"status": row.status, "into": str(primary.pk)})
+    for row, reason in release.suppressed:
+        row.combined_into = None
+        _finish(row, Disposition(MessageStatus.SUPPRESSED, error=reason))
+
+
+def _send_now_for_settings(message: OutboundMessage, actor: User) -> Outcome:
+    """*Send now* on a message held ``settings_incomplete``: released with every such hold of
+    its lease (the caller holds the row lock and checked the settings and the address)."""
+    held = [message]
+    if _groups(message) and message.lease_id is not None:
+        held += list(
+            held_for_settings()
+            .filter(lease_id=message.lease_id)
+            .exclude(pk=message.pk)
+            .select_for_update(of=("self",))
+            .select_related("operator", "lease", "template")
+        )
+    message = (
+        OutboundMessage.objects.select_related("operator", "lease", "template")
+        .filter(pk=message.pk)
+        .get()
+    )
+    held[0] = message
+    today = timezone.localdate()
+    release = plan_release(held, today)
+    _apply_release(release, actor, today)
+    reason = next((why for row, why in release.suppressed if row.pk == message.pk), "")
+    if reason:
+        return Outcome(True, SEND_NOW_SUPPRESSED.format(cause=reason))
+    return Outcome(True, SEND_NOW_QUEUED)
+
+
+def release_preview(today: date | None = None) -> Release:
+    """What "Send all held for settings" would do now (the page's confirmation)."""
+    return plan_release(
+        list(held_for_settings().select_related("operator", "lease", "template")),
+        today or timezone.localdate(),
+    )
+
+
+def send_held_for_settings(actor: User, count: int) -> Outcome:
+    """The Outbox's "Send all held for settings" (admin; owner, 2026-11-02): release every
+    message held ``settings_incomplete`` as :func:`plan_release` groups them (one e-mail per
+    lease under the most urgent rule, what the day has overtaken suppressed), each send's job
+    at once, audited ``message.send_held_for_settings``. Refused, and nothing written, while a
+    required setting is blank or mail is not set up, when none is held so, or when ``count``
+    (the holds the page showed and the admin confirmed) is no longer their number. The send
+    checks each again."""
+    with transaction.atomic():
+        if settings_incomplete(CompanySettings.read()):
+            return Outcome(False, RELEASE_STILL_INCOMPLETE)
+        if not mail.is_set_up():
+            return Outcome(False, SEND_NOW_NOT_SET_UP)
+        found = list(
+            held_for_settings()
+            .select_for_update(of=("self",))
+            .select_related("operator", "lease", "template")
+        )
+        if not found:
+            return Outcome(False, RELEASE_NONE)
+        if len(found) != count:
+            return Outcome(False, RELEASE_COUNT_CHANGED)
+        today = timezone.localdate()
+        release = plan_release(found, today)
+        _apply_release(release, actor, today)
+    return Outcome(True, RELEASE_QUEUED.format(text=release.text))
 
 
 # --- Pages ----------------------------------------------------------------------------------
@@ -1309,6 +1716,27 @@ class LogRow:
     charge_name: str = ""
 
 
+def held_text(message: OutboundMessage) -> str:
+    """Why a held message waits, as the Outbox says it: the held reason's label; for the two
+    holds of an empty placeholder, what to do or the placeholder ("Missing value:
+    {support_email}")."""
+    if message.held_reason == HeldReason.SETTINGS_INCOMPLETE:
+        return SETTINGS_INCOMPLETE_TEXT
+    if message.held_reason == HeldReason.MISSING_VALUE:
+        names = missing(message)
+        if names:
+            text = MISSING_VALUE_TEXT.format(name=gap(names[0]))
+            fix = MISSING_VALUE_FIX.get(names[0])
+            if fix is None:
+                return text
+            store = message.lease.store if message.lease is not None else None
+            return f"{text} — " + fix.format(
+                store=str(store.external_label) if store is not None else "of the lease",
+                operator=str(message.operator.display_name) or "of the message",
+            )
+    return str(HeldReason(message.held_reason).label)
+
+
 def status_text(message: OutboundMessage) -> str:
     """ "Held (held on sandbox)", "Failed (ConnectTimeout)", "Sent"…; a combined row carries
     the outcome of the message sent for it ("Combined into the D message: Sent"), a waiting
@@ -1320,7 +1748,7 @@ def status_text(message: OutboundMessage) -> str:
     if message.status == MessageStatus.WAITING and message.scheduled_for is not None:
         return WAITING_TEXT.format(label=label, day=day_text(message.scheduled_for))
     if message.status == MessageStatus.HELD and message.held_reason:
-        return f"{label} ({HeldReason(message.held_reason).label})"
+        return f"{label} ({held_text(message)})"
     if message.error:
         return f"{label} ({message.error})"
     return str(label)
@@ -1407,15 +1835,22 @@ def for_store(store_id: uuid.UUID) -> QuerySet[OutboundMessage]:
 
 
 def outbox(
-    *, status: str = "", since: date | None = None, until: date | None = None
+    *,
+    status: str = "",
+    since: date | None = None,
+    until: date | None = None,
+    held_reason: str = "",
 ) -> QuerySet[OutboundMessage]:
-    """Every message, newest first, for the Outbox (D5): of ``status`` when given, queued
-    from ``since`` to ``until`` (New York days, both included) when given."""
+    """Every message, newest first, for the Outbox (D5): of ``status`` when given, held for
+    ``held_reason`` when given, queued from ``since`` to ``until`` (New York days, both
+    included) when given."""
     found = OutboundMessage.objects.select_related(
         "template", "operator", "lease__store", "sent_by", "combined_into"
     ).order_by("-queued_at", "-id")
     if status:
         found = found.filter(status=status)
+    if held_reason:
+        found = found.filter(held_reason=held_reason)
     if since is not None:
         found = found.filter(queued_at__gte=datetime.combine(since, time(0), tzinfo=NEW_YORK))
     if until is not None:

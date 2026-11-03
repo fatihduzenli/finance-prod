@@ -481,6 +481,8 @@ for _name in (
     "ledger:settings:mail_save",
     "ledger:settings:template_preview",
     "ledger:outbox:send_now",
+    # Owner, 2026-11-02: the Outbox's "Send all held for settings".
+    "ledger:outbox:send_held_for_settings",
     # PLAN-014 I2: the Bank deposits card's switches.
     "ledger:settings:bank_save",
     # PLAN-014 I4: the billing details dialog's sender names (add, remove).

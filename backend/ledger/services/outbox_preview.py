@@ -293,7 +293,9 @@ class _Grouper:
             self._add(rows, WOULD_SEND_AFTER_FOLD if released else going[0].outcome_text)
             return
         text = WOULD_SEND_COMBINED
-        if going[0].no_email:
+        if going[0].settings_held:
+            text = f"{text} ({reminders.HELD_SETTINGS})"
+        elif going[0].no_email:
             text = f"{text} ({reminders.HELD_NO_EMAIL})"
         self._add(rows, text)
 

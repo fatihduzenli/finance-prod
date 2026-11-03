@@ -155,8 +155,10 @@ def test_another_operators_store_or_a_bad_value_falls_back_to_all_stores(raw: st
     assert '<option value="" selected>All stores (2)</option>' in html
     assert f'value="{first.store_id}" selected' not in html
     assert 'id="choose-store"' in section(html, "tab-history")
-    # The other store's number must not appear as a number (a hex id may hold "9009").
-    assert not has_token(html, "9009")
+    # The other store's number must not appear as a number: a hex id may hold "9009", and a
+    # UUID's hyphens make its "…-9009-…" segment look like a whole token to has_token (one
+    # PostgreSQL gate run in a thousand), so hyphen neighbours are excluded here.
+    assert re.search(r"(?<![\w,.-])9009(?![\w,.-])", html) is None
     assert "4,321.00" not in html and str(theirs.pk) not in html
 
 
@@ -201,8 +203,10 @@ def test_the_charges_tab_lists_every_store_of_the_operator_with_a_store_column()
     html = section(page(client_for(Role.BILLING)[0], operator_page(operator)), "tab-charges")
     assert "<th>Store</th>" in html
     assert has_token(html, "1001") and has_token(html, "1002") and "Broken shelf" in html
-    # The other store's number must not appear as a number (a hex id may hold "9009").
-    assert not has_token(html, "9009")
+    # The other store's number must not appear as a number: a hex id may hold "9009", and a
+    # UUID's hyphens make its "…-9009-…" segment look like a whole token to has_token (one
+    # PostgreSQL gate run in a thousand), so hyphen neighbours are excluded here.
+    assert re.search(r"(?<![\w,.-])9009(?![\w,.-])", html) is None
     assert "4,321.00" not in html
     assert 'id="charges-balance">$1,325.00<' in html
     assert f"?operator={operator.pk}" in html
