@@ -104,6 +104,12 @@ def month_long_text(value: date | datetime) -> str:
     return f"{_MONTHS_LONG[day.month - 1]} {day.year}"
 
 
+def month_name_text(value: date | datetime) -> str:
+    """``October``: the month named in full, the year dropped (the Reports index's sub-lines,
+    PLAN-014b item 2)."""
+    return _MONTHS_LONG[_day(value).month - 1]
+
+
 def month_short_text(value: date | datetime) -> str:
     """``Oct``: the year dropped, for text that names it already (a short chart's labels)."""
     return _MONTHS[_day(value).month - 1]
