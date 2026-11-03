@@ -146,6 +146,7 @@ SUPPORT_EMAIL_FILES = frozenset(
         "test_messaging_engine.py",
         "test_outbox_preview.py",
         "test_plan012e_adversarial.py",
+        "test_plan012e_d14_adversarial.py",  # the final statement of a transfer is mailed
         "test_plan014_d_messaging.py",
         "test_plan014_e4_rent_months.py",
         "test_plan014_e_reminders.py",
