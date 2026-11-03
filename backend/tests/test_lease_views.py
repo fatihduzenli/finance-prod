@@ -34,6 +34,7 @@ from ledger.models import (
     StoreStatus,
 )
 from ledger.services import leases as service
+from ledger.services.stores import crumb as store_crumb
 from payments.errors import ProviderRejected
 from payments.fake import FakeProvider
 from payments.models import ExternalRef
@@ -287,12 +288,14 @@ def test_admin_creates_a_lease_and_a_replay_saves_nothing(admin: Client) -> None
     [
         ({"operator": ""}, "operator", "An active lease needs an operator."),
         ({"debit_day": ""}, "debit_day", "An active lease needs a debit day."),
-        ({"payment_channel": "unknown"}, "payment_channel", "An active lease needs a known"),
+        # Re-pinned (Opus, PLAN-014b item 1): New lease offers the three cards only, and its
+        # Debit day is a select of the 1st to the 28th.
+        ({"payment_channel": "unknown"}, "payment_channel", "Choose Autopay (bank debit)"),
         ({"second_debit_day": "15"}, "second_debit_day", "must differ from the first"),
         ({"rent": "0"}, "rent", "greater than or equal to 0.01"),
         ({"rent": "-5"}, "rent", "greater than or equal to 0.01"),
         ({"rent": "10.001"}, "rent", "no more than 2 decimal places"),
-        ({"debit_day": "32"}, "debit_day", "less than or equal to 31"),
+        ({"debit_day": "32"}, "debit_day", "Choose one of the options."),
     ],
 )
 def test_an_invalid_lease_is_held_and_shown_once_after_a_redirect(
@@ -750,7 +753,8 @@ def test_new_lease_shows_empty_billing_details_and_the_copy_data_of_each_operato
     operator.phone, operator.city = "4155550132", "Austin"
     operator.save()
     page = admin.get(NEW).content.decode()
-    assert 'id="billing-card"' in page and "<h2>Billing details</h2>" in page
+    # Re-pinned (Opus, PLAN-014b item 1): the numbered card's title carries its id.
+    assert 'id="billing-card"' in page and '<h2 id="billing-title">Billing details</h2>' in page
     assert tag_with(page, 'id="copy-from-operator"', 'data-from="id_operator"')
     assert tag_with(page, f'value="{operator.pk}"', 'data-email="copy@example.com"')
     assert 'data-phone="4155550132"' in page and 'data-city="Austin"' in page
@@ -827,7 +831,8 @@ def test_new_lease_offers_and_saves_the_same_account_of_the_operators_lease(
         f'value="same:{holder.pk}"',
         f'data-shown-when="id_operator={holder.operator_id}"',
     )
-    assert f"Use the same account as #{holder.store.external_label} (····6789)" in page
+    # Re-pinned (Opus, PLAN-014b item 1, the owner's reference): "Use #1991's account".
+    assert f"Use {store_crumb(holder.store)}&#x27;s account" in page
     data = form_data(operator=str(holder.operator_id), account=f"same:{holder.pk}")
     assert admin.post(NEW, data).status_code == 302
     lease = Lease.objects.exclude(pk=holder.pk).get()

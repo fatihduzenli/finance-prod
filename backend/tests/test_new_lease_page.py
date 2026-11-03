@@ -354,7 +354,7 @@ def test_add_item_rows_are_listed_hidden_and_charge_only_with_a_price(
     assert not OneOffCharge.objects.filter(fee_type=extra).exists()
     other = vacant_store(439, "Priced Extra")
     post_create(admin, other, create_data(other, operator, setup_window_film_price="80.00"))
-    assert OneOffCharge.objects.get(fee_type=extra).lease.store == other
+    assert OneOffCharge.objects.get(fee_type=extra, lease__store=other)
 
 
 def test_operator_query_preselects_an_active_operator_only(admin: Client, today: date) -> None:
@@ -624,7 +624,7 @@ def test_the_dialog_names_the_operator_and_send_e_mails_the_draft(
     send = f"/invoices/drafts/{draft.pk}/send/?{urlencode({'store': str(store.pk)})}"
     assert tag_with(html_text, 'id="lease-created-form"', f'action="{html.escape(send)}"')
     assert tag_with(html_text, 'id="lease-created-later"', "tab=invoices")
-    connect(draft.lease)
+    connect(Lease.objects.get(store=store))
     assert admin.post(send).status_code == 302
     draft.refresh_from_db()
     assert draft.status != InvoiceDraftStatus.DRAFT

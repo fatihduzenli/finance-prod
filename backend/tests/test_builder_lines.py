@@ -10,6 +10,7 @@ reaches a network.
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -551,7 +552,10 @@ def test_an_item_saved_from_the_builder_is_hidden_from_the_setup_checklist(
     audit = AuditLog.objects.get(action=invoice_builder.FEE_TYPE_CREATED_ACTION)
     assert audit.after["show_in_setup"] is False
     admin, _ = client_for(Role.ADMIN)
-    assert 'id="setup-window-film"' not in html(admin, "/leases/new/")
+    # Re-pinned (Opus, PLAN-014b item 1, decision 2): not a checklist row; New lease lists it
+    # only as a row "+ Add item" reveals (data-extra).
+    page = html(admin, "/leases/new/")
+    assert re.search(r'id="setup-window-film" data-extra>', page)
 
 
 def test_the_flag_is_listed_and_edited_in_the_admin_and_audited() -> None:
