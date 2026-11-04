@@ -86,6 +86,15 @@ Read the actual diff. Evaluate against:
 - **Resources** — unclosed handles, unbounded memory growth, missing timeouts, missing retry limits
 - **Dependencies** — any new dependency is justified, pinned, licensed compatibly, and flagged for review
 
+**Gate classes (owner, 2026-11-04).** Every QA entry names the class it used.
+
+- **Small change** — UI and copy fixes, single-page features, test-only fixes. Locally, in the
+  branch's worktree: lint, types, the secret scan, the targeted tests of the touched apps, e2e once
+  on PostgreSQL, and the visual comparison for the pages touched. The full sqlite suite, the full
+  PostgreSQL unit selection and e2e ×4 run on the PR's CI and must be green before the merge.
+- **Full gate** — migrations, money paths, auth/security, data migration (Step 13b), and anything
+  Fable flags: everything above in full, locally (Gate 1 to Gate 4 as written), then the PR's CI.
+
 ### 1.4 Findings and Rework
 
 Fable returns findings to Opus as a structured list. Each finding contains:
