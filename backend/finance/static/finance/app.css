@@ -1978,7 +1978,10 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
 .lease-summary-money { margin: var(--space-3) 0 0; padding: var(--space-3) 0 0; border-top: 1px solid var(--border-soft); }
 .lease-summary-total { margin: var(--space-2) 0 0; font-size: var(--fs-lg); font-weight: 700; }
 .lease-summary-total dt, .lease-summary-total dd { color: var(--text); font-weight: 700; }
-.lease-summary-card .form-actions .btn-quiet { border-color: transparent; background: none; color: var(--text-2); font-weight: 500; }
+.lease-summary-card .summary-cancel { display: flex; justify-content: center; margin: var(--space-2) 0 0; }
+.lease-summary-card .summary-cancel .btn-quiet { width: 100%; border-color: transparent; background: none; color: var(--text-2); font-weight: 500; }
+.account-detail { flex-basis: 100%; margin: 0; }
+.account-detail[hidden] { display: none; }
 .summary-after { margin: var(--space-3) 0 0; font-size: var(--fs-sm); text-align: center; }
 @media (max-width: 768px) {
   .terms-row, .billing-grid, .channel-tiles, .movein-more-fields { grid-template-columns: minmax(0, 1fr); }
@@ -1987,9 +1990,6 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
   .movein-usual { grid-column: 2; }
   .movein-more { grid-column: 1; grid-row: auto; justify-self: start; }
   .debit-row > .field { flex: 1 1 100%; }
-  /* The Summary above the button: the card's actions stay in it, not fixed to the bottom. */
-  .new-lease-form .form-layout { padding-bottom: 0; }
-  .new-lease-form .form-summary .form-actions { position: static; padding: 0; background: none; border: 0; }
 }
 
 /* --- Print ---------------------------------------------------------------------------------- */

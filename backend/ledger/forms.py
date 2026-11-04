@@ -482,6 +482,15 @@ class BillingStepMixin(_BillingStepBase):
                     ),
                     # PLAN-014b item 1 (decision 4): the lease's operator, on every same: radio.
                     "operator": str(found.lease.operator_id),
+                    # The New lease page's line under the short segment: which account it is.
+                    "detail": (
+                        ACCOUNT_SAME_LABEL.format(
+                            store=found.lease.store.external_label,
+                            last4=f" (····{found.last4})" if found.last4 else "",
+                        )
+                        if self.short_same_label
+                        else ""
+                    ),
                 }
             )
         for index, option in enumerate(options):
@@ -490,6 +499,7 @@ class BillingStepMixin(_BillingStepBase):
             option.setdefault("reason", "")
             option.setdefault("shown_when", "")
             option.setdefault("operator", "")
+            option.setdefault("detail", "")
         return options
 
 

@@ -10,7 +10,7 @@
     <div role="radiogroup" aria-labelledby="account-label" id="id_account" class="radio-segmented account-segments">
       {% for option in form.account_options %}<div class="field account-option" id="account-option-{{ forloop.counter0 }}"><label for="{{ option.id }}"><input type="radio" name="account" value="{{ option.value }}" id="{{ option.id }}"{% if option.checked %} checked{% endif %}{% if option.reason %} disabled aria-describedby="{{ option.id }}-reason"{% endif %}{% if option.shown_when %} data-shown-when="{{ option.shown_when }}"{% endif %}{% if option.operator %} data-operator="{{ option.operator }}"{% endif %}> {{ option.label }}</label></div>{% endfor %}
     </div>
-    {% for option in form.account_options %}{% if option.reason %}<p class="help muted account-reason" id="{{ option.id }}-reason">{{ option.reason }}</p>{% endif %}{% endfor %}
+    {% for option in form.account_options %}{% if option.reason %}<p class="help muted account-reason" id="{{ option.id }}-reason">{{ option.reason }}</p>{% endif %}{% if option.detail %}<p class="field help muted account-detail" id="{{ option.id }}-detail"{% if option.shown_when %} data-shown-when="{{ option.shown_when }}"{% endif %}>{{ option.detail }}</p>{% endif %}{% endfor %}
     {{ form.account.errors }}
   </div>
 </section>

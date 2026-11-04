@@ -1,10 +1,12 @@
 // The New lease page (docs/qa/PLAN-014b item 1, Fable's decisions 3 to 5), in the browser only;
 // the server checks every rule and nothing is sent from here.
 // - Operator: #operator-search filters the options of the operator select #id_operator (an
-//   option's text holds the search's words); the select shows as a list while searching and
-//   gives way to the chosen operator's #operator-card (initials, name, then "phone · e-mail ·
-//   <n> other stores: #…" or "No other store", from the option's data-* attributes). The
-//   Billing details card (#billing-card) shows once an operator is chosen.
+//   option's text holds the search's words); the select opens as a list while searching, stays
+//   in the page as one line once chosen, and the chosen operator fills #operator-card
+//   (initials, name, then "phone · e-mail · <n> other stores: #…" or "No other store", from
+//   the option's data-* attributes), on the
+//   select's change (whatever chose it) and on load (?operator=). The Billing details' fields
+//   follow the select through ledger/shown_when.js.
 // - Terms: #prorate-line reads "Nov 15–30: 16 of 30 days = $1,066.67" from the start date and
 //   the rent: the days from the start through the month's last day over the days in the month,
 //   times the rent, rounded half up to the cent (ledger/services/proration.py, in whole cents);
@@ -59,7 +61,6 @@
   var searchField = byId("operator-search-field");
   var listField = byId("operator-list-field");
   var card = byId("operator-card");
-  var billing = byId("billing-card");
   function chosenOption() {
     if (!select || select.selectedIndex < 0) { return null; }
     var option = select.options[select.selectedIndex];
@@ -67,7 +68,6 @@
   }
   function fillCard() {
     var option = chosenOption();
-    if (billing) { billing.hidden = !option; }
     if (!card) { return; }
     card.hidden = !option;
     if (!option) { return; }
@@ -80,9 +80,14 @@
     setText("operator-card-name", option.textContent.trim());
     setText("operator-card-line", parts.join(" · "));
   }
+  // The select stays in the page (a keyboard or any other path chooses through it): it opens as
+  // a list while searching and closes to one line once an operator is chosen.
   function showList(shown) {
     if (!listField || !search) { return; }
-    listField.hidden = !shown;
+    if (!shown) {
+      select.size = 0;
+      Array.prototype.forEach.call(select.options, function (option) { option.hidden = false; });
+    }
   }
   function filterOptions() {
     var words = search.value.trim().toLowerCase().split(/\s+/).filter(function (word) { return word; });

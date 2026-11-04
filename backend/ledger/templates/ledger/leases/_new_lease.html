@@ -85,7 +85,8 @@
         <div><dt>Move-in charges</dt><dd id="setup-total">{{ summary.move_in }}</dd></div>
         <div class="lease-summary-total"><dt>First invoice</dt><dd id="summary-total">{{ summary.total }}</dd></div>
       </dl>
-      <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-lease">Create lease</button><a class="btn btn-quiet" id="cancel-lease" href="{{ cancel_url }}">Cancel</a></div>
+      <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-lease">Create lease</button></div>
+      <p class="summary-cancel"><a class="btn btn-quiet" id="cancel-lease" href="{{ cancel_url }}">Cancel</a></p>
       <p class="muted summary-after" id="summary-after">After saving you can send the move-in invoice by e-mail.</p>
     </section>
     {% endwith %}
