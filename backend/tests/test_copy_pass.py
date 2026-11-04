@@ -409,8 +409,9 @@ PAIRS: list[tuple[str, str, str]] = [
     # PLAN-014 G3: "Unpaid by age" became "Aging".
     ("reports/aging.html", "A/R aging", "<h1>Aging</h1>"),
     ("reports/aging.html", "Unpaid by age", "<h1>Aging</h1>"),
-    ("reports/index.html", "A/R aging", 'id="report-aging">Aging</a>'),
-    ("reports/index.html", "Unpaid by age", 'id="report-aging">Aging</a>'),
+    # PLAN-014b item 2: the index's Aging card holds its title as a heading.
+    ("reports/index.html", "A/R aging", '<h3 class="report-title">Aging</h3>'),
+    ("reports/index.html", "Unpaid by age", '<h3 class="report-title">Aging</h3>'),
     ("reports/deposits.html", "Deposits versus transactions", "Bank account check"),
     ("reports/index.html", "Deposits versus transactions", "Bank account check"),
     ("reconciliation/page.html", "<h1>Reconciliation</h1>", "<h1>Nightly check</h1>"),

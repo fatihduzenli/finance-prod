@@ -1,16 +1,63 @@
 {% extends "finance/base.html" %}
+{% load money icons dates %}
+{% comment %}The Reports index (docs/qa/PLAN-014b item 2; docs/design/reports-dark-laptop.png): ledger.views.reports.report_index. Three groups of cards; each card is one link: the icon and the title on one row, the one-line description, then the live figure of ledger.services.report_index with its sub-line at the left and "Open ›" at the right of the same row. The Customer statement card holds the operator search under its link (a form never sits inside a link; it submits on Enter). Without figures (the statement timeout cancelled them) the cards show without them and the page says so.{% endcomment %}
 {% block title %}Reports{% endblock %}
-{% block header %}<div class="page-header"><h1>Reports</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Reports</h1><span class="page-date" id="reports-lede">Every report downloads as a spreadsheet.</span></div></div>{% endblock %}
 {% block content %}
-  <p class="muted">Every report reads stored exact amounts in US dollars and downloads as a spreadsheet with the rows it shows.</p>
-  <section class="card" id="reports-card">
-  <ul id="reports">
-    <li><a href="{% url 'ledger:reports:aging' %}" id="report-aging">Aging</a>: open balances by store and days past due, as of today. Without a filter, its total is the dashboard's Unpaid balances figure.</li>
-    <li><a href="{% url 'ledger:reports:revenue' %}" id="report-revenue">Revenue by month</a>: billed and collected, rent, insurance and other fees; collected by settled month.</li>
-    <li><a href="{% url 'ledger:reports:payments_by_method' %}" id="report-payments-by-method">Payments by method</a>: settled payments per month by ACH, Zelle, wire, check and other.</li>
-    <li><a href="{% url 'ledger:reports:deposits' %}" id="report-deposits">Bank account check</a>: bank deposits against settled ACH payments, with unmatched items.</li>
-    <li><a href="{% url 'ledger:reports:pnl' %}" id="report-pnl">Profit and loss</a>: by store, operator or month, with store costs and margins.</li>
-    <li>Customer statement: open an operator from the <a href="{% url 'ledger:operators:list' %}" id="report-statement">operator list</a> and choose <em>Statement</em>.</li>
-  </ul>
+  {% if too_slow %}<p class="warning" id="reports-too-slow" role="status">{{ too_slow }}</p>{% endif %}
+  <section class="report-group" id="reports-collections" aria-labelledby="reports-collections-title">
+    <h2 id="reports-collections-title">Collections</h2>
+    <div class="report-cards">
+      <a class="report-card" id="report-aging" href="{% url 'ledger:reports:aging' %}">
+        <span class="report-head"><span class="report-icon">{% icon "alert" %}</span><h3 class="report-title">Aging</h3></span>
+        <span class="report-desc">Open balances by store and days past due, as of today.</span>
+        <span class="report-foot"><span class="report-numbers">{% if live %}<span class="report-value{% if live.aging_total > 0 %} tone-unpaid{% endif %}">{{ live.aging_total|money }}</span><span class="report-sub">unpaid · {{ live.aging_stores }} store{{ live.aging_stores|pluralize }}</span>{% endif %}</span><span class="report-open">Open ›</span></span>
+      </a>
+      <a class="report-card" id="report-payments-by-method" href="{% url 'ledger:reports:payments_by_method' %}">
+        <span class="report-head"><span class="report-icon">{% icon "banknote" %}</span><h3 class="report-title">Payments by method</h3></span>
+        <span class="report-desc">Settled payments per month: ACH, Zelle, wire, check.</span>
+        <span class="report-foot"><span class="report-numbers">{% if live %}<span class="report-value">{{ live.collected_month|money }}</span><span class="report-sub">collected in {{ live.month_name }}</span>{% endif %}</span><span class="report-open">Open ›</span></span>
+      </a>
+      <a class="report-card" id="report-deposits" href="{% url 'ledger:reports:deposits' %}">
+        <span class="report-head"><span class="report-icon">{% icon "check" %}</span><h3 class="report-title">Bank account check</h3></span>
+        <span class="report-desc">Bank deposits matched against settled payments.</span>
+        <span class="report-foot"><span class="report-numbers">{% if live %}<span class="report-value{% if live.unmatched %} tone-pending{% endif %}">{{ live.unmatched }} unmatched</span><span class="report-sub">{% if live.unmatched_since %}since {{ live.unmatched_since|day_short }}{% else %}nothing to review{% endif %}</span>{% endif %}</span><span class="report-open">Open ›</span></span>
+      </a>
+    </div>
+  </section>
+  <section class="report-group" id="reports-finance" aria-labelledby="reports-finance-title">
+    <h2 id="reports-finance-title">Finance</h2>
+    <div class="report-cards">
+      <a class="report-card" id="report-revenue" href="{% url 'ledger:reports:revenue' %}">
+        <span class="report-head"><span class="report-icon">{% icon "reports" %}</span><h3 class="report-title">Revenue by month</h3></span>
+        <span class="report-desc">Billed and collected: rent, insurance and other fees.</span>
+        <span class="report-foot"><span class="report-numbers">{% if live %}<span class="report-value">{{ live.billed_month|money }}</span><span class="report-sub">billed in {{ live.month_name }}</span>{% endif %}</span><span class="report-open">Open ›</span></span>
+      </a>
+      <a class="report-card" id="report-pnl" href="{% url 'ledger:reports:pnl' %}">
+        <span class="report-head"><span class="report-icon">{% icon "circle-half" %}</span><h3 class="report-title">Profit and loss</h3></span>
+        <span class="report-desc">By store, operator or month, with costs and margins.</span>
+        <span class="report-foot"><span class="report-numbers">{% if live %}{% if live.margin_month is None %}<span class="report-value">—</span><span class="report-sub">margin unknown: {{ live.margin_missing }}</span>{% else %}<span class="report-value{% if live.margin_month > 0 %} tone-paid{% elif live.margin_month < 0 %} tone-unpaid{% endif %}">{{ live.margin_month|money }}</span><span class="report-sub">{{ live.month_name }} margin</span>{% endif %}{% endif %}</span><span class="report-open">Open ›</span></span>
+      </a>
+    </div>
+  </section>
+  <section class="report-group" id="reports-operators" aria-labelledby="reports-operators-title">
+    <h2 id="reports-operators-title">Operators &amp; schedule</h2>
+    <div class="report-cards">
+      <article class="report-card report-card-form" aria-labelledby="report-statement-title">
+        <a class="report-card-link" id="report-statement" href="{% url 'ledger:operators:list' %}">
+          <span class="report-head"><span class="report-icon">{% icon "user" %}</span><h3 class="report-title" id="report-statement-title">Customer statement</h3></span>
+          <span class="report-desc">Every charge and payment for one operator.</span>
+        </a>
+        <form class="report-statement-form" id="report-statement-form" method="get" action="{% url 'ledger:operators:list' %}" role="search">
+          <label class="visually-hidden" for="report-statement-q">Operator</label>
+          <input type="search" name="q" id="report-statement-q" maxlength="200" autocomplete="off" placeholder="Find an operator…">
+        </form>
+      </article>
+      <a class="report-card" id="report-calendar" href="{% url 'ledger:calendar:page' %}">
+        <span class="report-head"><span class="report-icon">{% icon "calendar" %}</span><h3 class="report-title">Calendar</h3></span>
+        <span class="report-desc">Debit days, due dates, promises and lease ends.</span>
+        <span class="report-foot"><span class="report-numbers">{% if live %}<span class="report-value">{{ live.calendar_week }} this week</span><span class="report-sub">{% if live.calendar_week %}next: {% endif %}{{ live.calendar_next }}</span>{% endif %}</span><span class="report-open">Open ›</span></span>
+      </a>
+    </div>
   </section>
 {% endblock %}

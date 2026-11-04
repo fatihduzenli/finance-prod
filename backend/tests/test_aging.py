@@ -446,7 +446,8 @@ def test_the_page_is_titled_aging_and_the_header_has_no_money_filter_bug() -> No
     ]
     assert f'id="aging-as-of">As of {TODAY:%b} {TODAY.day}, {TODAY.year}</span>' in html
     menu = page("/reports/")
-    assert 'id="report-aging">Aging</a>' in menu
+    # PLAN-014b item 2: the index's Aging card (one link holding the title).
+    assert re.search(r'id="report-aging"[^>]*>.*?<h3 class="report-title">Aging</h3>', menu, re.S)
 
 
 @pytest.mark.parametrize(
