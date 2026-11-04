@@ -72,7 +72,7 @@ from ledger.services import workspace_cards as operator_cards
 from ledger.services.csv_export import CsvWriter
 from ledger.services.operators import OperatorArchived
 from ledger.validators import validate_no_payment_data
-from ledger.views import contact_log, workspace_cards
+from ledger.views import contact_log, store_context, workspace_cards
 from portal import invitations
 
 PAGE_SIZE = 25
@@ -429,26 +429,63 @@ WIDE_FIELDS: tuple[str, ...] = ("display_name", "address_line1", "address_line2"
 
 
 def _form_dialog(
-    form: OperatorForm, title: str, return_url: str, *, operator: Operator | None = None
+    form: OperatorForm,
+    title: str,
+    return_url: str,
+    *,
+    operator: Operator | None = None,
+    next_url: str = "",
 ) -> dict[str, Any]:
     """The New / Edit operator dialog (PLAN-012f-b Batch B; ledger/operators/_form_dialog.html),
-    open over the page behind it; closing it goes to ``return_url``."""
+    open over the page behind it; closing it goes to ``return_url``. ``next_url`` (New
+    operator from the New lease page, PLAN-014b item 1) is posted as ``next``."""
     return {
         "form": form,
         "title": title,
         "return_url": return_url,
         "operator": operator,
         "wide": WIDE_FIELDS,
+        "next": next_url,
     }
+
+
+#: Where a ``next`` may not lead: the operator portal's own pages (another principal).
+PORTAL_PREFIX = "/portal"
+
+
+def _safe_next(raw: object) -> str:
+    """``next`` of New operator (PLAN-014b item 1, decision 3) when it is a path of this app:
+    a path on this site (:func:`ledger.views.store_context.local_next`: starts with ``/``, no
+    scheme, no host, no ``//``), without a backslash anywhere, not under ``/portal/``; else
+    ``""`` (the operator page, as before)."""
+    text = str(raw or "")
+    if "\\" in text:
+        return ""
+    target = store_context.local_next(text)
+    path = target.split("?", 1)[0]
+    if not target or path == PORTAL_PREFIX or path.startswith(PORTAL_PREFIX + "/"):
+        return ""
+    return target
+
+
+def _with_operator(target: str, operator: Operator) -> str:
+    """``target`` with ``operator=<id>`` added to its query (the New lease page preselects it)."""
+    return f"{target}{'&' if '?' in target else '?'}{urlencode({'operator': str(operator.pk)})}"
 
 
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def operator_create(request: HttpRequest) -> HttpResponse:
+    """New operator. With a ``next`` of this app (:func:`_safe_next`; the New lease page's
+    "+ New operator", PLAN-014b item 1) the saved operator goes back there with
+    ``operator=<id>``, and a refused form comes back to this page keeping ``next``."""
     if request.method == "POST":
+        next_url = _safe_next(request.POST.get("next"))
         existing = _by_creation_key(request.POST.get("creation_key"))
         if existing is not None:
             messages.info(request, ALREADY_SAVED)
+            if next_url:
+                return redirect(_with_operator(next_url, existing))
             return redirect("ledger:operators:detail", pk=existing.pk)
         form = OperatorCreateForm(request.POST)
         if form.is_valid():
@@ -461,18 +498,27 @@ def operator_create(request: HttpRequest) -> HttpResponse:
             except IntegrityError:
                 form.add_error("email", EMAIL_TAKEN)
             else:
-                if not created:
+                if created:
+                    messages.success(request, f"Operator {operator.display_name} added.")
+                else:
                     messages.info(request, ALREADY_SAVED)
-                    return redirect("ledger:operators:detail", pk=operator.pk)
-                messages.success(request, f"Operator {operator.display_name} added.")
+                if next_url:
+                    return redirect(_with_operator(next_url, operator))
                 return redirect("ledger:operators:detail", pk=operator.pk)
         _hold(request, "create", form)
+        if next_url:
+            return redirect(
+                reverse("ledger:operators:create") + "?" + urlencode({"next": next_url})
+            )
         return redirect("ledger:operators:create")
+    next_url = _safe_next(request.GET.get("next"))
     form = _held(request, "create", OperatorCreateForm) or OperatorCreateForm(
         initial={"creation_key": uuid.uuid4()}
     )
     context = _list_context(request)
-    context["form_dialog"] = _form_dialog(form, "New operator", reverse("ledger:operators:list"))
+    context["form_dialog"] = _form_dialog(
+        form, "New operator", next_url or reverse("ledger:operators:list"), next_url=next_url
+    )
     return render(request, "ledger/operators/list.html", context)
 
 

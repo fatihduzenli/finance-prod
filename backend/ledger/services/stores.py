@@ -497,7 +497,7 @@ def _store_balances(today: date) -> dict[uuid.UUID, tuple[Decimal, bool, bool]]:
     return found
 
 
-def _vacant_label(last_ended: date | None, today: date) -> str:
+def vacant_label(last_ended: date | None, today: date) -> str:
     """The Status of a store without a lease (PLAN-014 A4): "Vacant · 23 days" since its last
     lease ended, or "Vacant · never leased" when it never had one (a lease not ended before
     today is the store's current lease, so a vacant store's leases all ended)."""
@@ -534,7 +534,7 @@ def _status(
     if store.status in CLOSED_STATUSES:
         return LIST_STATUS_CLOSED, store.get_status_display(), status_badge(store)
     if not has_lease:
-        return LIST_STATUS_VACANT, _vacant_label(last_ended, today), "neutral"
+        return LIST_STATUS_VACANT, vacant_label(last_ended, today), "neutral"
     if store.status == StoreStatus.ACTIVE:
         return LIST_STATUS_ACTIVE, "Active", status_badge(store)
     return store.status, store.get_status_display(), "neutral"

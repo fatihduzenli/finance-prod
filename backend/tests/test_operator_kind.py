@@ -37,7 +37,7 @@ from ledger.forms import (
     OperatorCreateForm,
     OperatorForm,
 )
-from ledger.models import Operator, OperatorKind, SyncStatus
+from ledger.models import Lease, Operator, OperatorKind, SyncStatus
 from ledger.services import operators, search
 from payments import lease_sync
 from payments.fake import FakeProvider
@@ -472,8 +472,18 @@ def test_the_operator_form_ignores_a_posted_type_and_never_repeats_it() -> None:
 
 @pytest.mark.parametrize("field", ["store", "operator", "payment_channel", "collection_status"])
 def test_the_lease_forms_never_repeat_a_refused_select(field: str) -> None:
+    from ledger.forms import CHANNEL_REFUSED
+
     admin, _ = client_for(Role.ADMIN)
-    _assert_not_echoed(admin, "/leases/new/", lease_data(**{field: CARD}))
+    # Re-pinned (Opus, PLAN-014b item 1, decisions 1 and 2): New lease has no Status (a posted
+    # one is ignored, the lease saved active) and words the channel cards' refusal itself.
+    if field == "collection_status":
+        response = admin.post("/leases/new/", lease_data(**{field: CARD}))
+        assert CARD not in response.content.decode()
+        assert Lease.objects.get().collection_status == "active"
+    else:
+        refusal = str(CHANNEL_REFUSED) if field == "payment_channel" else CHOICE_REFUSED
+        _assert_not_echoed(admin, "/leases/new/", lease_data(**{field: CARD}), refusal)
     lease = a_lease(a_store("Edited store"), an_operator("Edited Co"))
     _assert_not_echoed(admin, f"/leases/{lease.pk}/edit/", edit_data(lease, **{field: CARD}))
 

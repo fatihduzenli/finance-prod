@@ -12,8 +12,13 @@ from django.db import migrations, models
 import ledger.models
 
 #: The lease's payment channels, read from the model as ``0037`` reads them, so that the
-#: provider's stored value is written in one place (the provider isolation test).
-CHANNELS = list(ledger.models.PaymentChannel.choices)
+#: provider's stored value is written in one place (the provider isolation test), without
+#: the values later migrations added (``0070``'s ``invoice``).
+CHANNELS = [
+    choice
+    for choice in ledger.models.PaymentChannel.choices
+    if choice[0] not in ledger.models.LATER_CHANNELS
+]
 
 
 class Migration(migrations.Migration):

@@ -359,7 +359,10 @@ def headings(body: str) -> list[str]:
         text(found)
         for found in re.findall(
             r'<(?:section|fieldset)\b[^>]*class="card form-card[^"]*"[^>]*>'
-            r"\s*<(?:h2|legend)>(.*?)</",
+            # PLAN-014b item 1: a numbered card's head (its number, then its title).
+            r'\s*(?:<div class="step-head"><span class="step-number"[^>]*>\d</span>'
+            r'<div class="step-title">)?'
+            r'<(?:h2|legend)(?: id="[^"]*")?>(.*?)</',
             form,
             re.S,
         )
@@ -380,8 +383,9 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
         # dialog's foot (tests/test_form_modals.py).
         (
             reverse("ledger:leases:create"),
-            # PLAN-014 C4: the Billing details card after Debits.
-            ["Lease", "Debits", "Billing details", "Setup checklist", "Documents"],
+            # PLAN-014 C4: the Billing details card after Debits. Re-pinned (Opus, PLAN-014b
+            # item 1): the five numbered cards of the owner's reference, then Documents.
+            ["Operator", "Terms", "Collection", "Billing details", "Move-in charges", "Documents"],
             "save-lease",
         ),
         (reverse("ledger:leases:edit", kwargs={"pk": lease.pk}), ["Lease", "Debits"], "save-lease"),
@@ -416,20 +420,25 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
 
 
 def test_the_lease_form_keeps_its_fields_in_lease_and_debits() -> None:
+    # Re-pinned (Opus, PLAN-014b item 1): New lease's fields in its numbered cards (no Status);
+    # the Edit lease form keeps Lease and Debits.
     body = get(Role.ADMIN, reverse("ledger:leases:create"))
-    lease_card = element(body, '<section class="card form-card" id="lease-card">', "section")
-    debits = element(body, '<section class="card form-card" id="debits-card">', "section")
+    cards = {
+        name: element(
+            body, f'<section class="card form-card new-lease-step" id="{name}"', "section"
+        )
+        for name in ("operator-step", "terms-step", "collection-step", "setup-card")
+    }
     for name in ("debit_day", "second_debit_day", "payment_channel"):
-        assert f'name="{name}"' in debits and f'name="{name}"' not in lease_card, name
-    for name in ("store", "operator", "started_on", "collection_status", "rent"):
-        assert f'name="{name}"' in lease_card and f'name="{name}"' not in debits, name
-    assert 'id="twice-monthly-field"' in debits
-    # The setup checklist in the Lines style; its total in the summary card.
-    assert 'id="setup-checklist"' in element(
-        body, '<section class="card form-card lines-card" id="setup-card">', "section"
-    )
+        assert f'name="{name}"' in cards["collection-step"], name
+    for name in ("store", "started_on", "rent"):
+        assert f'name="{name}"' in cards["terms-step"], name
+    assert 'name="operator"' in cards["operator-step"]
+    assert 'name="collection_status"' not in body
+    assert 'id="twice-monthly-field"' in cards["collection-step"]
+    assert 'id="setup-checklist"' in cards["setup-card"]
     summary = summary_of(body)
-    assert 'id="setup-total"' in summary and 'data-total-for="setup-checklist"' in summary
+    assert 'id="setup-total"' in summary and 'id="summary-total"' in summary
 
 
 def test_the_payment_form_has_the_allocation_in_lines_style_and_the_unallocated_line_aside() -> (

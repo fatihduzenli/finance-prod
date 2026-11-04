@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from datetime import timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -44,10 +45,21 @@ from accounts.views import forbidden
 from banking import services as banking
 from banking.models import ALIAS_MAX_LENGTH
 from finance.dates import day_text
-from ledger.forms import EnrolForm, LeaseBillingForm, LeaseCreateForm, LeaseForm, LinkForm
+from ledger.forms import (
+    SHOWN_WHEN,
+    EnrolForm,
+    LeaseBillingForm,
+    LeaseCreateForm,
+    LeaseForm,
+    LinkForm,
+    OperatorCreateForm,
+)
 from ledger.models import (
     ChargeNote,
+    CollectionStatus,
     DocumentKind,
+    InvoiceDraft,
+    InvoiceDraftStatus,
     Lease,
     LeaseBilling,
     LeaseRentHistory,
@@ -68,7 +80,9 @@ from ledger.services import (
     search,
     workspace,
 )
+from ledger.services import lease_end as lease_end_service
 from ledger.services import leases as service
+from ledger.services import move_in as move_in_service
 from ledger.services import stores as store_service
 from ledger.services.csv_export import CsvWriter
 from ledger.services.leases import LeaseRefused
@@ -80,6 +94,7 @@ from ledger.views.operators import (
     HELD_FORM_KEY,
     PAGE_SIZE,
     _actor,
+    _form_dialog,
     _held,
     _hold,
     _role,
@@ -363,18 +378,93 @@ def enter_refusal() -> str:
     return "" if get_hosted_fields().available() else str(BANK_NOT_SET_UP)
 
 
-def _create_form(data: Any, context: store_context.StoreContext | None) -> LeaseCreateForm:
-    initial = {} if context is None else {"store": context.store.pk}
+def _other_stores(store: Store | None) -> dict[uuid.UUID, list[str]]:
+    """Per operator, "#no Name" of the stores of its current leases (not ended by today and
+    not ended in status) other than ``store``, by store number: one query for every
+    operator (PLAN-014b item 1, decision 3; the options' ``data-stores``)."""
+    today = timezone.localdate()
+    leases = (
+        Lease.objects.filter(operator__isnull=False)
+        .filter(Q(ended_on__isnull=True) | Q(ended_on__gte=today))
+        .exclude(collection_status=CollectionStatus.ENDED)
+        .order_by("store__store_number", "store__external_label", "id")
+        .values_list(
+            "operator_id", "store_id", "store__store_number", "store__external_label", "store__city"
+        )
+    )
+    found: dict[uuid.UUID, list[str]] = {}
+    for operator_id, store_id, number, label, city in leases:
+        if store is not None and store_id == store.pk:
+            continue
+        title = store_service.title_of(number, label, city)
+        named = found.setdefault(operator_id, [])
+        if title not in named:
+            named.append(title)
+    return found
+
+
+def _initial_operator(request: HttpRequest) -> uuid.UUID | None:
+    """``?operator=``: an operator not archived (after "+ New operator" saved one,
+    decision 3); an unknown, archived or malformed id is ignored."""
+    raw = (request.GET.get("operator") or "").strip()
+    try:
+        key = uuid.UUID(raw)
+    except ValueError:
+        return None
+    return key if Operator.objects.filter(pk=key, archived_at__isnull=True).exists() else None
+
+
+def _create_form(
+    data: Any,
+    context: store_context.StoreContext | None,
+    operator: uuid.UUID | None = None,
+) -> LeaseCreateForm:
+    initial: dict[str, Any] = {} if context is None else {"store": context.store.pk}
+    if operator is not None:
+        initial["operator"] = operator
     operators = Operator.objects.filter(archived_at__isnull=True).values_list("pk", flat=True)
     form = LeaseCreateForm(
         data,
         initial=initial,
         accounts=service.shareable_accounts(operators),
         enter_refusal=enter_refusal(),
+        stores=_other_stores(context.store if context is not None else None),
     )
     if context is not None:
         _lock_known(form, ("store",))
     return form
+
+
+def _header_badge(store: Store) -> tuple[str, str]:
+    """The New lease page's badge beside its title (decision 7, the owner's reference): a
+    store without a current lease reads as the Stores list's "Vacant · 23 days" (since its
+    last lease ended, ``lease_end.vacant_since``) or "Vacant · never leased"; any other the
+    store page's status badge."""
+    today = timezone.localdate()
+    current = store.leases.filter(Q(ended_on__isnull=True) | Q(ended_on__gte=today)).exclude(
+        collection_status=CollectionStatus.ENDED
+    )
+    if current.exists():
+        return str(store.get_status_display()), store_service.status_badge(store)
+    since = lease_end_service.vacant_since(store, today)
+    last_ended = since - timedelta(days=1) if since is not None else None
+    return store_service.vacant_label(last_ended, today), "neutral"
+
+
+def _operator_dialog(request: HttpRequest) -> dict[str, Any]:
+    """ "+ New operator" (decision 3): the operator dialog over this page, posting to
+    ``ledger:operators:create`` with ``next`` = this page, which it returns to with
+    ``&operator=<new id>``. Its ids carry ``op_`` so that they never meet the Billing
+    details' (both forms have an e-mail, a phone and an address)."""
+    page = request.get_full_path()
+    form = OperatorCreateForm(initial={"creation_key": uuid.uuid4()}, auto_id="op_%s")
+    for field in form.fields.values():
+        shown = field.widget.attrs.get(SHOWN_WHEN)
+        if shown:
+            field.widget.attrs[SHOWN_WHEN] = shown.replace("id_", "op_")
+    dialog = _form_dialog(form, "New operator", page)
+    dialog["next"] = page
+    return dialog
 
 
 @role_required
@@ -414,30 +504,99 @@ def lease_create(request: HttpRequest) -> HttpResponse:
                     refusal.field if refusal.field in form.fields else None, str(refusal)
                 )
             else:
-                if created:
-                    messages.success(request, _saved_message(len(charges)))
-                    documents.upload_after_create(request, lease, "lease")
-                else:
+                if not created:
                     messages.info(request, ALREADY_SAVED)
-                if created and account == service.ACCOUNT_ENTER:
+                    return redirect(_saved_url(request, lease, context))
+                messages.success(request, _saved_message(len(charges)))
+                documents.upload_after_create(request, lease, "lease")
+                # Decision 6: the move-in invoice, a draft; the lease stays saved without one.
+                move_in = move_in_service.create_draft(
+                    lease,
+                    charges,
+                    creation_key=form.cleaned_data["creation_key"],
+                    actor=_actor(request),
+                )
+                if move_in.draft is None:
+                    messages.warning(request, move_in.message)
+                if account == service.ACCOUNT_ENTER:
                     return redirect("ledger:leases:bank", pk=lease.pk)
+                if move_in.draft is not None and context is not None:
+                    return redirect(created_url(lease.store_id, move_in.draft))
+                if move_in.draft is not None:
+                    messages.info(request, MOVE_IN_DRAFTED.format(number=move_in.draft.number))
                 return redirect(_saved_url(request, lease, context))
         _hold(request, "lease-create", form)
         return redirect(request.get_full_path())
     held = _held(request, "lease-create", lambda data: _create_form(data, context))
     if held is None:
-        held = _create_form(None, context)
+        held = _create_form(None, context, _initial_operator(request))
         held.initial["creation_key"] = uuid.uuid4()
-    return render(
-        request,
-        "ledger/leases/form.html",
-        {
-            "form": held,
-            "lease": None,
-            "document_form": documents.create_form(DocumentKind.LEASE_AGREEMENT),
-            "store_context": context,
-        },
+    page: dict[str, Any] = {
+        "form": held,
+        "lease": None,
+        "document_form": documents.create_form(DocumentKind.LEASE_AGREEMENT),
+        "store_context": context,
+        "operator_dialog": _operator_dialog(request),
+        "new_operator_url": (
+            reverse("ledger:operators:create") + "?" + urlencode({"next": request.get_full_path()})
+        ),
+        "cancel_url": (
+            reverse("ledger:stores:detail", kwargs={"pk": context.store.pk})
+            if context is not None
+            else reverse("ledger:leases:list")
+        ),
+    }
+    if context is not None:
+        page["store_title"] = store_service.title(context.store)
+        page["header_badge"] = _header_badge(context.store)
+    return render(request, "ledger/leases/form.html", page)
+
+
+#: Decision 6: after a save from outside a store page, where the move-in draft is.
+MOVE_IN_DRAFTED = "The move-in invoice {number} is saved as a draft under Drafts."
+#: The store page's query that opens the "Lease created" dialog over its Invoices tab.
+CREATED_PARAM = "lease_created"
+CREATED_TITLE = "Lease created"
+#: The dialog reads "Lease created" (its title) then this question (the owner's sentence).
+CREATED_QUESTION = "Send the move-in invoice to {operator} now?"
+
+
+def created_url(store_id: uuid.UUID, draft: Any) -> str:
+    """The store page's Invoices tab with the "Lease created" dialog for ``draft``."""
+    page = reverse("ledger:stores:detail", kwargs={"pk": store_id})
+    query = urlencode({"tab": workspace.TAB_INVOICES, CREATED_PARAM: str(draft.pk)})
+    return f"{page}?{query}#tab-{workspace.TAB_INVOICES}"
+
+
+def created_dialog(request: HttpRequest, store: Store) -> dict[str, Any] | None:
+    """The "Lease created" dialog (decision 6) when the store page's query names a move-in
+    draft (``?lease_created=``) still a draft, of a lease of this store, for billing and
+    above; ``None`` otherwise (writes nothing). "Send e-mail" posts to
+    ``ledger:invoices:send`` for the draft (``?store=``); "Not now" goes back to the tab, the
+    draft staying under Drafts."""
+    raw = (request.GET.get(CREATED_PARAM) or "").strip()
+    if not raw or not meets(_role(request), Role.BILLING):
+        return None
+    try:
+        key = uuid.UUID(raw)
+    except ValueError:
+        return None
+    draft = (
+        InvoiceDraft.objects.select_related("operator")
+        .filter(pk=key, lease__store=store, status=InvoiceDraftStatus.DRAFT)
+        .first()
     )
+    if draft is None:
+        return None
+    return {
+        "draft": draft,
+        "title": CREATED_TITLE,
+        "question": CREATED_QUESTION.format(operator=draft.operator.display_name),
+        "return_url": workspace.tab_url(store.pk, workspace.TAB_INVOICES),
+        "send_url": reverse("ledger:invoices:send", kwargs={"pk": draft.pk})
+        + "?"
+        + urlencode({"store": str(store.pk)}),
+    }
 
 
 def _saved_url(

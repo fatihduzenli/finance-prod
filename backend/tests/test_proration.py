@@ -208,7 +208,7 @@ def test_the_text_is_on_the_charge_page_the_grid_title_and_the_statement() -> No
 def test_the_lease_form_has_the_switch_on_by_default_and_saves_it_off() -> None:
     client, _ = client_for(Role.ADMIN)
     form = client.get("/leases/new/").content.decode()
-    assert "Prorate first month" in form
+    assert "Prorate the first month" in form  # Re-pinned (Opus, PLAN-014b item 1's wording)
     assert (
         'name="prorate_first_month"' in form
         and "checked" in form.split('name="prorate_first_month"')[1].split(">")[0]

@@ -9,6 +9,7 @@ The adversarial cases are the QA owner's.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -930,8 +931,12 @@ def test_a_card_number_in_the_reason_is_refused_and_reaches_no_row(
     assert transfer.REASON_PAYMENT_DATA in page and CARD not in page
     assert overridden(row) == NOTHING_ALLOWED
     assert not AuditLog.objects.filter(action="lease_transfer.debt_overridden").exists()
+    # The audit rows' dicts hold random UUIDs, whose hex groups can read "-4111-": the card's
+    # digits count only with no hyphen, word character, comma or dot beside them (the gate of
+    # 2026-11-04 saw one such UUID; has_token takes a hyphen as a boundary).
+    card_digits = re.compile(r"(?<![\w,.-])4111(?![\w,.-])")
     assert not any(
-        has_token(str(entry.after), "4111") or has_token(str(entry.before), "4111")
+        card_digits.search(str(entry.after)) or card_digits.search(str(entry.before))
         for entry in AuditLog.objects.all()
     )
 

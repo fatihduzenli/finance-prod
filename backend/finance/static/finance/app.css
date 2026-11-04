@@ -1888,6 +1888,111 @@ p.detail-more-notes { padding-left: 0; }
   .help-footer { text-align: left; }
 }
 
+/* --- New lease (docs/qa/PLAN-014b item 1; the owner's new-lease-dark-laptop.png) ------------------
+   Five numbered cards (.new-lease-step): .step-head holds the teal .step-number circle (--link on
+   --month-current, the operator page's avatar pair), the title and its muted .step-note, and at
+   the right .step-action (Copy from operator). (1) the search and "+ New operator" on one row
+   (.operator-pick), the chosen operator's .operator-card on --surface-2 with its initials circle;
+   (2) .terms-row: three fields a row, then .prorate-row: the switch (.switch, a checkbox drawn as
+   a track and knob) and the teal .prorate-line; (3) .debit-row: Debit day and "Twice a month"
+   side by side, .channel-tiles three a row (the builder's .collect-tile); (4) .billing-grid two
+   columns, Bank account as the .radio-segmented track (.account-segments); (5) .movein-row: the
+   name, the price (or the deposit's mirrored .movein-mirror), the grey usual price, and "More";
+   .step-link: a teal text button ("+ New operator", "Copy from operator", "+ Add item"). The
+   Summary (.lease-summary-card): the small capitals label, rows of label and value, a rule, the
+   bold First invoice, the full-width "Create lease", Cancel and the muted line. Phone: one
+   column, each row's fields stacked. */
+.step-link { display: inline-flex; align-items: center; min-height: 0; margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: var(--fs-base); font-weight: 500; text-decoration: none; cursor: pointer; }
+.step-link:hover { text-decoration: underline; }
+.step-link[hidden] { display: none; }
+.new-lease-step .step-head { display: flex; align-items: flex-start; gap: var(--space-3); margin: 0 0 var(--space-4); }
+.step-number { display: inline-flex; flex: 0 0 22px; align-items: center; justify-content: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: var(--month-current); color: var(--link); font-size: var(--fs-sm); font-weight: 700; }
+.step-title { flex: 1 1 auto; min-width: 0; }
+.step-title h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+.step-note { margin: 2px 0 0; font-size: var(--fs-base); }
+.step-action { flex: 0 0 auto; margin-left: auto; }
+.operator-pick { display: flex; align-items: center; gap: var(--space-3); }
+.operator-pick .field { flex: 1 1 auto; min-width: 0; margin: 0; }
+.operator-pick .field[hidden] { display: none; }
+.operator-pick input[type=search] { width: 100%; }
+.operator-pick .new-operator { flex: 0 0 auto; white-space: nowrap; }
+#operator-list-field[hidden] { display: none; }
+#operator-list-field select { width: 100%; }
+.operator-card { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-ctl); background: var(--surface-2); }
+.operator-card[hidden] { display: none; }
+.operator-initials { display: inline-flex; flex: 0 0 36px; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: var(--month-current); color: var(--link); font-size: var(--fs-base); font-weight: 700; }
+.operator-card-text { min-width: 0; }
+.operator-card-text strong { display: block; color: var(--text); font-size: var(--fs-md); }
+.operator-card-text p { margin: 2px 0 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.terms-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 var(--space-3); }
+.terms-row .field input { width: 100%; }
+.new-lease-step .terms-row .field > label, .new-lease-step .billing-grid .field > label, .new-lease-step .debit-row .field > label { margin-top: var(--space-3); }
+.new-lease-step .step-head + .terms-row .field > label, .new-lease-step .step-head + .debit-row .field > label { margin-top: 0; }
+.terms-row #id_rent, .terms-row input.js-total { text-align: right; font-variant-numeric: tabular-nums; }
+.prorate-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
+.prorate-row .field { margin: 0; }
+.prorate-row label.inline { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; font-weight: 600; }
+.prorate-line { margin: 0; color: var(--link); font-size: var(--fs-base); font-variant-numeric: tabular-nums; }
+.prorate-line[hidden] { display: none; }
+input[type=checkbox].switch { position: relative; flex: 0 0 auto; width: 36px; min-width: 36px; height: 20px; min-height: 20px; margin: 0; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface-2); -webkit-appearance: none; appearance: none; cursor: pointer; }
+input[type=checkbox].switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: left 0.12s; }
+input[type=checkbox].switch:checked { border-color: var(--btn-primary-border); background: var(--btn-primary-bg); }
+input[type=checkbox].switch:checked::after { left: 18px; background: var(--btn-primary-text); }
+input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.debit-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0 var(--space-4); }
+.debit-row > .field { margin-bottom: var(--space-3); }
+.debit-row #id_debit_day { min-width: 10rem; }
+.debit-row #twice-monthly-field label { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 40px; margin: 0; font-weight: 400; }
+.channel-field { margin: var(--space-2) 0 0; }
+.channel-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+.channel-tile { display: flex; }
+.channel-tile .collect-option { flex: 1 1 auto; }
+.billing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--space-3); }
+.billing-grid > * { min-width: 0; }
+.billing-grid input, .billing-grid select { width: 100%; }
+.label-hint { display: block; color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
+.account-field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: var(--space-4) 0 0; }
+.account-field > .label { margin: 0; font-weight: 600; }
+.account-field > .account-reason, .account-field > .errorlist { flex-basis: 100%; margin: 0; }
+.radio-segmented > div[hidden] { display: none; }
+.radio-segmented > div > label:has(input:disabled) { cursor: not-allowed; opacity: 0.7; }
+.movein-rows { border-top: 1px solid var(--border-soft); }
+.movein-row { display: grid; grid-template-columns: minmax(0, 1fr) 10rem 8rem auto; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); }
+.movein-row[hidden] { display: none; }
+.movein-name { margin: 0; color: var(--text); font-size: var(--fs-md); font-weight: 500; }
+.movein-price input { width: 100%; text-align: right; font-variant-numeric: tabular-nums; }
+.movein-mirror { display: block; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.movein-usual { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.movein-errors { grid-column: 1 / -1; }
+.movein-more { grid-column: 4; grid-row: 1; justify-self: end; }
+.movein-more[open] { grid-column: 1 / -1; grid-row: auto; justify-self: stretch; }
+.movein-more summary { color: var(--link); font-size: var(--fs-sm); cursor: pointer; }
+.movein-more-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 var(--space-3); }
+.movein-more-fields input { width: 100%; }
+.add-item { margin: var(--space-3) 0 0; }
+.lease-summary-card .summary-label { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.lease-summary-rows { display: block; margin: 0; font-size: var(--fs-base); }
+.lease-summary-rows > div { display: flex; justify-content: space-between; gap: var(--space-3); padding: 4px 0; }
+.lease-summary-rows dt { color: var(--muted); font-weight: 400; }
+.lease-summary-rows dd { margin: 0; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.lease-summary-money { margin: var(--space-3) 0 0; padding: var(--space-3) 0 0; border-top: 1px solid var(--border-soft); }
+.lease-summary-total { margin: var(--space-2) 0 0; font-size: var(--fs-lg); font-weight: 700; }
+.lease-summary-total dt, .lease-summary-total dd { color: var(--text); font-weight: 700; }
+.lease-summary-card .summary-cancel { display: flex; justify-content: center; margin: var(--space-2) 0 0; }
+.lease-summary-card .summary-cancel .btn-quiet { width: 100%; border-color: transparent; background: none; color: var(--text-2); font-weight: 500; }
+.account-detail { flex-basis: 100%; margin: 0; }
+.account-detail[hidden] { display: none; }
+.summary-after { margin: var(--space-3) 0 0; font-size: var(--fs-sm); text-align: center; }
+@media (max-width: 768px) {
+  .terms-row, .billing-grid, .channel-tiles, .movein-more-fields { grid-template-columns: minmax(0, 1fr); }
+  .operator-pick { flex-wrap: wrap; }
+  form button.step-link { width: auto; }
+  .movein-row { grid-template-columns: minmax(0, 1fr) 8rem; }
+  .movein-usual { grid-column: 2; }
+  .movein-more { grid-column: 1; grid-row: auto; justify-self: start; }
+  .debit-row > .field { flex: 1 1 100%; }
+}
+
 /* --- Print ---------------------------------------------------------------------------------- */
 @media print {
   /* The sandbox banner is left as it is: it prints too (docs/CLAUDE.md Rule 6). */

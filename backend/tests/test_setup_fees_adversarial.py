@@ -140,7 +140,7 @@ def test_a_deposit_of_another_lease_cannot_be_resolved_through_a_mismatched_url(
 
 
 def test_the_checklist_ignores_unknown_fee_codes_and_refuses_impossible_prices() -> None:
-    from ledger.models import Lease, RentCharge
+    from ledger.models import InvoiceDraft, Lease, RentCharge
     from tests.test_setup_charges import lease_form
 
     sign = fee()
@@ -150,6 +150,8 @@ def test_the_checklist_ignores_unknown_fee_codes_and_refuses_impossible_prices()
     admin.post("/leases/new/", {**base, "setup_bogus_tick": "on", "setup_bogus_price": "1.00"})
     assert (Lease.objects.count(), OneOffCharge.objects.count()) == (1, 0)
     RentCharge.objects.all().delete()  # the first charge on save (PLAN-012b-b D2)
+    # Re-pinned (Opus, PLAN-014b item 1, decision 6): the move-in draft made on save.
+    InvoiceDraft.objects.all().delete()
     Lease.objects.all().delete()
     # Impossible prices: nothing is saved, not even the lease.
     prices = ("1000000000000.00", "NaN", "-5", "0.001", "Infinity", "1e300", "0x10", "1,000")
@@ -176,6 +178,7 @@ def test_the_checklist_ignores_unknown_fee_codes_and_refuses_impossible_prices()
             },
         )
         assert list(OneOffCharge.objects.values_list("price", flat=True)) == [exact], spelling
+        InvoiceDraft.objects.all().delete()  # Re-pinned (Opus, PLAN-014b): the move-in draft
         OneOffCharge.objects.all().delete()
         RentCharge.objects.all().delete()  # the first charge on save (PLAN-012b-b D2)
     Lease.objects.all().delete()

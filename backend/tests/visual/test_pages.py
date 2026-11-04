@@ -90,7 +90,11 @@ PAGES: dict[str, Callable[[Site], str]] = {
     "help-topic": lambda site: "/help/collecting-an-invoice/",
     "not-found": lambda site: "/no-such-page/",
     "new-store": lambda site: reverse("ledger:stores:create"),
-    "new-lease": lambda site: reverse("ledger:leases:create"),
+    # PLAN-014b item 1: opened from the world's vacant store, as "+ Add lease" opens it, so the
+    # header reads "New lease for #303 ELM STREET" with "Vacant · never leased".
+    "new-lease": lambda site: (
+        reverse("ledger:leases:create") + f"?store={site.world.vacant_store.pk}"
+    ),
     "operator-form": lambda site: reverse(
         "ledger:operators:edit", kwargs={"pk": site.world.operator.pk}
     ),

@@ -1319,9 +1319,10 @@ def test_the_new_lease_page_lists_one_row_per_checklist_item_with_the_price_as_a
     # PLAN-012d D9: the catalogue's price is a placeholder, never a value; no tick box.
     assert 'placeholder="1000.00"' in page and 'value="1000.00"' not in page
     assert "setup_sign_fee_tick" not in page
-    assert 'id="setup-total"' in page and "Setup charges: <span" in page
-    assert 'data-total-for="setup-checklist">$0.00</span>' in page
-    assert "ledger/table_total.js" in page
+    # Re-pinned (Opus, PLAN-014b item 1, decision 5): the Summary's Move-in charges line,
+    # kept live by ledger/new_lease.js.
+    assert 'id="setup-total">$0.00</dd>' in page
+    assert "ledger/new_lease.js" in page
 
 
 def test_the_checklist_hides_an_item_without_the_flag() -> None:
@@ -1329,14 +1330,16 @@ def test_the_checklist_hides_an_item_without_the_flag() -> None:
     fee("phone_fee", default_price=D("50.00"), show_in_setup=False)
     client, _ = client_for(Role.ADMIN)
     page = client.get("/leases/new/").content.decode()
-    assert 'id="setup-sign_fee"' in page and 'id="setup-phone_fee"' not in page
+    # Re-pinned (Opus, PLAN-014b item 1, decision 2): an item without the flag is no checklist
+    # row; New lease offers it as a row "+ Add item" reveals (data-extra), charged with a price.
+    assert 'id="setup-sign_fee">' in page and 'id="setup-phone_fee" data-extra>' in page
     codes = {row.code for row in service.checklist_types()}
     assert "sign_fee" in codes and "phone_fee" not in codes
     # The invoice builder still offers it (the flag is the checklist's only).
     assert "phone_fee" in {row.code for row in service.offered_types()}
-    # A posted price for the hidden item charges nothing.
     client.post("/leases/new/", lease_form(setup_phone_fee_price="50.00"))
-    assert Lease.objects.count() == 1 and not OneOffCharge.objects.exists()
+    assert Lease.objects.count() == 1
+    assert OneOffCharge.objects.filter(fee_type__code="phone_fee").count() == 1
 
 
 def test_the_checklist_post_charges_the_rows_with_a_price_once() -> None:
@@ -1392,7 +1395,7 @@ def test_a_row_with_a_card_number_saves_nothing_and_the_total_line_is_rendered()
     assert CARD not in page and CARD.replace(" ", "") not in page
     assert (Lease.objects.count(), OneOffCharge.objects.count()) == (0, 0)
     # The held form shows the total of the prices typed, rendered by the server.
-    assert 'data-total-for="setup-checklist">$1,244.50</span>' in page
+    assert 'id="setup-total">$1,244.50</dd>' in page  # Re-pinned (Opus, PLAN-014b item 1)
 
 
 def test_the_lease_edit_page_has_no_checklist() -> None:

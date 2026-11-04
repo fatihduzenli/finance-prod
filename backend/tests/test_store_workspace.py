@@ -54,6 +54,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services import attention, invoice_builder, workspace
+from ledger.services import stores as store_service
 from ledger.services.invoice_builder import LineInput
 from payments.models import ExternalRef
 from tests.receivables_helpers import (
@@ -463,7 +464,9 @@ def test_new_lease_from_a_vacant_store_has_the_store_known() -> None:
     store = a_store("3100")
     admin, _ = client_for(Role.ADMIN)
     html = page(admin, f"/leases/new/?store={store.pk}")
-    assert "Store 3100" in html and '<select name="store"' not in html
+    # Re-pinned (Opus, PLAN-014b item 1, decision 7): the title names the store (no line).
+    assert f"New lease for {store_service.title(store)}" in html
+    assert '<select name="store"' not in html
     assert admin.get(f"/leases/new/?store={uuid.uuid4()}").status_code == 404
     assert admin.get("/leases/new/?store=not-a-uuid").status_code == 404
 
