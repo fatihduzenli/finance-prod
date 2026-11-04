@@ -224,6 +224,9 @@ def test_the_page_has_five_numbered_cards_the_header_and_the_summary(
     assert 'id="lease-summary"' in html_text and ">Create lease</button>" in html_text
     assert "After saving you can send the move-in invoice by e-mail." in html_text
     assert tag_with(html_text, 'id="cancel-lease"', f'href="/stores/{store.pk}/"')
+    # Fable's 14b-1 visual review: the operator select's blank option names the choice.
+    assert '<option value="" selected>Choose an operator…</option>' in html_text
+    assert "---------" not in html_text
 
 
 def an_operator_with(name: str, **fields: Any) -> Operator:

@@ -9,7 +9,7 @@
     {% include "ledger/leases/_step_head.html" with number=1 heading_id="operator-title" title="Operator" note="Who takes the store." action="" %}
     <div class="operator-pick">
       <div class="field operator-search-field" id="operator-search-field" hidden><label class="visually-hidden" for="operator-search">Find an operator</label><input type="search" id="operator-search" placeholder="Search operators" autocomplete="off" aria-controls="id_operator"></div>
-      <a class="link-action new-operator" id="new-operator" href="{{ new_operator_url }}" data-dialog-open="operator-form">+ New operator</a>
+      <a class="step-link new-operator" id="new-operator" href="{{ new_operator_url }}" data-dialog-open="operator-form">+ New operator</a>
     </div>
     <div id="operator-list-field">{% include "ledger/stores/_form_field.html" with field=form.operator hide_help=True %}</div>
     <div class="operator-card" id="operator-card" aria-live="polite" hidden><span class="operator-initials" id="operator-card-initials" aria-hidden="true"></span><div class="operator-card-text"><strong id="operator-card-name"></strong><p class="muted" id="operator-card-line"></p></div></div>
@@ -66,7 +66,7 @@
       <p class="muted empty" id="setup-empty">No item is shown in the setup checklist.</p>
       {% endfor %}
     </div>
-    {% if form.extra_types %}<button type="button" class="link-action add-item" id="add-item" hidden>+ Add item</button>{% endif %}
+    {% if form.extra_types %}<button type="button" class="step-link add-item" id="add-item" hidden>+ Add item</button>{% endif %}
   </section>
   <section class="card form-card" id="documents-card"><h2>Documents</h2>{% include "ledger/documents/_create_upload.html" %}</section>
   </div>

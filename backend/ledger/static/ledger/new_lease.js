@@ -59,7 +59,6 @@
   var select = byId("id_operator");
   var search = byId("operator-search");
   var searchField = byId("operator-search-field");
-  var listField = byId("operator-list-field");
   var card = byId("operator-card");
   function chosenOption() {
     if (!select || select.selectedIndex < 0) { return null; }
@@ -80,17 +79,16 @@
     setText("operator-card-name", option.textContent.trim());
     setText("operator-card-line", parts.join(" · "));
   }
-  // The select stays in the page (a keyboard or any other path chooses through it): it opens as
-  // a list while searching and closes to one line once an operator is chosen.
-  function showList(shown) {
-    if (!listField || !search) { return; }
-    if (!shown) {
-      select.size = 0;
-      Array.prototype.forEach.call(select.options, function (option) { option.hidden = false; });
-    }
+  // The select stays in the page (a keyboard or any other path chooses through it): one line,
+  // the browser's own select, whenever the search is empty (on load, after choosing, after
+  // clearing); the filtered list only while the search holds text.
+  function closeList() {
+    select.size = 0;
+    Array.prototype.forEach.call(select.options, function (option) { option.hidden = false; });
   }
   function filterOptions() {
     var words = search.value.trim().toLowerCase().split(/\s+/).filter(function (word) { return word; });
+    if (!words.length) { closeList(); return; }
     var shown = 0;
     Array.prototype.forEach.call(select.options, function (option) {
       var text = option.textContent.toLowerCase();
@@ -98,22 +96,22 @@
       option.hidden = !match;
       if (match && option.value) { shown += 1; }
     });
-    select.size = Math.min(Math.max(shown + 1, 2), 8);
+    select.size = Math.min(shown + 1, 8);
   }
   if (select && search && searchField) {
     searchField.hidden = false;
     var chosen = chosenOption();
     search.value = chosen ? chosen.textContent.trim() : "";
-    showList(!chosen);
-    if (!chosen) { filterOptions(); }
-    search.addEventListener("input", function () { filterOptions(); showList(true); });
+    closeList();
+    search.addEventListener("input", filterOptions);
     search.addEventListener("focus", function () { search.select(); });
     search.addEventListener("keydown", function (event) {
-      if (event.key === "ArrowDown") { event.preventDefault(); showList(true); select.focus(); }
+      if (event.key === "ArrowDown" && select.size > 1) { event.preventDefault(); select.focus(); }
     });
     select.addEventListener("change", function () {
       var option = chosenOption();
-      if (option) { search.value = option.textContent.trim(); showList(false); }
+      search.value = option ? option.textContent.trim() : "";
+      closeList();
     });
   }
   if (select) { select.addEventListener("change", fillCard); }

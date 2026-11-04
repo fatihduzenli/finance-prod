@@ -163,6 +163,7 @@ class World:
     second_lease: Lease
     draft: InvoiceDraft
     lease_end: LeaseEnd
+    vacant_store: Store
 
 
 def _rent_year(lease: Lease) -> None:
@@ -374,6 +375,10 @@ def _build() -> World:
     assert dark_billing_device is not None and dark_admin_device is not None
     set_theme(dark_billing, "dark")
     set_theme(dark_admin, "dark")
+    # PLAN-014b item 1 (Fable's visual review): a store that never had a lease, so New lease is
+    # seen as the owner reaches it ("+ Add lease", "Vacant · never leased"); last, so every
+    # other row keeps its id.
+    vacant_store = a_store("0303 ELM STREET", 303, "GA")
     return World(
         user=user,
         sign_ins={
@@ -389,4 +394,5 @@ def _build() -> World:
         second_lease=second_lease,
         draft=drafted.draft,
         lease_end=LeaseEnd.objects.get(pk=end.pk),
+        vacant_store=vacant_store,
     )

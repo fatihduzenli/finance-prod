@@ -655,6 +655,8 @@ NO_VALUE = "\u2014"
 CHANNEL_REFUSED = provider_sentence(
     "Choose Autopay (bank debit), E-mail invoice or Paid outside {provider}."
 )
+#: The New lease page's operator select before a choice (Fable's 14b-1 visual review).
+OPERATOR_EMPTY_LABEL = "Choose an operator\u2026"
 #: The Terms card's label of the refundable fee type's price (decision 2).
 DEPOSIT_LABEL = "Deposit"
 
@@ -711,6 +713,8 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         prorate.widget.attrs.update({"class": "switch", "role": "switch"})
         operator = self.fields["operator"]
         operator.widget = OperatorContactSelect(attrs=operator.widget.attrs, stores=stores)
+        if isinstance(operator, forms.ModelChoiceField):
+            operator.empty_label = OPERATOR_EMPTY_LABEL
         if isinstance(operator, forms.ChoiceField):
             operator.widget.choices = operator.choices
         self.add_billing_step(accounts, enter_refusal=enter_refusal, shown_when="id_operator")

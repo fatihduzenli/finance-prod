@@ -1898,13 +1898,13 @@ p.detail-more-notes { padding-left: 0; }
    side by side, .channel-tiles three a row (the builder's .collect-tile); (4) .billing-grid two
    columns, Bank account as the .radio-segmented track (.account-segments); (5) .movein-row: the
    name, the price (or the deposit's mirrored .movein-mirror), the grey usual price, and "More";
-   .link-action: a teal text button ("+ New operator", "Copy from operator", "+ Add item"). The
+   .step-link: a teal text button ("+ New operator", "Copy from operator", "+ Add item"). The
    Summary (.lease-summary-card): the small capitals label, rows of label and value, a rule, the
    bold First invoice, the full-width "Create lease", Cancel and the muted line. Phone: one
    column, each row's fields stacked. */
-.link-action { display: inline-flex; align-items: center; min-height: 0; margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: var(--fs-base); font-weight: 500; text-decoration: none; cursor: pointer; }
-.link-action:hover { text-decoration: underline; }
-.link-action[hidden] { display: none; }
+.step-link { display: inline-flex; align-items: center; min-height: 0; margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: var(--fs-base); font-weight: 500; text-decoration: none; cursor: pointer; }
+.step-link:hover { text-decoration: underline; }
+.step-link[hidden] { display: none; }
 .new-lease-step .step-head { display: flex; align-items: flex-start; gap: var(--space-3); margin: 0 0 var(--space-4); }
 .step-number { display: inline-flex; flex: 0 0 22px; align-items: center; justify-content: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: var(--month-current); color: var(--link); font-size: var(--fs-sm); font-weight: 700; }
 .step-title { flex: 1 1 auto; min-width: 0; }
@@ -1986,6 +1986,7 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
 @media (max-width: 768px) {
   .terms-row, .billing-grid, .channel-tiles, .movein-more-fields { grid-template-columns: minmax(0, 1fr); }
   .operator-pick { flex-wrap: wrap; }
+  form button.step-link { width: auto; }
   .movein-row { grid-template-columns: minmax(0, 1fr) 8rem; }
   .movein-usual { grid-column: 2; }
   .movein-more { grid-column: 1; grid-row: auto; justify-self: start; }
