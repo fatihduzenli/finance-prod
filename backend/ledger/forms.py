@@ -640,7 +640,7 @@ CHANNEL_CARDS: tuple[tuple[str, Any, Any, Any], ...] = (
     (
         PaymentChannel.INVOICE,
         "E-mail invoice",
-        provider_sentence("{provider} e-mails each month's invoice"),
+        "We e-mail a reminder with a pay link before each due date",
         "E-mail invoice",
     ),
     (
