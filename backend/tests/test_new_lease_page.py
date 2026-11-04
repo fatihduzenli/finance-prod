@@ -288,7 +288,8 @@ def test_the_cards_name_the_provider_from_the_settings(admin: Client, today: dat
 
     html_text = page(admin, create_path(vacant_store()))
     assert f"Paid outside {provider_name()}" in html_text
-    assert f"{provider_name()} e-mails each month&#x27;s invoice" in html_text
+    assert "We e-mail a reminder with a pay link before each due date" in html_text
+    assert "each month&#x27;s invoice" not in html_text
     assert "Autopay (bank debit)" in html_text and "Debited from the store" in html_text
 
 
