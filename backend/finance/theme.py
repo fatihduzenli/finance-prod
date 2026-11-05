@@ -1,4 +1,4 @@
-"""The Light · Dark · System control's POST (docs/qa/PLAN-012g-dark-theme-and-dashboard.md A3;
+"""The Light · Dark control's POST (docs/qa/PLAN-012g-dark-theme-and-dashboard.md A3;
 DESIGN-SPEC §7.1).
 
 ``finance:theme`` (``POST /settings/theme/``, every signed-in role, CSRF-protected) stores
@@ -32,7 +32,7 @@ from accounts.themes import (
 )
 from ledger.views.operators import _actor, role_required
 
-UNKNOWN_THEME = "Choose Light, Dark or System."
+UNKNOWN_THEME = "Choose Light or Dark."
 UNKNOWN_PERIOD = "Choose Weekly or Monthly."
 
 

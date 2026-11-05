@@ -35,6 +35,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
+from accounts.themes import DEFAULT_THEME
 from ledger.models import Store
 from ledger.views.calendar import client_address
 from portal import auth, invitations, services, tokens
@@ -66,7 +67,7 @@ def _page(
         template,
         {
             "portal_user": user,
-            "portal_theme": user.theme if user is not None else "system",
+            "portal_theme": user.theme if user is not None else DEFAULT_THEME,
             "portal_stores": services.store_choices(user) if user is not None else [],
             **context,
         },

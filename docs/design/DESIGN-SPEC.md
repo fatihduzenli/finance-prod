@@ -181,11 +181,11 @@ Direction: the dark layout of Mercury (styles.refero.design) — onyx canvas, gr
 
 ### 7.1 Switching
 
-- Three choices: **Light · Dark · System**. Default **System** (follows `prefers-color-scheme`).
+- Two choices: **Light · Dark** (owner, 2026-11-05, PLAN-015 §4.4: System, which followed `prefers-color-scheme`, is no longer offered). Default **Dark**, for a new user and for a user who never chose; a stored System became Dark (`accounts` 0005, `portal` 0003).
 - Stored per user on the user record (not in browser storage), so the choice follows the person to every device.
-- The server renders `<html data-theme="light|dark">` from the stored choice (System resolves on the client before first paint with a one-line inline script) — no white flash on load.
-- Laptop: a three-way segmented control at the bottom of the sidebar, under "Appearance". Phone: inside the **More** tab.
-- The login page follows System (no user yet).
+- The server renders `<html data-theme="light|dark">` from the stored choice — no script and no white flash on load; nothing in the style sheets follows the device's scheme.
+- Laptop: a two-way segmented control at the bottom of the sidebar, under "Appearance". Phone: inside the **More** tab. The Preferences page carries the same control. A posted value other than `light` or `dark` (`system` included) is refused and nothing is saved.
+- Signed-out pages are Dark (no user yet): the sign-in page and the pages of its frame (Sign in required, the second factor's), and the operator portal's sign-in, link and error pages. The portal's own control offers Light · Dark too.
 - Never themed: PDF statements and invoices, e-mails, the print stylesheet, invoice previews, exported spreadsheets. They stay light.
 
 ### 7.2 Dark tokens

@@ -620,7 +620,8 @@ def test_every_control_on_the_sign_in_and_error_pages_has_a_label() -> None:
     for name, status, response in sign_in_and_error_pages():
         assert response.status_code == status, (name, response.status_code)
         page = response.content.decode()
-        assert '<html lang="en" data-theme="system">' in page, name  # PLAN-012g A2
+        # PLAN-012g A2; PLAN-015 §4.4 re-pin: signed out, the pages are Dark.
+        assert '<html lang="en" data-theme="dark">' in page, name
         assert page.count("<h1") == 1, name  # one heading names the page
         findings += [f"{name}: {c}" for c in unlabelled_controls(page)]
     assert findings == [], "controls without a label:\n" + "\n".join(findings)

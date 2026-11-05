@@ -977,7 +977,10 @@ def test_the_account_page_changes_the_theme_and_the_password(world: World) -> No
     client = portal_client(user)
     other = portal_client(user)
     page = text(client.get("/portal/account/"))
-    assert 'id="account-email">alpha.owner@example.com<' in page and 'data-theme="system"' in page
+    # PLAN-015 §4.4 re-pin: a portal user who never chose is Dark; System is not offered.
+    assert 'id="account-email">alpha.owner@example.com<' in page and 'data-theme="dark"' in page
+    assert 'value="system"' not in page and ">System<" not in page
+    assert client.post("/portal/account/", {"theme": "system"}).status_code == 400
     themed = client.post("/portal/account/", {"theme": "dark", "next": "/portal/statement/"})
     assert themed["Location"] == "/portal/statement/"
     assert 'data-theme="dark"' in text(client.get("/portal/"))

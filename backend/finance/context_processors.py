@@ -13,7 +13,7 @@ no setting.
 or support e-mail is blank (``settings_incomplete``: the Admin pages' red banner, owner
 2026-11-02, :func:`ledger.services.messaging.settings_incomplete`) and the shell's theme
 colours (light and dark) to every template; :func:`theme` exposes the user's stored theme
-(PLAN-012g A2: ``light``, ``dark`` or ``system``) for ``<html data-theme>``. ``logo_url`` is the
+(PLAN-012g A2, PLAN-015 §4.4: ``light`` or ``dark``) for ``<html data-theme>``. ``logo_url`` is the
 brand's dark logo unless the row names a live PNG or JPEG document, then that document's preview
 route: always a path of this app, never a URL taken from the row. ``logo_is_override`` is true
 for such a document: the bar then shows the company name as text beside it (the brand logo
@@ -184,7 +184,7 @@ def company(request: HttpRequest) -> dict[str, object]:
 
 
 def theme(request: HttpRequest) -> dict[str, str]:
-    """``theme``: the user's stored choice, ``"system"`` when signed out or never chosen.
+    """``theme``: the user's stored choice, ``"dark"`` when signed out or never chosen.
     Read once per request (one query at most, shared with the dashboard's period:
     :func:`accounts.themes.preference_for`) and kept on the request."""
     return {"theme": preference_for(request).theme}

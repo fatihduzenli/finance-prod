@@ -1,8 +1,9 @@
 """PLAN-012g Batch A (Fable): the token sets. The light block keeps the §1 values and gains
-the names the dark theme needs; the two dark blocks (``[data-theme="dark"]`` and the System
-block under ``prefers-color-scheme: dark``) are identical, sit inside ``@media screen`` so print
-never sees them, and hold the §7.2 / §7.3 values; every token the dark block sets exists in the
-light block too, so no colour depends on the theme attribute being present."""
+the names the dark theme needs; the dark block (``[data-theme="dark"]``) sits inside
+``@media screen`` so print never sees them, and holds the §7.2 / §7.3 values; every token the
+dark block sets exists in the light block too, so no colour depends on the theme attribute being
+present. PLAN-015 §4.4 re-pin (owner, 2026-11-05): System is not offered, so its twin block under
+``prefers-color-scheme: dark`` is gone and no sheet resolves a theme from the device."""
 
 from __future__ import annotations
 
@@ -130,10 +131,10 @@ def test_the_light_block_gains_the_names_the_dark_theme_needs(css: str) -> None:
     assert light["--bg"] == "#F4F6F9" and light["--text"] == "#0B2545"  # §1 untouched
 
 
-def test_the_two_dark_blocks_are_identical_and_hold_the_spec(css: str) -> None:
+def test_the_dark_block_holds_the_spec(css: str) -> None:
+    # PLAN-015 re-pin (was "the two dark blocks are identical"): one dark block.
+    assert css.count(':root[data-theme="dark"]') == 1
     dark = declarations(block_after(css, r':root\[data-theme="dark"\]'))
-    system = declarations(block_after(css, r':root\[data-theme="system"\]'))
-    assert dark == system, set(dark.items()) ^ set(system.items())
     for name, value in SPEC_DARK.items():
         assert dark.get(name) == value, (name, dark.get(name))
 
@@ -148,12 +149,20 @@ def test_every_dark_token_exists_in_light_so_no_colour_needs_the_attribute(css: 
 def test_the_dark_blocks_sit_inside_media_screen_so_print_stays_light(css: str) -> None:
     screen = block_after(css, r"@media\s+screen")
     assert ':root[data-theme="dark"]' in screen
-    assert "prefers-color-scheme: dark" in screen and ':root[data-theme="system"]' in screen
     outside = css.replace(screen, "")
-    assert 'data-theme="dark"' not in outside and 'data-theme="system"' not in outside
+    assert 'data-theme="dark"' not in outside
 
 
-def test_the_system_block_is_under_prefers_color_scheme_dark(css: str) -> None:
-    media = block_after(css, r"@media\s*\(prefers-color-scheme:\s*dark\)")
-    assert ':root[data-theme="system"]' in media
-    assert ':root[data-theme="dark"]' not in media
+def test_no_sheet_follows_the_device_scheme_any_more(css: str) -> None:
+    # PLAN-015 re-pin (was "the System block is under prefers-color-scheme: dark"): the System
+    # block is removed and nothing else resolves a theme from the device.
+    sheets = [
+        TOKENS,
+        *TOKENS.parent.glob("*.css"),
+        *TOKENS.parents[3].glob("portal/static/portal/*.css"),
+    ]
+    assert len(sheets) >= 4
+    for sheet in sheets:
+        text = sheet.read_text()
+        assert "prefers-color-scheme" not in strip_comments(text), sheet.name
+        assert 'data-theme="system"' not in strip_comments(text), sheet.name

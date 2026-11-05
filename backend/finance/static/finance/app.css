@@ -59,7 +59,7 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 .nav-group-toggle .icon-chevron-right { transition: transform 120ms; }
 .nav-disclosure[open] > .nav-group-toggle .icon-chevron-right { transform: rotate(90deg); }
 /* The Appearance control above the user card (PLAN-012g A3; DESIGN-SPEC §7.1, §7.6): a muted
-   12 px label, then the Light · Dark · System segmented form across the sidebar's width, its
+   12 px label, then the Light · Dark segmented form (PLAN-015 §4.4) across the sidebar's width, its
    track one step lighter than the sidebar (--sidebar-card-bg), the unpressed segments in
    --sidebar-text. */
 .sidebar-appearance { margin-top: auto; margin-bottom: var(--space-3); }
@@ -215,8 +215,8 @@ p.help { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-sm
    Invoices tab's filter): a grey pill track (--seg-track, --bg); the current segment
    (aria-current "page") on the pill thumb (--seg-thumb, white) with a 1 px ring (--seg-thumb-ring).
    The grid's status filter stays a select. The segments may be buttons of one form (the
-   Light · Dark · System control, PLAN-012g A3): the pressed one (aria-pressed "true") takes
-   the thumb. */
+   Light · Dark control, PLAN-012g A3; the header's period control, PLAN-015): the pressed one
+   (aria-pressed "true") takes the thumb. */
 .segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--seg-track); }
 .segmented a, .segmented button { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: var(--radius-pill); color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; }
 .segmented button { margin: 0; border: 0; background: none; font-family: inherit; line-height: inherit; cursor: pointer; }

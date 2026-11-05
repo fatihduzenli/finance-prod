@@ -1,8 +1,10 @@
-"""PLAN-012g Batch A (Fable): Light · Dark · System per user. The server renders
-``<html data-theme>`` from the stored choice (System for anonymous and for a user without a
+"""PLAN-012g Batch A (Fable): Light · Dark · System per user, re-pinned by PLAN-015 §4.4 (owner,
+2026-11-05) to Light · Dark: System is not offered and Dark is the default. The server renders
+``<html data-theme>`` from the stored choice (Dark for anonymous and for a user without a
 row), the control saves through one POST with a validated ``next``, the theme-color meta follows,
-the invoice preview stays light, and the sign-in shell follows System. Plus the adversarial cases
-of plan §5: a hostile value, a hostile ``next``, no CSRF, GET, a viewer, a row that vanishes."""
+the invoice preview stays light, and the sign-in shell is Dark. Plus the adversarial cases
+of plan §5: a hostile value (a posted ``system`` among them), a hostile ``next``, no CSRF, GET, a
+viewer, a row that vanishes."""
 
 from __future__ import annotations
 
@@ -37,29 +39,28 @@ def theme_metas(page: str) -> list[str]:
 # --- What the server renders ---------------------------------------------------------------------
 
 
-def test_a_user_without_a_row_and_the_sign_in_shell_follow_system() -> None:
+def test_a_user_without_a_row_and_the_sign_in_shell_are_dark() -> None:
+    # PLAN-015 §4.4 re-pin (was "..._follow_system"): Dark, one meta, no System.
     client, user = client_for(Role.BILLING)
-    assert theme_for(user) == "system" and not UserPreference.objects.filter(user=user).exists()
-    assert html_tag(client.get("/").content.decode()) == '<html lang="en" data-theme="system">'
+    assert theme_for(user) == "dark" and not UserPreference.objects.filter(user=user).exists()
+    assert html_tag(client.get("/").content.decode()) == '<html lang="en" data-theme="dark">'
     anonymous = Client().get("/account/login/").content.decode()
-    assert html_tag(anonymous) == '<html lang="en" data-theme="system">'
-    assert sorted(theme_metas(anonymous)) == sorted(theme_metas(client.get("/").content.decode()))
+    assert html_tag(anonymous) == '<html lang="en" data-theme="dark">'
+    assert theme_metas(anonymous) == theme_metas(client.get("/").content.decode())
+    assert theme_metas(anonymous) == ['<meta name="theme-color" content="#171721">']
 
 
 @pytest.mark.parametrize("theme", THEMES)
 def test_the_stored_choice_reaches_every_page_and_the_meta(theme: str) -> None:
+    # PLAN-015 §4.4 re-pin: the two themes, one meta each (the System branch is gone).
+    assert THEMES == ("light", "dark")
     client, user = client_for(Role.ADMIN)
     set_theme(user, theme)
     for url in ("/", reverse("finance:settings"), "/stores/"):
         page = client.get(url, follow=True).content.decode()
         assert html_tag(page) == f'<html lang="en" data-theme="{theme}">', url
         metas = theme_metas(page)
-        if theme == "system":
-            assert len(metas) == 2
-            assert any("prefers-color-scheme: dark" in m and "#171721" in m for m in metas)
-            assert any("prefers-color-scheme: light" in m and "#0b2545" in m for m in metas)
-        else:
-            assert len(metas) == 1 and ("#171721" if theme == "dark" else "#0b2545") in metas[0]
+        assert len(metas) == 1 and ("#171721" if theme == "dark" else "#0b2545") in metas[0]
 
 
 def test_the_control_marks_the_current_choice_in_the_sidebar_the_sheet_and_settings() -> None:
@@ -76,7 +77,9 @@ def test_the_control_marks_the_current_choice_in_the_sidebar_the_sheet_and_setti
         pressed = re.findall(r'value="(\w+)" aria-pressed="true"', form)
         assert pressed == ["dark"], form
         assert 'name="csrfmiddlewaretoken"' in form
-        assert set(re.findall(r'name="theme" value="(\w+)"', form)) == set(THEMES)
+        # PLAN-015 §4.4 re-pin: two segments, Light then Dark.
+        assert re.findall(r'name="theme" value="(\w+)"', form) == ["light", "dark"]
+        assert ">System<" not in form
     assert "Appearance" in page
 
 
@@ -110,9 +113,20 @@ def test_saving_redirects_back_and_sticks(theme: str) -> None:
 
 @pytest.mark.parametrize(
     "value",
-    ["", "DARK", "blue", "<script>alert(1)</script>", "dark; drop", "d" * 300, "system\n", "1"],
+    [
+        "",
+        "DARK",
+        "blue",
+        "<script>alert(1)</script>",
+        "dark; drop",
+        "d" * 300,
+        "system",  # PLAN-015 §4.4: no longer offered
+        "System",
+        "system\n",
+        "1",
+    ],
 )
-def test_a_value_outside_the_three_is_refused_and_nothing_is_saved(value: str) -> None:
+def test_a_value_outside_the_two_is_refused_and_nothing_is_saved(value: str) -> None:
     client, user = client_for(Role.ADMIN)
     response = client.post(reverse(THEME_URL), {"theme": value, "next": "/"})
     assert response.status_code == 400
@@ -153,24 +167,25 @@ def test_without_the_csrf_token_the_post_is_refused() -> None:
     _, user = client_for(Role.BILLING)
     strict = Client(enforce_csrf_checks=True)
     strict.force_login(user)
-    response = strict.post(reverse(THEME_URL), {"theme": "dark", "next": "/"})
+    response = strict.post(reverse(THEME_URL), {"theme": "light", "next": "/"})
     assert response.status_code == 403
-    assert theme_for(user) == "system"
+    assert theme_for(user) == "dark"  # PLAN-015 re-pin: the default is Dark
 
 
 def test_a_row_deleted_between_requests_is_recreated_not_crashed() -> None:
     client, user = client_for(Role.ADMIN)
     set_theme(user, "dark")
     UserPreference.objects.filter(user=user).delete()
-    assert theme_for(user) == "system"
+    assert theme_for(user) == "dark"  # PLAN-015 re-pin: the default is Dark
     assert client.post(reverse(THEME_URL), {"theme": "light", "next": "/"}).status_code == 302
     assert theme_for(user) == "light"
 
 
-def test_set_theme_refuses_a_value_outside_the_three() -> None:
+def test_set_theme_refuses_a_value_outside_the_two() -> None:
     _, user = client_for(Role.VIEWER)
-    with pytest.raises(ValueError):
-        set_theme(user, "sepia")
+    for value in ("sepia", "system"):  # PLAN-015 §4.4 re-pin: System is refused too
+        with pytest.raises(ValueError):
+            set_theme(user, value)
     assert not UserPreference.objects.filter(user=user).exists()
 
 
@@ -209,5 +224,5 @@ def test_without_a_row_the_dashboard_reads_once_and_follows_the_defaults() -> No
     client, _ = client_for(Role.VIEWER)
     html, reads = preference_reads(client, "/")
     assert reads == 1
-    assert html_tag(html) == '<html lang="en" data-theme="system">'
+    assert html_tag(html) == '<html lang="en" data-theme="dark">'  # PLAN-015 re-pin
     assert pressed_period(html) == "weekly"

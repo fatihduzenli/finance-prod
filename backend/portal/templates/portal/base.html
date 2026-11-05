@@ -1,12 +1,13 @@
 {% load static %}{% comment %}
-The operator portal's shell (PLAN-014 H3): light by default, phone first, its own. The 12g
-tokens (finance/tokens.css: data-theme light, dark or system) and portal/portal.css; no staff
+The operator portal's shell (PLAN-014 H3): phone first, its own. The 12g tokens
+(finance/tokens.css: data-theme light or dark; Dark by default and signed out since PLAN-015
+§4.4) and portal/portal.css; no staff
 navigation, no manifest, no service worker. The top bar: the company's name, the store switcher
-(a <details> list of the operator's stores, no script), the Light · Dark · System control (a
+(a <details> list of the operator's stores, no script), the Light · Dark control (a
 POST to portal:account) and Sign out (a POST to portal:logout). Signed out, the bar holds the
 company's name only. Nothing here reads the staff user.
 {% endcomment %}<!doctype html>
-<html lang="en" data-theme="{{ portal_theme|default:'system' }}">
+<html lang="en" data-theme="{{ portal_theme|default:'dark' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -30,7 +31,7 @@ company's name only. Nothing here reads the staff user.
     </details>
     <a href="{% url 'portal:statement' %}">Statement</a>
     <a href="{% url 'portal:account' %}">Account</a>
-    <form method="post" action="{% url 'portal:account' %}" class="portal-theme" id="portal-theme">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit" name="theme" value="light" aria-pressed="{% if portal_theme == 'light' %}true{% else %}false{% endif %}">Light</button><button type="submit" name="theme" value="dark" aria-pressed="{% if portal_theme == 'dark' %}true{% else %}false{% endif %}">Dark</button><button type="submit" name="theme" value="system" aria-pressed="{% if portal_theme == 'light' or portal_theme == 'dark' %}false{% else %}true{% endif %}">System</button></form>
+    <form method="post" action="{% url 'portal:account' %}" class="portal-theme" id="portal-theme">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit" name="theme" value="light" aria-pressed="{% if portal_theme == 'light' %}true{% else %}false{% endif %}">Light</button><button type="submit" name="theme" value="dark" aria-pressed="{% if portal_theme == 'dark' %}true{% else %}false{% endif %}">Dark</button></form>
     <form method="post" action="{% url 'portal:logout' %}" id="portal-logout">{% csrf_token %}<button type="submit" class="portal-link-button">Sign out</button></form>
   </nav>
   {% endif %}

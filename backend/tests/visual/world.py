@@ -366,7 +366,7 @@ def _build() -> World:
     )
 
     # Last, so that the rows above keep their ids whoever else signs in.
-    _, admin_device = make_user(ADMIN_USERNAME, Role.ADMIN)
+    admin, admin_device = make_user(ADMIN_USERNAME, Role.ADMIN)
     assert admin_device is not None
     # PLAN-012g Batch D: the same two roles with the Dark appearance stored (DESIGN-SPEC §7.1),
     # for the dark baseline set; after the admin so every other row keeps its id.
@@ -375,6 +375,10 @@ def _build() -> World:
     assert dark_billing_device is not None and dark_admin_device is not None
     set_theme(dark_billing, "dark")
     set_theme(dark_admin, "dark")
+    # PLAN-015 §4.4 re-pin: Dark is the default now, so the light set's two users store Light
+    # (before, no row read as System and the light browser made it light).
+    set_theme(user, "light")
+    set_theme(admin, "light")
     # PLAN-014b item 1 (Fable's visual review): a store that never had a lease, so New lease is
     # seen as the owner reaches it ("+ Add lease", "Vacant · never leased"); last, so every
     # other row keeps its id.
