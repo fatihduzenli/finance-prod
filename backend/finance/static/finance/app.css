@@ -300,6 +300,47 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .kpi-link { display: block; color: inherit; text-decoration: none; }
 .kpi-link:hover .kpi { border-color: var(--input-border); }
 
+/* --- Design v2's components (docs/qa/PLAN-015-design-v2.md §4.1; DESIGN-SPEC §3) -----------
+   .kpi2 ({% kpi2 %}): the dashboard mockup's KPI card. Its head (.kpi2-head): the 32 px tinted
+   square (.kpi2-icon, --link on --month-current) and the titles (.kpi2-title 15/600, the muted
+   12 px .kpi2-sub under it); the figure row (.kpi2-amount): the 28/700 .kpi2-value (.tone-unpaid
+   red) and the pill .kpi2-pill-<paid|pending|neutral>; the footer (.kpi2-link): the link text
+   in --link 13/600 and the arrow at the far right.
+   .period-control ({% period_control %}): the .segmented track as a GET form.
+   .avatar-tile ({% avatar_tile %}): the 28 px (.avatar-tile-36: 36 px) tinted square with the
+   initials in --link. .status-chip ({% chip %}): a 12/600 pill in a status pair, its glyph
+   first. .card-head (finance/components/card_head.html): the .section-label left, the
+   .card-link right. */
+.kpi2 { display: flex; flex-direction: column; gap: var(--space-3); height: 100%; box-sizing: border-box; padding: 18px 20px; border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface); }
+.kpi2-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.kpi2-icon { display: inline-flex; flex: 0 0 32px; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--radius-ctl); background: var(--month-current); color: var(--link); }
+.kpi2-titles { min-width: 0; }
+.kpi2-title { margin: 0; color: var(--text); font-size: var(--fs-lg); font-weight: 600; line-height: 1.3; }
+.kpi2-sub { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); }
+.kpi2-amount { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
+.kpi2-value { color: var(--text); font-size: var(--fs-kpi); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kpi2-value.tone-unpaid { color: var(--unpaid-text); }
+.kpi2-pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 600; line-height: 1.3; white-space: nowrap; }
+.kpi2-pill-paid { background: var(--paid-bg); color: var(--paid-text); }
+.kpi2-pill-pending { background: var(--pending-bg); color: var(--pending-text); }
+.kpi2-pill-neutral { background: var(--neutral-bg); color: var(--neutral-text); }
+.kpi2-link { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: auto; color: var(--link); font-size: var(--fs-base); font-weight: 600; text-decoration: none; }
+.kpi2-link:hover span { text-decoration: underline; }
+.period-control { margin: 0; }
+.avatar-tile { display: inline-flex; flex: 0 0 28px; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-ctl); background: var(--month-current); color: var(--link); font-size: var(--fs-xs); font-weight: 700; line-height: 1; }
+.avatar-tile-36 { flex-basis: 36px; width: 36px; height: 36px; font-size: var(--fs-sm); }
+.status-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 600; line-height: 1.3; white-space: nowrap; vertical-align: middle; }
+.status-chip .icon { flex: none; }
+.status-chip-paid { background: var(--paid-bg); color: var(--paid-text); }
+.status-chip-unpaid { background: var(--unpaid-bg); color: var(--unpaid-text); }
+.status-chip-overdue { background: var(--overdue-bg); color: var(--overdue-text); }
+.status-chip-pending { background: var(--pending-bg); color: var(--pending-text); }
+.status-chip-partial { background: var(--partial-bg); color: var(--partial-text); }
+.status-chip-neutral { background: var(--neutral-bg); color: var(--neutral-text); }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); }
+.card-head .section-label { margin: 0; }
+.card-head .card-link { font-weight: 600; }
+
 /* --- Progress bar ------------------------------------------------------------------------
    .progress ({% progress segments %}): a 10 px bar (.progress-bar) of stacked segments
    (.progress-segment.progress-<family>) in the status colours, widths summing to at most

@@ -1,0 +1,1 @@
+{% comment %}A card's header row (PLAN-015 §4.1; DESIGN-SPEC §3): the .section-label at the left and, when "link" is given, the .card-link at the right ("All operators ›"). Include with label, link and link_text.{% endcomment %}<div class="card-head"><p class="section-label">{{ label }}</p>{% if link %}<a class="card-link" href="{{ link }}">{{ link_text }}</a>{% endif %}</div>

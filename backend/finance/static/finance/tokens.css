@@ -113,6 +113,7 @@
    pair[dark]: --login-text on --login-card-bg over --navy
    pair[dark]: --login-heading on --login-card-bg over --navy
    pair[dark]: --green on --login-icon-bg over --navy (ui)
+   pair[dark]: --link on --month-current over --surface-2
    The sandbox banner (finance/templates/finance/banner.html) takes --sandbox-text on
    --sandbox-bg (PLAN-012g A5; before 12g it carried the pending pair's values as literals).
    White on --btn-primary-bg is the primary button's label, white on #B42318 the confirming
@@ -167,7 +168,12 @@
    Filter, Show and Search buttons) and the pager's current page, the navy with white text in
    light (as before), a raised #2E2E3D with --text's #EDEDF3 in dark. It adds --backdrop too:
    a modal dialog's backdrop, the navy at 45 % in light (as before), black at 60 % in dark; no
-   text sits on it, so it has no pair. */
+   text sits on it, so it has no pair.
+   PLAN-015 Batch 0 (Design v2's components) adds no colour: the KPI card's icon square and the
+   avatar tile are --link on --month-current (documented above; in dark the tile also sits on the
+   sidebar's card, --surface-2, hence its own dark line), the KPI badge and the status chip take
+   the paid, unpaid, overdue, pending, partial and neutral pairs, the card head --muted and --link
+   on --surface. */
 
 @font-face {
   font-family: Inter;

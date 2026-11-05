@@ -1,0 +1,1 @@
+<form method="get" class="segmented period-control" aria-label="Period">{% for value, label, pressed in periods %}<button type="submit" name="period" value="{{ value }}" aria-pressed="{% if pressed %}true{% else %}false{% endif %}">{{ label }}</button>{% endfor %}</form>
