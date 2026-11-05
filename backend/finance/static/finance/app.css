@@ -40,15 +40,24 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 .nav-item:hover, .nav-sublist a:hover { background: var(--sidebar-card-bg); }
 .nav-item[aria-current="page"], .nav-sublist a[aria-current="page"] { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); font-weight: 600; }
 .nav-item[aria-current="true"] { color: var(--sidebar-active-text); font-weight: 600; }
-/* Reports and Admin: their pages in a nested list, open under the active group (Reports on its
-   own pages; Admin, which has no page of its own, is a <details> the reader opens too). */
+/* Reports and Admin: their pages in a nested list, each a <details> open under the active group
+   that the reader opens too. Admin, which has no page of its own, has its heading as the summary
+   (its chevron-down turns up when open). Reports keeps its heading as the link to the reports
+   index (.nav-group-split); its summary is the chevron beside it (.nav-group-toggle, a 36 px
+   target over the heading's right end; chevron-right turns down when open; PLAN-015 §4.1). */
 .nav-sublist { display: none; margin: 2px 0 6px; padding-left: 30px; }
-.nav-group.is-open > .nav-sublist, .nav-disclosure > .nav-sublist { display: block; }
+.nav-disclosure > .nav-sublist { display: block; }
 .nav-sublist a { display: block; padding: 6px 12px; border-radius: var(--radius-ctl); color: var(--sidebar-text); font-size: var(--fs-base); text-decoration: none; }
 .nav-disclosure > summary { list-style: none; }
 .nav-disclosure > summary::-webkit-details-marker { display: none; }
 .nav-disclosure > summary .icon-chevron-down { margin-left: auto; transition: transform 120ms; }
 .nav-disclosure[open] > summary .icon-chevron-down { transform: rotate(180deg); }
+.nav-group-split { position: relative; }
+.nav-group-split > .nav-item { padding-right: 44px; }
+.nav-group-toggle { position: absolute; top: 0; right: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 36px; height: 40px; border-radius: var(--radius-ctl); color: var(--sidebar-text); cursor: pointer; }
+.nav-group-toggle:hover { color: var(--sidebar-active-text); }
+.nav-group-toggle .icon-chevron-right { transition: transform 120ms; }
+.nav-disclosure[open] > .nav-group-toggle .icon-chevron-right { transform: rotate(90deg); }
 /* The Appearance control above the user card (PLAN-012g A3; DESIGN-SPEC §7.1, §7.6): a muted
    12 px label, then the Light · Dark · System segmented form across the sidebar's width, its
    track one step lighter than the sidebar (--sidebar-card-bg), the unpressed segments in
@@ -59,12 +68,19 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 .sidebar .theme-switch button { flex: 1 1 0; justify-content: center; padding: 5px 6px; }
 .sidebar .theme-switch button[aria-pressed="false"] { color: var(--sidebar-text); }
 .sidebar-appearance + .user-card { margin-top: 0; }
-/* The user card: name, then role · Settings · Help · Sign out (a POST form). */
+/* The user card (PLAN-015 §4.1, the mockup's): the identity row (.user-identity: the 28 px
+   initials tile, the name 13/600 and the role in 12 px under it), then Preferences · Help ·
+   Sign out (a POST form) in 12 px --sidebar-link (the teal --link in dark; the sidebar text in
+   light, where the teal on the navy would be under AA). */
 .user-card { margin-top: auto; padding: 12px; border-radius: var(--radius-ctl); background: var(--sidebar-card-bg); color: var(--sidebar-text); font-size: var(--fs-sm); }
-.user-name { display: block; margin-bottom: 2px; color: var(--sidebar-active-text); font-size: var(--fs-base); font-weight: 600; overflow-wrap: anywhere; }
-.user-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-1); }
+.user-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.user-identity-text { display: flex; flex-direction: column; min-width: 0; }
+.user-name { display: block; color: var(--sidebar-active-text); font-size: var(--fs-base); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.user-role { font-size: var(--fs-sm); line-height: 1.3; }
+.user-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-1); margin-top: 10px; }
 .user-meta form { margin: 0; display: inline; }
-.user-meta a, .user-meta .link-button { color: var(--sidebar-text); }
+.user-meta a, .user-meta .link-button { color: var(--sidebar-link); text-decoration: none; }
+.user-meta a:hover, .user-meta .link-button:hover { text-decoration: underline; }
 .link-button { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
 
 /* --- Content column: the page header, then the page --------------------------------------- */
@@ -1232,6 +1248,10 @@ fieldset.card > legend + * { clear: both; }
   .more-list .theme-switch button { flex: 1 1 0; justify-content: center; width: auto; padding: 0 var(--space-3); font-size: var(--fs-base); }
   .more-list .theme-switch button[aria-pressed="false"] { color: var(--muted); }
   .more-list .more-sublist { list-style: none; margin: 0; padding: 0 0 0 var(--space-6); }
+  /* PLAN-015 §4.1: the user's tile, name and role above Preferences, as in the sidebar's card. */
+  .more-list .more-user { padding: var(--space-3) var(--space-2) var(--space-1); border-top: 1px solid var(--border-soft); }
+  .more-list .more-user .user-name { color: var(--text); }
+  .more-list .more-user .user-role { color: var(--muted); }
   /* The dashboard (DESIGN-SPEC §6): KPI cards two per row, the rest stacked. */
   .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
   .kpi { padding: var(--space-3) 14px; }

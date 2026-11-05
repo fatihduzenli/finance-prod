@@ -63,6 +63,8 @@
    pair: --sandbox-text on --sandbox-bg
    pair: --sidebar-text on --sidebar-card-bg over --sidebar-gradient[start]
    pair: --sidebar-text on --sidebar-card-bg over --sidebar-gradient[end]
+   pair: --sidebar-link on --sidebar-card-bg over --sidebar-gradient[start]
+   pair: --sidebar-link on --sidebar-card-bg over --sidebar-gradient[end]
    pair: --chart-label on --surface
    pair: --flash-success-text on --flash-success-bg
    pair: --flash-warning-text on --flash-warning-bg
@@ -84,6 +86,7 @@
    pair[dark]: --link on --bg
    pair[dark]: --sidebar-text on --sidebar-bg
    pair[dark]: --sidebar-text on --sidebar-card-bg
+   pair[dark]: --sidebar-link on --sidebar-card-bg
    pair[dark]: --sidebar-active-text on --sidebar-bg
    pair[dark]: --sidebar-active-text on --sidebar-active-bg over --sidebar-bg
    pair[dark]: --paid-text on --paid-bg
@@ -173,7 +176,9 @@
    avatar tile are --link on --month-current (documented above; in dark the tile also sits on the
    sidebar's card, --surface-2, hence its own dark line), the KPI badge and the status chip take
    the paid, unpaid, overdue, pending, partial and neutral pairs, the card head --muted and --link
-   on --surface. */
+   on --surface. The sidebar's user card adds --sidebar-link for its three links: the teal --link
+   in dark (as the mockup draws them; 6.7 on the card), the sidebar text in light, where the teal
+   on the navy card would be under AA (its pairs are the sidebar text's, 9.2 and 5.9). */
 
 @font-face {
   font-family: Inter;
@@ -239,6 +244,7 @@
 
   /* added by 12g for the dark theme (PLAN-012g A1): the light values; the dark ones below */
   --sidebar-bg: #0B2545;  --sidebar-border: transparent;  --sidebar-card-bg: rgba(255,255,255,.08);
+  --sidebar-link: var(--sidebar-text);  /* PLAN-015: the user card's links (dark: the teal) */
   --phone-bar-button-bg: rgba(255,255,255,.10);
   --header-bg: var(--surface);  --card-border: var(--border);
   --text-on-accent: #FFFFFF;  --btn-primary-text: #FFFFFF;  --btn-danger-bg: #B42318;
@@ -277,7 +283,7 @@
 
     /* text */
     --text: #EDEDF3;  --text-2: #C3C3CC;  --muted: #A3A3B3;  --faint: #70707D;
-    --link: #2EC4A6;
+    --link: #2EC4A6;  --sidebar-link: var(--link);
 
     /* the primary button: the light theme's teal (§7.2 --primary-*); white text */
     --btn-primary-bg: #0E8F86;  --btn-primary-border: #0A6B64;  --btn-primary-text: #FFFFFF;
@@ -332,7 +338,7 @@
 
       /* text */
       --text: #EDEDF3;  --text-2: #C3C3CC;  --muted: #A3A3B3;  --faint: #70707D;
-      --link: #2EC4A6;
+      --link: #2EC4A6;  --sidebar-link: var(--link);
 
       /* the primary button: the light theme's teal (§7.2 --primary-*); white text */
       --btn-primary-bg: #0E8F86;  --btn-primary-border: #0A6B64;  --btn-primary-text: #FFFFFF;
