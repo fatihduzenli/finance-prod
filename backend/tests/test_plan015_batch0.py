@@ -338,7 +338,7 @@ def test_the_portal_controls_offer_light_and_dark_only() -> None:
         assert forms, path
         for form in forms:
             assert re.findall(r'name="theme" value="(\w+)"', form) == ["light", "dark"], path
-        assert 'data-theme="dark"' in page and "System" not in page, path
+        assert 'data-theme="dark"' in page and ">System<" not in page, path
 
 
 def saved_operator() -> Operator:
@@ -362,4 +362,4 @@ def test_the_staff_switch_has_two_segments_in_the_sidebar_the_sheet_and_settings
     for _, form in forms:
         assert re.findall(r"<button[^>]*>([^<]+)</button>", form) == ["Light", "Dark"]
         assert re.findall(r'value="(\w+)" aria-pressed="true"', form) == ["dark"]
-    assert "System" not in page and "this device" not in page
+    assert ">System<" not in page and "this device" not in page

@@ -55,6 +55,7 @@ from tests.auth_helpers import make_user, verified_client
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
 from tests.test_lease_end import a_store_lease, deductions, draft, saved, settle
 from tests.test_transfer import ready as a_ready_transfer
+from tests.text_helpers import assert_absent
 
 pytestmark = pytest.mark.django_db
 
@@ -1081,7 +1082,9 @@ def test_kpi2_refuses_an_unknown_tone(arguments: str) -> None:
 )
 def test_kpi2_draws_a_link_to_this_site_only(link: str) -> None:
     html = rendered("{% kpi2 'alert' 'Overdue' link=link link_text='See' %}", link=link)
-    assert "<a " not in html and "evil" not in html and "javascript" not in html
+    assert "<a " not in html and 'href="' not in html
+    assert_absent(html, "evil")
+    assert_absent(html, "javascript")
 
 
 def test_kpi2_escapes_every_text() -> None:
