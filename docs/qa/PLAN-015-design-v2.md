@@ -3,7 +3,8 @@
 Fable's plan under the root `CLAUDE.md` §1.2 for the owner's request of 2026-11-05: "re-design my
 entire pages according to this screenshot". The reference is `docs/design/dashboard-v2-dark-laptop.png`
 (717 × 619, dark, laptop). Opus builds; Fable gates each batch; one PR per batch, merged in order.
-**Status: draft awaiting the owner's answers to §9 before Batch 0 starts.**
+**Status: Batches 0 and 1 approved by the owner on 2026-11-05 (§9 answered); Batches 2–6 wait for the
+owner's review of the dashboard on staging, possibly until after Step 13b.**
 
 ## 1. Objective
 
@@ -25,7 +26,7 @@ palette; this is a component and layout redesign, not a new theme.
 
 | Batch | Scope | Gate class |
 |---|---|---|
-| 0 | **Shared components**: KPI card v2 (`{% kpi2 %}`: icon, title, sub-line, figure, badge, footer link), the header period control, the avatar initials tile, the status chip with a dot, the card header (section label + right link), the sidebar's user card and the Reports chevron; `app.css` rules; the design-spec update (§4 of `DESIGN-SPEC.md`) | full (shared code on every page) |
+| 0 | **Shared components**: KPI card v2 (`{% kpi2 %}`: icon, title, sub-line, figure, badge, footer link), the header period control, the avatar initials tile, the status chip with a dot, the card header (section label + right link), the sidebar's user card and the Reports chevron; **Appearance: Light and Dark only (§4.4)**; `app.css` rules; the design-spec update (§4 and §7.1 of `DESIGN-SPEC.md`) | full (shared code on every page; a data migration) |
 | 1 | **Dashboard v2** as the mockup: the services (`dashboard.kpis_v2`, `collections_by_month`, `operator_tiles`, `activity`), the period scoping, the chart, the activity feed with search/filter/paging, the spreadsheet download; the fate of the current sections per §9 | full (money figures; data services) |
 | 2 | **List pages** (stores, operators, leases, invoices, payments, bank deposits, outbox): the header with period/segmented controls where a list has a range, the table style, chips, the paging bar | small + full visual |
 | 3 | **Workspaces** (store, operator): the summary strip as KPI cards v2, the side cards' headers, tiles for related stores/operators | small + full visual |
@@ -61,6 +62,14 @@ sheet), `infra/`, CI, the tokens' values, any model change except §4.1's option
   display ("Admin", "Billing", "Viewer") unless §9.4 adds a title field.
 - Reports in the sidebar: a chevron that opens its sub-items (the group stays open on report pages).
 
+### 4.4 Appearance (Batch 0; owner, 2026-11-05 §9.7)
+Only Light and Dark: the System choice leaves the sidebar control, the phone More sheet and the
+Settings page; `accounts.themes` offers `light` and `dark`, the default for a new user is `dark`, a
+data migration (`accounts/0005_theme_light_or_dark.py`) moves every stored `system` to `dark` and the
+column's choices and CHECK (if any) follow; signed-out pages (the staff sign-in frame, the portal's
+sign-in and link pages) render `data-theme="dark"`; a posted `system` is refused as unknown. The spec's
+§7.1 and the tests follow.
+
 ### 4.2 Dashboard services (Batch 1), all read-only, each with a flat query count
 - `kpis_v2(period, today) -> Kpis`: `due` (the period's rent and charges due, the stores counted,
   the next due day), `collected` (settled in the period, the percent of what is due, the delta
@@ -73,12 +82,19 @@ sheet), `infra/`, CI, the tokens' values, any model change except §4.1's option
 - `operator_tiles(today, limit=4)`: per operator with a current lease — initials, name, open
   balance, store count, a status chip (Paid up / Overdue N days / Partial / Promise · date), ordered
   by balance desc; "All operators ›" to the list.
-- `activity(today, query, kind, page)`: the unified feed from the existing timeline/contact log and
-  payments: Payment received, Invoice sent, Promise to pay, Paid outside {provider}, Lease ended,
-  with store, operator, date, amount and the status chip; `kind` filter (All activity, Payments,
-  Invoices, Promises, Leases); 5 a page on the dashboard with ‹ Previous · 1 2 3 · Next ›.
+- `activity(today, query, kind, page)`: the unified feed from the existing timeline/contact log,
+  payments and returns: Payment received, Invoice sent, Promise to pay, Paid outside {provider}, Lease
+  ended, **Payment returned (NSF)**, **Promise broken**, with store, operator, date, amount and the
+  status chip; `kind` filter (All activity, Payments, Invoices, Promises, Leases, Returns, **Needs
+  attention** — the current Needs attention rows); 5 a page on the dashboard with ‹ Previous · 1 2 3 ·
+  Next ›. The Overdue KPI's sub-line carries the Needs attention count.
 - The spreadsheet download: the period's KPI rows and the activity rows as CSV (`dashboard_export`).
-- "Record payment": the existing Add payment page.
+- "Record payment" (primary, the existing Add payment page) with "New invoice" beside it as a
+  secondary button.
+- The mini calendar stays as a compact card beside the Recent activity feed, with its "Next 7 days"
+  list and the day-click behaviour as built. Payment status (the donut) is removed. Coming up lives on
+  the Calendar page. Today's run, Failed payment attempts, Invoices created but not sent and Last
+  nightly check move to Admin › Daily charges as cards (their tests move with them).
 
 ### 4.3 Routes
 `ledger:dashboard` keeps its name and takes `?period=`, `?q=`, `?kind=`, `?page=`; one new route
@@ -94,7 +110,7 @@ sheet), `infra/`, CI, the tokens' values, any model change except §4.1's option
 | 1.1 services | `ledger/services/dashboard.py` (or `dashboard_v2.py`) | §4.2 with reconciliation tests against the reports |
 | 1.2 page | `ledger/views/dashboard.py`, `ledger/templates/ledger/dashboard/*.html`, `dashboard.js` (the chart's tooltip and the Monthly/Yearly switch) | the mockup in both themes and widths |
 | 1.3 export | `views/dashboard.py`, `services/csv_export.py` | CSV of the KPIs and the activity rows |
-| 1.4 the current sections | per §9.1 | moved or kept as decided; nothing silently dropped |
+| 1.4 the current sections | `ledger/templates/ledger/dashboard/*.html`, `ledger/views/daily_charges.py` + templates | the four operational cards on Admin › Daily charges with their tests; the donut gone; the mini calendar beside the feed |
 | 1.5 tests | `tests/test_dashboard_v2.py`, `e2e/test_dashboard_v2.py`, visual baselines | §6 |
 
 ## 6. Test plan (Batches 0–1)
@@ -139,21 +155,18 @@ Yearly, pages the activity.
 4. Each batch's gate is green at its class; each merge verified on staging.
 5. No token value changes; no portal change; no new dependency.
 
-## 9. Decisions for the owner (before Batch 0)
+## 9. The owner's decisions (2026-11-05)
 
-1. **The current dashboard sections** not in the mockup: Needs attention (7), the mini calendar,
-   Payment status (the donut), Coming up, Today's run, Failed payment attempts, Invoices created but
-   not sent, Last nightly check. Fable's recommendation: Needs attention becomes a kind in the
-   Recent activity filter ("Needs attention") and keeps its count in the Overdue KPI's sub-line;
-   the calendar and Coming up stay on the Calendar page; Today's run, Failed attempts, Invoices not
-   sent and the nightly check move to Admin › Daily charges as cards. Confirm or change.
-2. **Period control**: This month · Quarter · Year scope the four KPIs only (the chart has its own
-   Monthly · Yearly; the feed is not scoped). Confirm.
-3. **Primary action**: "Record payment" (Add payment) replaces "New invoice" in the dashboard's
-   header; New invoice stays in the store workspace. Confirm.
-4. **Role label**: the mockup's "Property manager" under the name — use the role's display (Admin /
-   Billing / Viewer), or add a free-text title per user (a migration)?
-5. **Batch order**: 0 → 1 → 2 → 3 → 4 → 5 → 6 as in §2, one PR per batch, each merged on green
-   and verified on staging under the standing approval. Confirm, or name the pages you want first.
-6. **Activity feed scope**: five kinds (payment received, invoice sent, promise to pay, paid outside
-   the provider, lease ended) at 5 per page on the dashboard. Add or remove kinds?
+1. **Current sections**: Needs attention becomes a kind in the activity filter and feeds the Overdue
+   KPI's sub-line; Today's run, Failed attempts, Invoices not sent and Last nightly check move to
+   Admin › Daily charges as cards; Coming up lives on the Calendar page; Payment status is removed
+   (the KPIs cover it); the mini calendar stays as a compact card beside the Recent activity feed with
+   its "Next 7 days" list and the day-click behaviour as built.
+2. **Period control** scopes the four KPIs only.
+3. **"Record payment"** is the primary action; "New invoice" stays beside it as a secondary button.
+4. **Role label**: the role's display (Admin / Billing / Viewer); no migration.
+5. **Order**: Batches 0 and 1 now, then stop for the owner's review on staging; Batches 2–6 wait
+   (possibly until after Step 13b).
+6. **Activity kinds**: the five plus "Payment returned (NSF)" and "Promise broken"; five per page.
+7. **Appearance**: Light and Dark only (§4.4): System removed everywhere, Dark the default for new
+   users, stored System moved to Dark, signed-out pages Dark; tests and spec §7.1 updated.
