@@ -19,6 +19,7 @@ import importlib
 import inspect
 import re
 import uuid
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -32,12 +33,13 @@ from accounts.roles import Role
 from ledger import forms as ledger_forms
 from ledger.forms import (
     BRAND_REFUSED,
+    CALENDAR_LINK_UNKNOWN,
     CHOICE_REFUSED,
     STATE_REFUSED,
     OperatorCreateForm,
     OperatorForm,
 )
-from ledger.models import Lease, Operator, OperatorKind, SyncStatus
+from ledger.models import CalendarEntry, Lease, Operator, OperatorKind, SyncStatus
 from ledger.services import operators, search
 from payments import lease_sync
 from payments.fake import FakeProvider
@@ -497,11 +499,23 @@ def test_the_store_form_never_repeats_a_refused_select(field: str, refusal: str)
     _assert_not_echoed(admin, "/stores/new/", store_data(**{field: CARD}), refusal)
 
 
-@pytest.mark.parametrize("field", ["kind", "store", "operator", "lease"])
-def test_the_calendar_form_never_repeats_a_refused_select(field: str) -> None:
+@pytest.mark.parametrize("field", ["kind", "link_kind", "link_id"])
+def test_the_calendar_dialog_never_repeats_a_refused_choice(field: str) -> None:
+    """The New calendar entry dialog (owner, 2026-11-06): Kind and the hidden link."""
     billing, _ = client_for(Role.BILLING)
     data = {"kind": "note", "on": "2026-10-20", "title": "Call", "body": "", field: CARD}
-    _assert_not_echoed(billing, "/calendar/new/", data)
+    refusal = CHOICE_REFUSED if field == "kind" else CALENDAR_LINK_UNKNOWN
+    _assert_not_echoed(billing, "/calendar/new/", data, refusal)
+
+
+@pytest.mark.parametrize("field", ["kind", "store", "operator", "lease"])
+def test_the_calendar_edit_form_never_repeats_a_refused_select(field: str) -> None:
+    billing, user = client_for(Role.BILLING)
+    entry = CalendarEntry.objects.create(
+        kind="note", on=date(2026, 10, 20), title="Call", author=user
+    )
+    data = {"kind": "note", "on": "2026-10-20", "title": "Call", "body": "", field: CARD}
+    _assert_not_echoed(billing, f"/calendar/{entry.pk}/edit/", data)
 
 
 @pytest.mark.parametrize("field", ["kind", "lease"])

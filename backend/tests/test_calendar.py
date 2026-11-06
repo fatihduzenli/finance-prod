@@ -192,8 +192,10 @@ def entry_post(**overrides: str) -> dict[str, str]:
 def test_a_note_for_october_20_shows_on_the_page_and_links_to_its_page(today: date) -> None:
     client, _ = client_for(Role.BILLING)
     response = client.post("/calendar/new/", entry_post())
-    assert response.status_code == 302 and response["Location"] == "/calendar/?month=2026-10"
     entry = CalendarEntry.objects.get()
+    # The New calendar entry dialog (owner, 2026-11-06): the month, at the entry's chip.
+    assert response.status_code == 302
+    assert response["Location"] == f"/calendar/?month=2026-10#entry-{entry.pk}"
     page = client.get("/calendar/?month=2026-10").content.decode()
     assert f'href="/calendar/{entry.pk}/" id="entry-{entry.pk}">Call the landlord</a>' in page
     assert 'data-day="2026-10-20"' in page

@@ -353,32 +353,28 @@ def _input(form: CalendarEntryForm | CalendarEntryDialogForm) -> calendar.EntryI
     )
 
 
-def _save(request: HttpRequest, entry: CalendarEntry | None) -> HttpResponse:
+def _save(request: HttpRequest, entry: CalendarEntry) -> HttpResponse:
+    """The edit page of ``entry`` (its author or an admin)."""
     refused = _billing_only(request)
     if refused is not None:
         return refused
     role = _role(request)
     actor = _actor(request)
-    if entry is not None and not calendar.can_change(
-        entry, actor, is_admin=meets(role, Role.ADMIN)
-    ):
+    if not calendar.can_change(entry, actor, is_admin=meets(role, Role.ADMIN)):
         messages.error(request, calendar.NOT_YOURS)
         return redirect("ledger:calendar:detail", pk=entry.pk)
     if request.method == "POST":
         form = CalendarEntryForm(request.POST)
         if form.is_valid():
             outcome = calendar.save_entry(
-                _input(form),
-                actor=actor,
-                is_admin=meets(role, Role.ADMIN),
-                entry_id=entry.pk if entry is not None else None,
+                _input(form), actor=actor, is_admin=meets(role, Role.ADMIN), entry_id=entry.pk
             )
             if outcome.ok and outcome.entry is not None:
                 messages.success(request, outcome.message)
                 return redirect(f"{reverse('ledger:calendar:page')}?month={outcome.entry.on:%Y-%m}")
             form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
         drop_payment_data(form)
-    elif entry is not None:
+    else:
         form = CalendarEntryForm(
             initial={
                 "kind": entry.kind,
@@ -391,13 +387,6 @@ def _save(request: HttpRequest, entry: CalendarEntry | None) -> HttpResponse:
                 "lease": str(entry.lease_id or ""),
             }
         )
-    else:
-        initial: dict[str, object] = {"kind": calendar.KIND_NOTE}
-        try:
-            initial["on"] = date.fromisoformat(request.GET.get("on", "") or "")
-        except ValueError:
-            initial["on"] = timezone.localdate()
-        form = CalendarEntryForm(initial=initial)
     return render(request, "ledger/calendar/form.html", {"form": form, "entry": entry})
 
 
@@ -405,13 +394,27 @@ def _save(request: HttpRequest, entry: CalendarEntry | None) -> HttpResponse:
 @require_http_methods(["GET", "HEAD", "POST"])
 def calendar_add(request: HttpRequest) -> HttpResponse:
     """The New calendar entry dialog: a GET is the calendar page with it open (``?on=``
-    its day)."""
+    its day); a POST saves (to the entry's month, ``#entry-<pk>``) or shows it again with its
+    errors, over the month of the date posted."""
     refused = _billing_only(request)
     if refused is not None:
         return refused
     if request.method != "POST":
         return _page(request, entry_open=True)
-    return _save(request, None)
+    form = CalendarEntryDialogForm(request.POST, auto_id=ENTRY_IDS)
+    if form.is_valid():
+        role = _role(request)
+        outcome = calendar.save_entry(
+            _input(form), actor=_actor(request), is_admin=meets(role, Role.ADMIN)
+        )
+        if outcome.ok and outcome.entry is not None:
+            messages.success(request, outcome.message)
+            page = reverse("ledger:calendar:page")
+            return redirect(f"{page}?month={outcome.entry.on:%Y-%m}#entry-{outcome.entry.pk}")
+        form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
+    drop_payment_data(form)
+    on = form.cleaned_data.get("on") if hasattr(form, "cleaned_data") else None
+    return _page(request, entry_form=form, entry_open=True, on=on)
 
 
 @role_required
