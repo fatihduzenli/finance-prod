@@ -4,11 +4,11 @@ sidebar replaced the 12c top bar and left navigation).
 
 The shell is checked on every main page as each role: the sidebar with the logo, the
 navigation's items and groups with ``aria-current``, the user card, the tab title
-"Monvera · <page>". No literal colour outside ``tokens.css`` (app.css and every template,
-except the two named below). The company settings row is seeded, single, edited in the admin
-by an admin only and audited; its provider name reaches the job banner. The 12f shell's own
-cases (the page header, the phone shell, the icons, the tokens against the spec) are in
-``tests/test_plan012f_shell.py``.
+"<page> · Monvera" (owner, 2026-11-05). No literal colour outside ``tokens.css`` (app.css and
+every template, except the two named below). The company settings row is seeded, single,
+edited in the admin by an admin only and audited; its provider name reaches the job banner.
+The 12f shell's own cases (the page header, the phone shell, the icons, the tokens against the
+spec) are in ``tests/test_plan012f_shell.py``.
 """
 
 from __future__ import annotations
@@ -152,7 +152,8 @@ def test_every_main_page_renders_in_the_shell(
         assert f">{label}<" in nav, label
     for label in BILLING_ITEMS:
         assert (f">{label}<" in nav) is (role != Role.VIEWER), label
-    assert title(html).startswith(f"[SANDBOX] Monvera · {page}"), title(html)
+    assert title(html).startswith(f"[SANDBOX] {page}"), title(html)
+    assert title(html).endswith(" · Monvera"), title(html)
     assert "| Finance" not in html
     marked = current_labels(bar)
     assert marked == ([current] if current else []), marked
@@ -342,16 +343,17 @@ def test_every_staff_page_links_the_tokens_before_the_style_sheet() -> None:
 # --- Titles --------------------------------------------------------------------------------
 
 
-def test_the_title_follows_the_short_name() -> None:
+def test_the_title_is_the_apps_whatever_the_short_name() -> None:
+    # Owner, 2026-11-05: "<page> · Monvera"; the company's name stays inside the pages.
     row = CompanySettings.current()
     row.short_name = "Acme"
     row.save()
-    assert title(body(client_for(Role.VIEWER).get("/"))) == "[SANDBOX] Acme · Dashboard"
+    assert title(body(client_for(Role.VIEWER).get("/"))) == "[SANDBOX] Dashboard · Monvera"
 
 
-def test_the_sign_in_page_reads_the_short_name() -> None:
+def test_the_sign_in_page_title_is_the_apps() -> None:
     html = body(Client().get("/account/login/"))
-    assert title(html) == "[SANDBOX] Monvera · Login"
+    assert title(html) == "[SANDBOX] Login · Monvera"
     assert "| Finance" not in html
 
 
@@ -398,8 +400,8 @@ def test_the_manifest_answers_with_its_type_and_the_brand_icons() -> None:
     assert response.status_code == 200
     assert response["Content-Type"] == "application/manifest+json"
     data = response.json()
-    # PLAN-012f D4: the theme is --navy, the background --bg.
-    assert (data["theme_color"], data["background_color"]) == ("#0b2545", "#f4f6f9")
+    # Owner, 2026-11-05: both colours are the dark theme's --bg.
+    assert (data["theme_color"], data["background_color"]) == ("#171721", "#171721")
     assert all(icon["src"].startswith("/static/finance/brand/") for icon in data["icons"])
 
 
@@ -513,15 +515,15 @@ def test_read_falls_back_to_the_seed_when_the_table_is_missing(
     assert (row.pk, row.short_name, row.provider_name) == (1, "Monvera", "Stax")
 
 
-def test_the_manifest_reads_the_row_once() -> None:
+def test_the_manifest_reads_no_row() -> None:
+    # Owner, 2026-11-05: the manifest is the app's, the same for everyone; no company row.
     client = client_for(Role.VIEWER)
     client.get("/reports/")  # warm the session
     with CaptureQueriesContext(connection) as captured:
         response = client.get("/manifest.webmanifest")
     assert response.status_code == 200
-    # One plain read: no get_or_create (its savepoint and its INSERT).
     reads = [q["sql"] for q in captured.captured_queries if '"company_settings"' in q["sql"]]
-    assert len(reads) == 1 and reads[0].startswith("SELECT ")
+    assert reads == []
 
 
 def test_the_admin_registers_change_only() -> None:

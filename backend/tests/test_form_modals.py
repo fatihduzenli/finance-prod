@@ -107,7 +107,7 @@ def test_new_store_renders_the_stores_list_with_the_dialog_open() -> None:
     assert 'id="documents-fields"' in dialog
     assert 'name="creation_key"' in dialog and 'name="csrfmiddlewaretoken"' in dialog
     assert_foot(dialog, "store", STORES)
-    assert re.search(r"<title>[^<]* · Stores</title>", body)
+    assert re.search(r"<title>[^<]*Stores · Monvera</title>", body)
     assert duplicate_ids(body) == []
 
 

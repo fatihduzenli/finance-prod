@@ -32,8 +32,9 @@ open, the user's tile, name and role, Preferences, Help and Sign out as a POST f
 that holds the page is marked). The sheets work
 without script; the script below closes an open one on a click outside it and on Escape.
 
-The tab title is "<short name> · <page>" (finance.context_processors.company): each page's
-title block holds the page part only. Flash messages are .toast items (PLAN-012c D5): the
+The tab title is "<page> · Monvera" (the app's name; owner, 2026-11-05): each page's title
+block holds the page part only. The icons, the manifest and the app-name metas are
+finance/_app_identity.html's. Flash messages are .toast items (PLAN-012c D5): the
 level's icon (.toast-icon: check, alert, dot, info; PLAN-012f-b E-4), the text, a
 dismiss button (the script below removes the message), a CSS fade (opacity) after 8 s for
 success and information, the text kept in the page. print.css (media="print") drops the
@@ -59,15 +60,12 @@ for an admin.
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   {% if job_refresh %}<meta http-equiv="refresh" content="5">{% endif %}
-  <title>{{ company.short_name }} · {% block title %}{% endblock %}</title>
+  <title>{% block title %}{% endblock %} · Monvera</title>
   {% block theme_color %}{% include "finance/_theme_color.html" %}{% endblock %}
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'finance/app.css' %}">
   <link rel="stylesheet" href="{% static 'finance/print.css' %}" media="print">
-  <link rel="icon" href="{% static 'finance/brand/monvera_icon_192.png' %}" type="image/png" sizes="192x192">
-  <link rel="icon" href="{% static 'finance/brand/monvera_icon.svg' %}" type="image/svg+xml">
-  <link rel="manifest" href="{% url 'finance:manifest' %}" crossorigin="use-credentials">
-  <link rel="apple-touch-icon" href="{% static 'finance/brand/monvera_icon_192.png' %}">
+  {% include "finance/_app_identity.html" %}
   {% block head %}{% endblock %}
 </head>
 <body class="app">

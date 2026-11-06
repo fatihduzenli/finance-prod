@@ -1448,7 +1448,7 @@ def test_the_add_buttons_and_the_form_say_log_contact(today: date) -> None:
         assert '<a class="btn" id="add-contact"' in page and "Log contact</a>" in page, path
         assert "Add contact" not in page and "Add entry" not in page, path
     form = form_page(client, operator)
-    assert "Monvera · Log contact</title>" in form
+    assert "Log contact · Monvera</title>" in form
     assert '<h2 id="log-contact-dialog-title">Log contact</h2>' in form
 
 

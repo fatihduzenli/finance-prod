@@ -429,7 +429,7 @@ def test_status_open_lists_only_open_charges_and_the_total_is_the_aging_row() ->
 def test_the_page_is_titled_aging_and_the_header_has_no_money_filter_bug() -> None:
     build_world()
     html = page(AGING)
-    assert "· Aging</title>" in html and "<h1>Aging</h1>" in html
+    assert "Aging · Monvera</title>" in html and "<h1>Aging</h1>" in html
     head = re.search(r"<thead>(.*?)</thead>", html, re.S)
     assert head is not None
     headers = re.findall(r"<th[^>]*>([^<]*)</th>", head.group(1))

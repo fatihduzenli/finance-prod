@@ -67,6 +67,9 @@ def test_every_portal_route_is_classified_and_the_public_set_is_exactly_the_sign
         "portal:invite",
         "portal:reset_request",
         "portal:reset_confirm",
+        # The portal's web app manifest (the home-screen identity, 2026-11-05): JSON with the
+        # app's fixed name, colours and icon paths, no setting and no row — public by design.
+        "portal:manifest",
     } | {name for name in PORTAL_PUBLIC_ROUTE_NAMES if name.endswith("not_found")}
 
 

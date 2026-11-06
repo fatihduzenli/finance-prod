@@ -228,8 +228,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: since PLAN-014 I-b (ledger:leases:insurance_bill, the LEASE card's insurance "Bill now"); 315
 #: since the Outbox's "Preview next 30 days" (ledger:outbox:preview) and "Copy invite link"
 #: (ledger:operators:portal_copy_link), owner, 2026-11-01; 317 since the Outbox's "Send all held
-#: for settings" (ledger:outbox:send_held_for_settings), owner, 2026-11-02.
-FROZEN_ROUTES = (317, "41828d1d6f17a91bfa3855a84d47f90eb0f602de031c9b32d679694a57654aab")
+#: for settings" (ledger:outbox:send_held_for_settings), owner, 2026-11-02; 318 since the
+#: portal's own web app manifest (portal:manifest, opening on /portal/), owner, 2026-11-05.
+FROZEN_ROUTES = (318, "f566d4cec6a05b546397adc9327fe3a4510f2ea2cd9e7bc811a0b6cb051a9c76")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

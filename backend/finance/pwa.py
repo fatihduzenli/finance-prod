@@ -16,14 +16,21 @@ and the worker caches nothing.
 Static files are served without hashed names (``finance.settings.STORAGES``), so the list
 comes from the static file finders rather than a ``staticfiles.json`` manifest.
 
-Both routes need a signed-in, verified user like every staff page (``accounts.registry``
-lists them as read-only); the page asks for the manifest with its credentials
-(``crossorigin="use-credentials"``). Neither carries a setting or a host name.
+The manifest is public (``accounts.registry.PUBLIC_ROUTE_NAMES``): a browser reads it from
+the sign-in page too, without a session, so a phone that adds the site to its home screen
+there gets the app's name and icons rather than a fallback built from the page title and the
+host. It carries no setting, no host name and nothing of the company row, so the page links
+it without credentials. The service worker needs a signed-in, verified user like every staff
+page (``accounts.registry`` lists it as read-only).
 
-The manifest's name is the company's (``company_settings``, PLAN-012c D2), as data in the
-JSON; its icons are the brand's (192 and 512 px PNGs and the SVG, PLAN-012c D4). Its colours
-follow the tokens (PLAN-012f D4): the theme is ``--navy``, the top of the phone bar's gradient,
-and the background ``--bg``, the content's, so the splash is the icon on the page colour.
+The manifest names the app, "Monvera" (owner, 2026-11-05: the home-screen identity is the
+app's, so PLAN-012c D2's company name gives way here; the company's name stays inside the
+pages). The operator portal has its own, ``/portal/manifest.webmanifest`` (``portal:manifest``,
+public too): the same name, colours and icons, its start URL and scope ``/portal/``. Its
+icons are the brand's, the M mark on the navy-to-teal gradient square, opaque
+(``scripts/make_brand_icons.py``): 192 and 512 px PNGs, a 512 px maskable one with more
+padding, and the SVG. Its colours are the dark theme's ``--bg`` (tokens.css), so the
+splash and the standalone window's bar match the icon's dark ground.
 """
 
 from __future__ import annotations
@@ -32,7 +39,6 @@ import hashlib
 import json
 from dataclasses import dataclass
 from functools import cache
-from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.contrib.staticfiles import finders
@@ -40,9 +46,6 @@ from django.http import HttpRequest, HttpResponse
 from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.views.decorators.http import require_safe
-
-if TYPE_CHECKING:
-    from ledger.models import CompanySettings
 
 #: The static path prefixes the worker may keep: the app's own files, not the admin's.
 PRECACHE_PREFIXES: tuple[str, ...] = ("finance/", "ledger/")
@@ -53,16 +56,19 @@ WORKER_CONTENT_TYPE = "application/javascript"
 WORKER_TEMPLATE = "finance/sw.js"
 #: ``--navy`` in finance/static/finance/tokens.css: the phone bar's gradient starts on it.
 THEME_COLOR = "#0b2545"
-#: ``--bg`` of the dark theme (PLAN-012g A2): the page's theme-color meta in dark; the manifest
-#: stays light.
+#: ``--bg`` of the dark theme (PLAN-012g A2): the page's theme-color meta in dark, and the
+#: manifest's theme and background colours.
 THEME_COLOR_DARK = "#171721"
-#: ``--bg`` in finance/static/finance/tokens.css: the content's background.
-BACKGROUND_COLOR = "#f4f6f9"
-#: (static path, sizes, type) of each icon in the manifest.
-ICONS: tuple[tuple[str, str, str], ...] = (
-    ("finance/brand/monvera_icon_192.png", "192x192", "image/png"),
-    ("finance/brand/monvera_icon_512.png", "512x512", "image/png"),
-    ("finance/brand/monvera_icon.svg", "any", "image/svg+xml"),
+#: The app's name on a home screen (owner, 2026-11-05), whatever the company's name.
+APP_NAME = "Monvera"
+#: Where the portal's manifest opens, and its scope (``portal/urls.py`` mounts the portal here).
+PORTAL_START_URL = "/portal/"
+#: (static path, sizes, type, purpose) of each icon in the manifest.
+ICONS: tuple[tuple[str, str, str, str], ...] = (
+    ("finance/brand/monvera_icon_192.png", "192x192", "image/png", "any"),
+    ("finance/brand/monvera_icon_512.png", "512x512", "image/png", "any"),
+    ("finance/brand/monvera_icon_512_maskable.png", "512x512", "image/png", "maskable"),
+    ("finance/brand/monvera_icon.svg", "any", "image/svg+xml", "any"),
 )
 
 
@@ -111,30 +117,36 @@ def worker_source() -> str:
     )
 
 
-def manifest_data(company: CompanySettings) -> dict[str, object]:
-    """The manifest of the company settings row ``company``."""
+def manifest_data(start_url: str = "/") -> dict[str, object]:
+    """The web app manifest, the same for every visitor: the staff app's at ``/``, the
+    operator portal's at ``/portal/`` (``start_url`` is also the scope)."""
     return {
-        "name": str(company.name),
-        "short_name": str(company.short_name),
-        "start_url": "/",
-        "scope": "/",
+        "name": APP_NAME,
+        "short_name": APP_NAME,
+        "start_url": start_url,
+        "scope": start_url,
         "display": "standalone",
-        "background_color": BACKGROUND_COLOR,
-        "theme_color": THEME_COLOR,
+        "background_color": THEME_COLOR_DARK,
+        "theme_color": THEME_COLOR_DARK,
         "icons": [
-            {"src": static(path), "sizes": sizes, "type": kind, "purpose": "any"}
-            for path, sizes, kind in ICONS
+            {"src": static(path), "sizes": sizes, "type": kind, "purpose": purpose}
+            for path, sizes, kind, purpose in ICONS
         ],
     }
 
 
 @require_safe
 def manifest(request: HttpRequest) -> HttpResponse:
-    """``finance:manifest``."""
-    from finance.context_processors import company_settings
+    """``finance:manifest``, public."""
+    return HttpResponse(json.dumps(manifest_data()), content_type=MANIFEST_CONTENT_TYPE)
 
+
+@require_safe
+def portal_manifest(request: HttpRequest) -> HttpResponse:
+    """``portal:manifest``, public: the same app, opening on the portal, so an operator who
+    adds the portal to a home screen lands on it rather than on the staff sign-in."""
     return HttpResponse(
-        json.dumps(manifest_data(company_settings(request))), content_type=MANIFEST_CONTENT_TYPE
+        json.dumps(manifest_data(PORTAL_START_URL)), content_type=MANIFEST_CONTENT_TYPE
     )
 
 

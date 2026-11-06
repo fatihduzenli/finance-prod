@@ -89,7 +89,7 @@ def test_the_store_url_opens_the_store_page_with_the_dialog_open(today: date) ->
     assert " open " in head and head.endswith(" data-open")
     assert f'data-return-url="/stores/{store.pk}/?tab=contacts#tab-contacts"' in dialog
     assert '<h2 id="log-contact-dialog-title">Log contact</h2>' in dialog
-    assert "Monvera · Log contact</title>" in page
+    assert "Log contact · Monvera</title>" in page
     # No Store field: the store's lease, hidden.
     assert 'name="lease"' in dialog and '<select name="lease"' not in dialog
     assert f'type="hidden" name="lease" value="{lease.pk}"' in dialog
