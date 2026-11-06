@@ -354,16 +354,20 @@ def test_once_the_first_month_is_billed_the_switch_is_gone_and_a_post_is_ignored
     charge = bill_first_month(lease)
     body = card(page(admin, lease), "rent-card")
     assert 'name="prorate_first_month"' not in body
-    assert (
-        f"The first month was billed on {day_text(charge.created_at)}, prorated; "
-        "its proration no longer changes."
-    ) in body
+    # Re-pinned (Opus, QA-015a): the billed state is a facts row, not a second line of help.
+    row = body[body.index('<div id="prorate-billed">') :]
+    row = row[: row.index("</div>")]
+    assert "<dt>Prorate the first month</dt>" in row
+    assert f"<dd>Billed on {day_text(charge.created_at)}, prorated</dd>" in row
     # Without the field a post that leaves the switch out (what "off" posts) changes nothing.
     values = data(lease, debit_day="6")
     del values["prorate_first_month"]
     admin.post(path(lease), values)
     saved = Lease.objects.get(pk=lease.pk)
     assert (saved.prorate_first_month, saved.debit_day) == (True, 6)
+    # A first month billed in full reads "not prorated".
+    Lease.objects.filter(pk=lease.pk).update(prorate_first_month=False)
+    assert ", not prorated</dd>" in card(page(admin, lease), "rent-card")
 
 
 # --- The adversarial post (the owner's test) -------------------------------------------------

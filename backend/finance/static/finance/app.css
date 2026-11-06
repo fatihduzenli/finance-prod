@@ -2013,7 +2013,7 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
 .rent-change-fields[hidden] { display: none; }
 .rent-change-fields .field > label { margin-top: var(--space-2); }
 .rent-change-fields #id_rent { text-align: right; font-variant-numeric: tabular-nums; }
-.prorate-billed { margin: var(--space-3) 0 0; font-size: var(--fs-base); }
+.lease-facts.prorate-billed { margin: var(--space-3) 0 0; }
 .rent-history-title { margin: var(--space-4) 0 var(--space-1); color: var(--muted); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 .rent-history { margin: 0; padding: 0; border-top: 1px solid var(--border-soft); list-style: none; font-size: var(--fs-base); }
 .rent-history li { display: flex; justify-content: space-between; gap: var(--space-3); padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
