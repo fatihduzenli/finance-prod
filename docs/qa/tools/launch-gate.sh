@@ -5,7 +5,7 @@
 # Run it as a tracked background task with a watcher on $QA_SCRATCH/$2-gate.txt (root CLAUDE.md §4.1).
 TOOLS="$(cd "$(dirname "$0")" && pwd)"; . "$TOOLS/_env.sh"
 export WT="${1:?worktree}" TAG="${2:?log tag}"
-while pgrep -f "pytest -m not e2e" >/dev/null || pgrep -f "tools/full-gate.sh" >/dev/null || pgrep -f "tools/small-gate.sh" >/dev/null; do sleep 60; done
+while pgrep -f "pytest.*not e2e" >/dev/null || pgrep -f "tools/full-gate.sh" >/dev/null || pgrep -f "tools/small-gate.sh" >/dev/null; do sleep 60; done
 echo "start $(date)"
 caffeinate -i zsh "$TOOLS/full-gate.sh" "${3:-test_the_page_looks}" "$4" "$5" > "$QA_SCRATCH/$TAG-gate.txt" 2>&1 &
 G=$!; caffeinate -s -w $G >/dev/null 2>&1 & wait $G; echo "gate exit $? $(date)"
