@@ -43,6 +43,16 @@ attribute, so that it shows with scripts off, and ``data-open``: the script
 (finance/static/finance/dialog.js) makes it modal on load and, when ``return_url`` is a path
 on this site, goes there on close; any other ``return_url`` is dropped.
 
+Design v2 (docs/qa/PLAN-015-design-v2.md §4.1; DESIGN-SPEC §3), each drawn by its template in
+``finance/components/``: ``{% kpi2 icon title sub value badge badge_tone link link_text
+value_tone %}`` the KPI card (the icon in a tinted square, the title and its sub-line, the figure,
+a pill badge, a footer link with an arrow); ``{% period_control current choices %}`` the header's
+This month · Quarter · Year GET form (``?period=``, read back with :func:`parse_period`);
+``{% avatar_tile name size %}`` the tinted square of initials (:func:`avatar_initials`);
+``{% chip tone text icon %}`` the status chip led by its glyph; and the include
+``finance/components/card_head.html`` (label, link, link_text) a card's header row.
+``{% avatar %}`` above stays the Notes & follow-ups' round letter.
+
 Every helper works on what the view already passed: no query, no setting. Every text is
 escaped.
 """
@@ -50,6 +60,7 @@ escaped.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable, Sequence
 from datetime import date
 from decimal import ROUND_FLOOR, Decimal, InvalidOperation
@@ -286,6 +297,124 @@ def avatar(letter: object, family: str = NEUTRAL) -> SafeString:
         family,
         str(letter).strip()[:1].upper(),
     )
+
+
+#: Design v2's components (docs/qa/PLAN-015-design-v2.md §4.1; DESIGN-SPEC §3).
+#: ``{% kpi2 %}``'s figure tones and its badge's tones.
+KPI2_VALUE_TONES: tuple[str, ...] = (UNPAID,)
+KPI2_BADGE_TONES: tuple[str, ...] = (PAID, PENDING, NEUTRAL)
+#: ``{% period_control %}``'s periods, in order, with their labels; the first is the default.
+PERIODS: tuple[tuple[str, str], ...] = (
+    ("month", "This month"),
+    ("quarter", "Quarter"),
+    ("year", "Year"),
+)
+DEFAULT_PERIOD = PERIODS[0][0]
+_PERIOD_LABELS: dict[str, str] = dict(PERIODS)
+#: ``{% avatar_tile %}``'s sizes in pixels; the first is the default.
+AVATAR_TILE_SIZES: tuple[int, ...] = (28, 36)
+#: ``{% chip %}``'s tones and the glyph (an icon of finance.templatetags.icons) each leads with.
+CHIP_GLYPHS: dict[str, str] = {
+    PAID: "check",
+    UNPAID: "dot",
+    OVERDUE: "dot",
+    PENDING: "dot",
+    PARTIAL: "dot",
+    NEUTRAL: "circle",
+}
+
+
+def parse_period(raw: object) -> str:
+    """``raw`` when it is one of :data:`PERIODS`' values (exactly), else ``"month"``."""
+    return raw if isinstance(raw, str) and raw in _PERIOD_LABELS else DEFAULT_PERIOD
+
+
+def avatar_initials(name: object) -> str:
+    """The tile's initials: the first letters of the first two words, upper case; one word,
+    its first two letters; "—" for a name without a letter. Each word keeps its letters only
+    (accents dropped: "Élodie" is "E"; "O'Brien" one word)."""
+    words = []
+    for word in str(name or "").split():
+        letters = "".join(
+            character for character in unicodedata.normalize("NFKD", word) if character.isalpha()
+        )
+        if letters:
+            words.append(letters)
+    if not words:
+        return "—"
+    found = words[0][0] + words[1][0] if len(words) > 1 else words[0][:2]
+    return found.upper()
+
+
+@register.inclusion_tag("finance/components/kpi2.html")
+def kpi2(
+    icon: str,
+    title: object,
+    sub: object = "",
+    value: object = "",
+    badge: object = "",
+    badge_tone: str = NEUTRAL,
+    link: object = "",
+    link_text: object = "",
+    value_tone: str = "",
+) -> dict[str, Any]:
+    """Design v2's KPI card: the icon in a tinted square, the title and its sub-line, the
+    figure (``value_tone="unpaid"``: red), an optional pill badge after it (paid, pending or
+    neutral) and a footer link with an arrow (a path of this site only; anything else draws
+    no link). An unknown tone is a template mistake (``ValueError``)."""
+    if value_tone and value_tone not in KPI2_VALUE_TONES:
+        raise ValueError(f"unknown kpi2 value tone {value_tone!r}")
+    if badge_tone not in KPI2_BADGE_TONES:
+        raise ValueError(f"unknown kpi2 badge tone {badge_tone!r}")
+    return {
+        "icon": icon,
+        "title": title,
+        "sub": sub,
+        "value": value,
+        "value_tone": value_tone,
+        "badge": badge,
+        "badge_tone": badge_tone,
+        "link": _local_path(link),
+        "link_text": link_text,
+    }
+
+
+@register.inclusion_tag("finance/components/period_control.html")
+def period_control(current: object, choices: Iterable[str] | None = None) -> dict[str, Any]:
+    """The header's This month · Quarter · Year control: a GET form, one submit button per
+    period (``name="period"``), the current one (:func:`parse_period`) pressed. ``choices``
+    narrows the periods shown (values of :data:`PERIODS`, in that order); an unknown one is a
+    template mistake (``ValueError``)."""
+    wanted = list(choices) if choices is not None else [value for value, _ in PERIODS]
+    unknown = [value for value in wanted if value not in _PERIOD_LABELS]
+    if unknown:
+        raise ValueError(f"unknown periods {unknown!r}")
+    chosen = parse_period(current)
+    return {
+        "periods": [(value, label, value == chosen) for value, label in PERIODS if value in wanted],
+    }
+
+
+@register.inclusion_tag("finance/components/avatar_tile.html")
+def avatar_tile(name: object, size: int = AVATAR_TILE_SIZES[0]) -> dict[str, Any]:
+    """The tinted square with the initials (:func:`avatar_initials`), 28 px or 36 px, hidden
+    from screen readers: the caller writes the name beside it."""
+    if size not in AVATAR_TILE_SIZES:
+        raise ValueError(f"unknown avatar tile size {size!r}")
+    return {"initials": avatar_initials(name), "size": size}
+
+
+@register.inclusion_tag("finance/components/chip.html")
+def chip(tone: str, text: object, icon: str = "") -> dict[str, Any]:
+    """The status chip: a pill in the tone's colours led by its glyph (:data:`CHIP_GLYPHS`;
+    ``icon`` may name another of those glyphs), then the words. An unknown tone or glyph is a
+    template mistake (``ValueError``): a chip never goes without its glyph."""
+    if tone not in CHIP_GLYPHS:
+        raise ValueError(f"unknown chip tone {tone!r}")
+    glyph = icon or CHIP_GLYPHS[tone]
+    if glyph not in CHIP_GLYPHS.values():
+        raise ValueError(f"unknown chip glyph {glyph!r}")
+    return {"tone": tone, "glyph": glyph, "text": text}
 
 
 @register.filter

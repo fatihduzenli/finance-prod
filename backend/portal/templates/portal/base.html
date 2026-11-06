@@ -1,20 +1,23 @@
 {% load static %}{% comment %}
-The operator portal's shell (PLAN-014 H3): light by default, phone first, its own. The 12g
-tokens (finance/tokens.css: data-theme light, dark or system) and portal/portal.css; no staff
+The operator portal's shell (PLAN-014 H3): phone first, its own. The 12g tokens
+(finance/tokens.css: data-theme light or dark; Dark by default and signed out since PLAN-015
+§4.4) and portal/portal.css; no staff
 navigation, no service worker. The top bar: the company's name, the store switcher
-(a <details> list of the operator's stores, no script), the Light · Dark · System control (a
+(a <details> list of the operator's stores, no script), the Light · Dark control (a
 POST to portal:account) and Sign out (a POST to portal:logout). Signed out, the bar holds the
 company's name only. Nothing here reads the staff user. The head carries the app's identity
 (finance/_app_identity.html: the icons, the portal's own public manifest, portal:manifest,
-which opens on /portal/, and the app-name metas; owner, 2026-11-05) and the tab title "<page> · Monvera"; the company's name is the top bar's.
+which opens on /portal/, and the app-name metas; owner, 2026-11-05), the theme-color meta of
+its theme (finance/_theme_color.html, Dark by default) and the tab title "<page> · Monvera";
+the company's name is the top bar's.
 {% endcomment %}<!doctype html>
-<html lang="en" data-theme="{{ portal_theme|default:'system' }}">
+<html lang="en" data-theme="{{ portal_theme|default:'dark' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>{% block title %}{% endblock %} · Monvera</title>
-  {% include "finance/_theme_color.html" with theme=portal_theme|default:"system" %}
+  {% include "finance/_theme_color.html" with theme=portal_theme|default:"dark" %}
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'portal/portal.css' %}">
   {% url 'portal:manifest' as portal_manifest_url %}{% include "finance/_app_identity.html" with manifest_url=portal_manifest_url %}
@@ -34,7 +37,7 @@ which opens on /portal/, and the app-name metas; owner, 2026-11-05) and the tab 
     </details>
     <a href="{% url 'portal:statement' %}">Statement</a>
     <a href="{% url 'portal:account' %}">Account</a>
-    <form method="post" action="{% url 'portal:account' %}" class="portal-theme" id="portal-theme">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit" name="theme" value="light" aria-pressed="{% if portal_theme == 'light' %}true{% else %}false{% endif %}">Light</button><button type="submit" name="theme" value="dark" aria-pressed="{% if portal_theme == 'dark' %}true{% else %}false{% endif %}">Dark</button><button type="submit" name="theme" value="system" aria-pressed="{% if portal_theme == 'light' or portal_theme == 'dark' %}false{% else %}true{% endif %}">System</button></form>
+    <form method="post" action="{% url 'portal:account' %}" class="portal-theme" id="portal-theme">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit" name="theme" value="light" aria-pressed="{% if portal_theme == 'light' %}true{% else %}false{% endif %}">Light</button><button type="submit" name="theme" value="dark" aria-pressed="{% if portal_theme == 'dark' %}true{% else %}false{% endif %}">Dark</button></form>
     <form method="post" action="{% url 'portal:logout' %}" id="portal-logout">{% csrf_token %}<button type="submit" class="portal-link-button">Sign out</button></form>
   </nav>
   {% endif %}

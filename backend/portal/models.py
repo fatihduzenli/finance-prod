@@ -49,7 +49,7 @@ class PortalUser(GuardedModel):
     activated_at = models.DateTimeField(null=True, blank=True)
     disabled_at = models.DateTimeField(null=True, blank=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
-    theme = models.CharField(max_length=6, choices=Theme.choices, default=Theme.SYSTEM)
+    theme = models.CharField(max_length=6, choices=Theme.choices, default=Theme.DARK)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

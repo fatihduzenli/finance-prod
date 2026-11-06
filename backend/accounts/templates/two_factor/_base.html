@@ -24,16 +24,15 @@ the company row's override (a stored document needs a session). The colours and 
 app.css's (tokens.css first); the forms and their flow are the package's own. The tab title is
 "<page> · Monvera", the app's name (owner, 2026-11-05); the head's icons, manifest and app-name
 metas are finance/_app_identity.html's, as in the staff shell.
-The theme (PLAN-012g A2; DESIGN-SPEC §7.1): no user yet, so the pages follow the device
-(data-theme="system", resolved by tokens.css through prefers-color-scheme, with no script) and
-carry the two System theme-color metas.
+The theme (PLAN-012g A2, PLAN-015 §4.4; DESIGN-SPEC §7.1): no user yet, so the pages are Dark
+(data-theme="dark", the default) with the dark theme-color meta.
 {% endcomment %}{% load icons static %}<!DOCTYPE html>
-<html lang="en" data-theme="system">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}{% endblock %} · Monvera</title>
-  {% include "finance/_theme_color.html" with theme="system" %}
+  {% include "finance/_theme_color.html" with theme="dark" %}
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'finance/app.css' %}">
   {% include "finance/_app_identity.html" %}

@@ -18,7 +18,7 @@
 </section>
 <section class="portal-card">
   <h2>Theme</h2>
-  <p class="portal-muted">Light, Dark, or System (as your device).</p>
-  <form method="post" action="{% url 'portal:account' %}" class="portal-theme" id="account-theme">{% csrf_token %}<button type="submit" name="theme" value="light" aria-pressed="{% if portal_theme == 'light' %}true{% else %}false{% endif %}">Light</button><button type="submit" name="theme" value="dark" aria-pressed="{% if portal_theme == 'dark' %}true{% else %}false{% endif %}">Dark</button><button type="submit" name="theme" value="system" aria-pressed="{% if portal_theme == 'light' or portal_theme == 'dark' %}false{% else %}true{% endif %}">System</button></form>
+  <p class="portal-muted">Light or Dark.</p>
+  <form method="post" action="{% url 'portal:account' %}" class="portal-theme" id="account-theme">{% csrf_token %}<button type="submit" name="theme" value="light" aria-pressed="{% if portal_theme == 'light' %}true{% else %}false{% endif %}">Light</button><button type="submit" name="theme" value="dark" aria-pressed="{% if portal_theme == 'dark' %}true{% else %}false{% endif %}">Dark</button></form>
 </section>
 {% endblock %}

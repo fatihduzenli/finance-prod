@@ -14,7 +14,7 @@ the only file with literal colours.
 | File | `docs/design/<page>-dark-laptop.png` (dark theme, laptop) — the primary mockup; add `<page>-light-laptop.png` only when light differs in layout; `<page>-dark-phone.png` for the phone when the page's phone layout is not the default one-column stack |
 | Laptop frame | 1440 × (as tall as needed), the app shell included: sidebar 232 px, content column up to 1240 px wide with 28 px / 32 px padding |
 | Phone frame | 390 × (as tall as needed), the top bar (menu, logo, search) and the bottom tab bar (Dashboard, Stores, Monthly rent, More) included |
-| Theme | Dark by default; both themes share every size, only the tokens change (§3) |
+| Theme | Dark by default; both themes share every size, only the tokens change (§3). System is not offered (Light · Dark only, owner 2026-11-05) |
 | Content | Realistic test data, never real customer data: stores "#101 0101 MAPLE AVENUE", operators "Northwind Stores", amounts with cents ("$1,066.67"), dates as "Nov 15, 2026" |
 | Copy | Final wording. The built page uses the mockup's words verbatim; every departure is recorded in QA |
 
@@ -38,8 +38,10 @@ store-log-contact, operator-log-contact, and the store tabs store-charges / -inv
 
 - **Sidebar** (laptop): 232 px, dark navy `#0B2545` in light (a navy-to-teal gradient), `#171721`
   in dark; logo top; items Dashboard, Stores, Operators, Monthly rent, Reports (with its sub-items
-  when open), Admin (collapsible); bottom: Appearance (Light · Dark · System), the user card
-  (name, role, Preferences · Help · Sign out).
+  when open; a `chevron-right` beside the heading opens them and turns down), Admin
+  (collapsible, `chevron-down`); bottom: Appearance (Light · Dark), the user card (the 28 px
+  initials tile, the name 13/600, the role under it in 12 px, then Preferences · Help · Sign out
+  in 12 px teal in dark).
 - **Top of the content**: the sandbox banner "SANDBOX — TEST SYSTEM, NO REAL MONEY" (amber,
   full width) on the sandbox; then the page header bar (64 px min, surface background, bottom
   border): `h1` 20 px/600 (a store's title 24 px/700 with its status badge), the page's actions on
@@ -102,14 +104,19 @@ rent teal, settles green, promise amber #B7791F, lease end red.
 | Component | Look |
 |---|---|
 | Card | surface, 12 px radius, 1 px border (light only), 18/20 px padding; optional header row with a section label left and a teal "… ›" link right |
+| Card head | the card's first row: the section label left, a 13/600 teal link right ("All operators ›"), 12 px below (`finance/components/card_head.html`) |
 | Section label | uppercase muted 13/600 (see §3) |
 | Buttons | pill; secondary = surface with input border; primary = teal fill, white 600 label, one per page; dark = navy fill; danger = red fill; small variant `btn-sm`; teal text buttons ("+ New operator", "Copy from operator", "+ Add item", "Change", "Upload") as plain link-coloured text |
 | Inputs | 8 px radius (pill-shaped in forms since 12f: 99 px on single-line inputs), 40 px tall, label above in 13/600; "optional" as a muted hint under the label; errors in `--error-text` under the field |
 | Select | native select, same frame as inputs |
 | Checkbox / radio | native; the **switch** (toggle) is a 40×22 track with a knob, teal when on |
 | Segmented control | pill track on `--bg`, segments 12 px/500 muted, the chosen one on surface with a 1 px ring and 600 weight (filters, "Later · Use #1991's account · Enter a new account") |
+| Period control | the page header's segmented control "This month · Quarter · Year" (a GET form, `?period=month|quarter|year`, month when anything else); `{% period_control %}` |
 | Badge | pill, 12/600, status colours, with an icon or dot ("✓ Active", "○ Vacant · never leased", "● $13,950.00 overdue") |
-| KPI card | label muted, figure 28/700, note line; four across on the dashboard |
+| Status chip | pill, 12/600, 3/9 px, paid / unpaid / overdue (solid) / pending / partial / neutral, always led by a 12 px glyph: check for paid ("✓ Paid up"), a filled dot for unpaid, overdue, pending, partial ("● Due Nov 20, 2026"), an empty circle for neutral ("○ Vacant · 23 days"); `{% chip %}` |
+| Avatar tile | 28 px (or 36 px) square, 8 px radius, `--month-current` with the initials in teal 11/700: the first letters of the first two words ("Harbor Lane Retail" → HL), one word its first two letters; the name always beside it; `{% avatar_tile %}` |
+| KPI card | label muted, figure 28/700, note line (the older card; pages move to v2 from Batch 1) |
+| KPI card v2 | a 32 px tinted square with a teal 16 px icon and the title 15/600 beside it, the muted 12 px sub-line under the title; the figure 28/700 (red for Overdue) with an optional pill badge after it (paid "↑ 4.2%", pending "3 unmatched", neutral); a footer row with the teal 13/600 link text and an arrow at the far right; four across on the dashboard; `{% kpi2 %}` |
 | Report card | icon in a 36 px tinted square + title 15/600 on one row; muted description; figure 22/700 with its sub-line left and "Open ›" right on the bottom row |
 | Numbered step card | a 22 px teal circle with the number, title 15/600, a muted subtitle; used by the New lease page |
 | Summary card (sticky) | "SUMMARY" label, label/value rows (labels muted), a rule, a bold total row, the primary button full width, "Cancel" under it, a muted help line |

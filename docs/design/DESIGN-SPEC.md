@@ -67,7 +67,7 @@ The dark values of these tokens, and the names the dark theme adds, are in §7.2
 
 ## 2. Shell
 
-- **Sidebar**, 232px, `--sidebar-gradient`, padding 20px 14px. Logo (transparent dark variant) 48px tall at the top with 26px below. Items: 10px 12px padding, radius 8px, `--sidebar-text`, weight 500; active item `--sidebar-active-bg` + white, weight 600. Order: Dashboard, Stores, Operators, Monthly rent, Reports, Admin. Bottom: user card (name, role, Sign out) on `rgba(255,255,255,.08)`.
+- **Sidebar**, 232px, `--sidebar-gradient`, padding 20px 14px. Logo (transparent dark variant) 48px tall at the top with 26px below. Items: 10px 12px padding, radius 8px, `--sidebar-text`, weight 500; active item `--sidebar-active-bg` + white, weight 600. Order: Dashboard, Stores, Operators, Monthly rent, Reports, Admin. Bottom: Appearance (Light · Dark, §7.1), then the user card (avatar tile, name, role, Preferences · Help · Sign out; §3 "Sidebar user card") on `rgba(255,255,255,.08)`.
 - On phones the sidebar becomes the existing collapsible menu (Prompt 11); content takes full width.
 - **Content column**: `--bg` background. Page header on `--surface` with a 1px `--border` bottom: title (20px/600 on list pages, 24px/700 on the store page), breadcrumb above the store title (12px, muted), primary action(s) at the right, search box where the page has one.
 - Content area: 28px 32px padding, max-width 1240px, sections separated by 20–24px.
@@ -88,6 +88,15 @@ The dark values of these tokens, and the names the dark theme adds, are in §7.2
 - **Contact log entry**: 34px round avatar with a letter (P promise = pending colours, C call = neutral), bold kind, muted meta line, row actions at the right.
 - **Empty cell in the grid**: blank before/after the lease; "Not yet due" only for future months inside the lease, italic faint text in a dashed 1px `--input-border` box.
 - **Help**: at most one 12px muted line under a block; everything else on the help pages.
+
+**Design v2 components** (PLAN-015 Batch 0, from `dashboard-v2-dark-laptop.png`; built in `finance/templatetags/components.py` and `finance/templates/finance/components/`; colours from the existing tokens only):
+
+- **KPI card v2** (`{% kpi2 icon title sub value badge badge_tone link link_text value_tone %}`): a card (`--surface`, radius 12px, padding 18px 20px, gap 12px). Head row: a 32px square, radius 8px, on `--month-current` with the 16px icon in `--link`; beside it the title 15px/600 `--text` and the sub-line 12px `--muted` under it ("38 stores · due Nov 1st"). Figure row: the value 28px/700 (tone `unpaid`: `--unpaid-text`, as "Overdue"), then an optional pill badge, 12px/600, 3px 8px, in the paid ("↑ 4.2%"), pending ("3 unmatched") or neutral pair. Footer row, pushed to the bottom: the link text in `--link` 13px/600 with a 16px `arrow-right` at the far right ("Open monthly rent →"); the link is a path of this site, any other address draws no link. Replaces the KPI card above as pages move to v2 (Batch 1 the dashboard).
+- **Period control** (`{% period_control current choices %}`): the header's segmented control (This month · Quarter · Year) as a GET form of three submit buttons (`name="period"`, values `month`, `quarter`, `year`), styled as the segmented filter: track `--seg-track`, segments 13px/500 `--muted`, the chosen one on `--seg-thumb` with 600. It works without script (each segment submits its value); the view reads the value back with `components.parse_period`, and anything else is `month`.
+- **Avatar tile** (`{% avatar_tile name size %}`): a 28px square (36px with `size=36`), radius 8px, `--month-current` with the initials in `--link` 11px/700 (12px at 36px). Initials: the first letters of the first two words, upper case; one word, its first two letters; each word keeps its letters only (accents and punctuation dropped); "—" for a name without a letter. Hidden from screen readers: the name is always written beside it. The Notes & follow-ups' round letter (`{% avatar %}`, 34px) stays as it is.
+- **Status chip** (`{% chip tone text icon %}`): a pill, 12px/600, 3px 9px, in a status pair — paid, unpaid, overdue (solid), pending, partial or neutral — always led by a 12px glyph: `check` for paid ("✓ Paid up"), a filled `dot` for unpaid, overdue, pending and partial ("● Due Nov 20, 2026", "● Overdue 45 days"), an empty `circle` for neutral ("○ Vacant · 23 days"). The glyph is hidden from screen readers; the words carry the status (never colour alone).
+- **Card head** (`finance/components/card_head.html` with `label`, `link`, `link_text`): a card's first row, flex, space-between, centred, 12px below: the section label (13px/600 uppercase `--muted`, "OPERATORS") at the left and, when given, a 13px/600 `--link` "All operators ›" at the right.
+- **Sidebar user card** (§2): the 28px avatar tile, the name 13px/600 and the role's display under it in 12px ("Admin", "Billing", "Viewer"), then Preferences · Help · Sign out in 12px `--sidebar-link` (`--link` in dark; the sidebar text in light, where the teal on the navy would be under AA). The phone's More sheet shows the same tile, name and role above its Preferences, Help and Sign out rows. **Reports** in the sidebar has a `chevron-right` beside its heading (the heading stays the link to the reports index) that opens its pages and turns down when open; the group is open on report pages. Admin keeps its `chevron-down`.
 
 ## 4. Pages
 
@@ -181,11 +190,11 @@ Direction: the dark layout of Mercury (styles.refero.design) — onyx canvas, gr
 
 ### 7.1 Switching
 
-- Three choices: **Light · Dark · System**. Default **System** (follows `prefers-color-scheme`).
+- Two choices: **Light · Dark** (owner, 2026-11-05, PLAN-015 §4.4: System, which followed `prefers-color-scheme`, is no longer offered). Default **Dark**, for a new user and for a user who never chose; a stored System became Dark (`accounts` 0005, `portal` 0003).
 - Stored per user on the user record (not in browser storage), so the choice follows the person to every device.
-- The server renders `<html data-theme="light|dark">` from the stored choice (System resolves on the client before first paint with a one-line inline script) — no white flash on load.
-- Laptop: a three-way segmented control at the bottom of the sidebar, under "Appearance". Phone: inside the **More** tab.
-- The login page follows System (no user yet).
+- The server renders `<html data-theme="light|dark">` from the stored choice — no script and no white flash on load; nothing in the style sheets follows the device's scheme.
+- Laptop: a two-way segmented control at the bottom of the sidebar, under "Appearance". Phone: inside the **More** tab. The Preferences page carries the same control. A posted value other than `light` or `dark` (`system` included) is refused and nothing is saved.
+- Signed-out pages are Dark (no user yet): the sign-in page and the pages of its frame (Sign in required, the second factor's), and the operator portal's sign-in, link and error pages. The portal's own control offers Light · Dark too.
 - Never themed: PDF statements and invoices, e-mails, the print stylesheet, invoice previews, exported spreadsheets. They stay light.
 
 ### 7.2 Dark tokens

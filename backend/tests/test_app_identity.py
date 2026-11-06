@@ -280,8 +280,10 @@ def test_a_portal_page_carries_the_identity_head() -> None:
     html = response.content.decode()
     # Its own manifest, which opens on /portal/, not the staff one.
     _assert_identity_head(html, PORTAL_MANIFEST)
-    # The theme-color meta is the shared one, rendered once per scheme for System.
-    assert head_of(html).count('<meta name="theme-color"') == 2
+    # The theme-color meta is the shared one: signed out the portal is Dark (PLAN-015 §4.4).
+    head = head_of(html)
+    assert head.count('<meta name="theme-color"') == 1
+    assert '<meta name="theme-color" content="#171721">' in head
 
 
 @pytest.mark.parametrize(
