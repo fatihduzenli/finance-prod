@@ -70,7 +70,7 @@ SHOWN_PAYMENT_STATUSES = (PaymentStatus.SETTLED, PaymentStatus.PENDING, PaymentS
 
 CURRENT_WRONG = "Your current password is not right."
 MISMATCH = "The two new passwords are not the same."
-UNKNOWN_THEME = "Choose Light, Dark or System."
+UNKNOWN_THEME = "Choose Light or Dark."
 
 
 # --- Stores ------------------------------------------------------------------------------------

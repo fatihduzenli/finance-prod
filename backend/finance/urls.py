@@ -60,7 +60,7 @@ urlpatterns = [
                         calendar_views.feed_revoke,
                         name="feed_revoke",
                     ),
-                    # The user's theme, Light, Dark or System (PLAN-012g A3).
+                    # The user's theme, Light or Dark (PLAN-012g A3, PLAN-015 §4.4).
                     path("settings/theme/", theme_views.set_theme_view, name="theme"),
                     # The dashboard Payment status card's period (PLAN-014 A3).
                     path(

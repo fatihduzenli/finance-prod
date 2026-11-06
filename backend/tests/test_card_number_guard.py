@@ -408,6 +408,7 @@ GUARD_MODULES = (
     "portal.migrations.0001_initial",
     "banking.migrations.0001_initial",
     "portal.migrations.0002_portal_payments",
+    "portal.migrations.0003_theme_light_or_dark",
 )
 
 

@@ -4,7 +4,7 @@
 {% block content %}
   <section class="card" id="appearance-card">
   <h2 id="appearance">Appearance</h2>
-  <p>Light, Dark, or System to follow this device. The choice is kept on your account, so it follows you to every device.</p>
+  <p>Light or Dark. The choice is kept on your account, so it follows you to every device.</p>
   {% url 'finance:settings' as settings_url %}{% include "finance/_theme_switch.html" with switch_id="settings-theme-switch" label_id="appearance" next_url=settings_url %}
   </section>
   <section class="card" id="calendar-feed-card">

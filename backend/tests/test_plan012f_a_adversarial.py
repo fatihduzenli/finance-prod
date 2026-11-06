@@ -69,7 +69,7 @@ def test_a_viewer_sees_no_admin_page_in_the_sidebar_nor_in_the_more_sheet() -> N
 def test_sign_out_in_the_user_card_is_a_post_form_and_a_get_signs_nobody_out() -> None:
     billing, _ = client_for(Role.BILLING)
     body = billing.get("/").content.decode()
-    card = _block(body, "user-card", "</div>")
+    card = _block(body, "user-card", "</form>")  # PLAN-015 re-pin: the card holds the tile
     assert 'method="post"' in card and "csrfmiddlewaretoken" in card
     action = re.search(r'<form [^>]*action="([^"]+)"', card)
     assert action is not None

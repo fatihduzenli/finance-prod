@@ -1,6 +1,6 @@
 """Sign-in bookkeeping (no IP address is stored, personal data; user agent only) and the
-user's display preference (PLAN-012g A2: the theme, Light, Dark or System; PLAN-014 A3: the
-Payment status card's period)."""
+user's display preference (PLAN-012g A2: the theme, Light or Dark since PLAN-015 §4.4; PLAN-014
+A3: the Payment status card's period)."""
 
 from __future__ import annotations
 
@@ -29,11 +29,11 @@ class UserSession(models.Model):
 
 
 class Theme(models.TextChoices):
-    """The appearance a user chose (DESIGN-SPEC §7.1); System follows the device."""
+    """The appearance a user chose (DESIGN-SPEC §7.1): Light or Dark (PLAN-015 §4.4: System,
+    which followed the device, is no longer offered; accounts 0005 moved it to Dark)."""
 
     LIGHT = "light", "Light"
     DARK = "dark", "Dark"
-    SYSTEM = "system", "System"
 
 
 class PaymentStatusPeriod(models.TextChoices):
@@ -51,7 +51,7 @@ class UserPreference(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="preference"
     )
-    theme = models.CharField(max_length=6, choices=Theme.choices, default=Theme.SYSTEM)
+    theme = models.CharField(max_length=6, choices=Theme.choices, default=Theme.DARK)
     payment_status_period = models.CharField(
         max_length=7, choices=PaymentStatusPeriod.choices, default=PaymentStatusPeriod.WEEKLY
     )

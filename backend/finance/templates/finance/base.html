@@ -9,11 +9,15 @@ Laptop: the 232 px sidebar (#sidebar) holds the logo (company.logo_url: the bran
 transparent dark logo, or a stored document the company settings row names, with the company
 name as text beside it) with the company name as its text alternative, the navigation
 (Dashboard, Stores, Operators, Monthly rent, Reports and Admin, each with its icon; Reports and
-Admin list their pages in a nested list open under the active group, each page only for the
-roles that may open it: Disputes, Daily charges and Nightly check billing and admin; Activity
-log, Settings (PLAN-014 B2) and System settings admin; Messages from the processor every role, as its list is
-read-only) and the user card (#user-card: the name, the role, Preferences, Help and Sign out,
-a POST form).
+Admin list their pages in a nested list, each page only for the roles that may open it:
+Disputes, Daily charges and Nightly check billing and admin; Activity log, Settings (PLAN-014
+B2) and System settings admin; Messages from the processor every role, as its list is
+read-only. Both lists are <details> open under the active group: Admin's summary is its
+heading, with a chevron that turns; Reports keeps its heading as the link to the reports
+index, and its chevron (chevron-right, turning down when open; #nav-reports-toggle) is the
+summary beside it, PLAN-015 §4.1) and the user card (#user-card, PLAN-015 §4.1: the initials
+tile, the name, the role under it (finance/_user_identity.html), then Preferences, Help and
+Sign out, a POST form).
 The content column holds the page header (#page-header: {% block header %}, which a page
 fills with its .page-header (title and actions); the default is the page's title block as
 the heading; {% block header_search %} adds the search box) and the page (main, 28/32 px
@@ -24,7 +28,8 @@ Phone (768 px and under): the top bar (#phone-bar: the menu button, a label of t
 checkbox that opens the sidebar as a sheet; the logo; the search button, a label of
 #search-toggle that opens #phone-search), and the bottom tab bar (#tab-bar: Dashboard, Stores,
 Monthly rent and More, a <details> sheet with Operators, Reports, the Admin pages the role may
-open, Preferences, Help and Sign out as a POST form; the item that holds the page is marked). The sheets work
+open, the user's tile, name and role, Preferences, Help and Sign out as a POST form; the item
+that holds the page is marked). The sheets work
 without script; the script below closes an open one on a click outside it and on Escape.
 
 The tab title is "<short name> · <page>" (finance.context_processors.company): each page's
@@ -39,11 +44,10 @@ page header. finance/dialog.js runs the {% dialog %} component (PLAN-012f-b D2) 
 page. The dialog block, after the content, holds a confirmation page's open {% dialog %}: the
 confirmation template extends its parent page's template and fills only this block (and its
 title), so the parent page shows behind the dialog (PLAN-012f-b E-4). The sign-in pages keep their own base, two_factor/_base.html.
-The theme (PLAN-012g A2, A3; DESIGN-SPEC §7.1): <html data-theme> is the user's stored choice
-(finance.context_processors.theme: light, dark or system; tokens.css resolves System through
-prefers-color-scheme, so no script and no flash); a page that must stay light (the invoice
+The theme (PLAN-012g A2, A3, PLAN-015 §4.4; DESIGN-SPEC §7.1): <html data-theme> is the user's
+stored choice (finance.context_processors.theme: light or dark, dark by default); a page that must stay light (the invoice
 preview) overrides {% block theme %} and {% block theme_color %}. The theme-color meta follows it (finance/_theme_color.html).
-The Light · Dark · System control (finance/_theme_switch.html) sits at the bottom of the sidebar
+The Light · Dark control (finance/_theme_switch.html) sits at the bottom of the sidebar
 above the user card, under "Appearance", and as the first row of the More sheet.
 The Admin group's pages show a red banner (#settings-incomplete, --unpaid-text on --unpaid-bg)
 while the company name or support e-mail is blank (company.settings_incomplete; owner,
@@ -86,17 +90,20 @@ for an admin.
         <li><a class="nav-item" href="{% url 'ledger:stores:list' %}" id="nav-stores"{% if nav_section == "stores" %} aria-current="page"{% endif %}>{% icon "stores" %}<span>Stores</span></a></li>
         <li><a class="nav-item" href="{% url 'ledger:operators:list' %}" id="nav-operators"{% if nav_section == "operators" %} aria-current="page"{% endif %}>{% icon "operators" %}<span>Operators</span></a></li>
         <li><a class="nav-item" href="{% url 'ledger:grid:page' %}" id="nav-grid"{% if nav_section == "grid" %} aria-current="page"{% endif %}>{% icon "monthly-rent" %}<span>Monthly rent</span></a></li>
-        <li class="nav-group{% if nav_group == "reports" or nav_section == "reports" %} is-open{% endif %}" id="nav-reports-menu">
+        <li class="nav-group nav-group-split" id="nav-reports-menu">
           <a class="nav-item nav-group-heading" href="{% url 'ledger:reports:index' %}" id="nav-reports"{% if nav_section == "reports" %} aria-current="page"{% elif nav_group == "reports" %} aria-current="true"{% endif %}>{% icon "reports" %}<span>Reports</span></a>
-          <ul class="nav-sublist">
-            <li><a href="{% url 'ledger:arrears:page' %}" id="nav-arrears"{% if nav_section == "arrears" %} aria-current="page"{% endif %}>Unpaid balances</a></li>
-            <li><a href="{% url 'ledger:reports:pnl' %}"{% if nav_section == "pnl" %} aria-current="page"{% endif %}>Profit and loss</a></li>
-            <li><a href="{% url 'ledger:payments:list' %}"{% if nav_section == "payments" %} aria-current="page"{% endif %}>Payments</a></li>
-            <li><a href="{% url 'ledger:returns:list' %}"{% if nav_section == "returns" %} aria-current="page"{% endif %}>Returned payments</a></li>
-            <li><a href="{% url 'ledger:calendar:page' %}" id="nav-calendar"{% if nav_section == "calendar" %} aria-current="page"{% endif %}>Calendar</a></li>
-            <li><a href="{% url 'ledger:leases:list' %}"{% if nav_section == "leases" %} aria-current="page"{% endif %}>Leases</a></li>
-            {% if request.user|is_billing %}<li><a href="{% url 'ledger:disputes:page' %}" id="nav-disputes"{% if nav_section == "disputes" %} aria-current="page"{% endif %}>Disputes</a></li>{% endif %}
-          </ul>
+          <details class="nav-disclosure"{% if nav_group == "reports" or nav_section == "reports" %} open{% endif %}>
+            <summary class="nav-group-toggle" id="nav-reports-toggle"><span class="visually-hidden">Reports pages</span>{% icon "chevron-right" 16 %}</summary>
+            <ul class="nav-sublist">
+              <li><a href="{% url 'ledger:arrears:page' %}" id="nav-arrears"{% if nav_section == "arrears" %} aria-current="page"{% endif %}>Unpaid balances</a></li>
+              <li><a href="{% url 'ledger:reports:pnl' %}"{% if nav_section == "pnl" %} aria-current="page"{% endif %}>Profit and loss</a></li>
+              <li><a href="{% url 'ledger:payments:list' %}"{% if nav_section == "payments" %} aria-current="page"{% endif %}>Payments</a></li>
+              <li><a href="{% url 'ledger:returns:list' %}"{% if nav_section == "returns" %} aria-current="page"{% endif %}>Returned payments</a></li>
+              <li><a href="{% url 'ledger:calendar:page' %}" id="nav-calendar"{% if nav_section == "calendar" %} aria-current="page"{% endif %}>Calendar</a></li>
+              <li><a href="{% url 'ledger:leases:list' %}"{% if nav_section == "leases" %} aria-current="page"{% endif %}>Leases</a></li>
+              {% if request.user|is_billing %}<li><a href="{% url 'ledger:disputes:page' %}" id="nav-disputes"{% if nav_section == "disputes" %} aria-current="page"{% endif %}>Disputes</a></li>{% endif %}
+            </ul>
+          </details>
         </li>
         <li class="nav-group" id="nav-admin-menu">
           <details class="nav-disclosure"{% if nav_group == "admin" %} open{% endif %}>
@@ -113,8 +120,8 @@ for an admin.
       {% include "finance/_theme_switch.html" with switch_id="theme-switch" label_id="appearance-label" %}
     </div>
     <div class="user-card" id="user-card">
-      <span class="user-name" id="user-menu-name"{% if nav_section == "preferences" or nav_section == "help" %} aria-current="true"{% endif %}>{{ request.user.get_full_name|default:request.user.get_username }}</span>
-      <div class="user-meta">{% with role=request.user|role_label %}{% if role %}<span class="user-role" id="user-role">{{ role }}</span> · {% endif %}{% endwith %}<a href="{% url 'finance:settings' %}" id="nav-preferences"{% if nav_section == "preferences" %} aria-current="page"{% endif %}>Preferences</a> · <a href="{% url 'finance:help' %}" id="nav-help"{% if nav_section == "help" %} aria-current="page"{% endif %}>Help</a> · <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="link-button" id="nav-sign-out">Sign out</button></form></div>
+      {% include "finance/_user_identity.html" with ids="yes" %}
+      <div class="user-meta"><a href="{% url 'finance:settings' %}" id="nav-preferences"{% if nav_section == "preferences" %} aria-current="page"{% endif %}>Preferences</a> · <a href="{% url 'finance:help' %}" id="nav-help"{% if nav_section == "help" %} aria-current="page"{% endif %}>Help</a> · <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="link-button" id="nav-sign-out">Sign out</button></form></div>
     </div>
   </aside>
   <div class="content" id="content">
@@ -150,6 +157,7 @@ for an admin.
               {% include "finance/_admin_links.html" with ids="" %}
             </ul>
           </li>
+          <li class="more-user">{% include "finance/_user_identity.html" with ids="" %}</li>
           <li><a href="{% url 'finance:settings' %}">{% icon "user" %}Preferences</a></li>
           <li><a href="{% url 'finance:help' %}">{% icon "file" %}Help</a></li>
           <li><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" id="more-sign-out">{% icon "arrow-right" %}Sign out</button></form></li>

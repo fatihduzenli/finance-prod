@@ -1,7 +1,8 @@
 """PLAN-012g Batch A in a browser (Fable): the theme paints on the first frame with no script
-(System follows the browser's scheme; a stored choice wins over it), the control in the sidebar
-and the More sheet saves and comes back, and print media stays light in a dark session (the P&L
-and the invoice preview). The QA shots (``QA_SHOTS_DIR``) come from here."""
+(PLAN-015 §4.4 re-pin: Dark by default whatever the browser's scheme, System is not offered; a
+stored choice wins), the control in the sidebar and the More sheet saves and comes back, and print
+media stays light in a dark session (the P&L and the invoice preview). The QA shots
+(``QA_SHOTS_DIR``) come from here."""
 
 from __future__ import annotations
 
@@ -71,28 +72,36 @@ def scheme_contexts(browser: Browser) -> Iterator[dict[str, BrowserContext]]:
         ctx.close()
 
 
-def test_system_follows_the_browser_and_a_stored_choice_wins(
+def test_dark_is_the_default_whatever_the_browser_and_a_stored_choice_wins(
     live_server: LiveServer, scheme_contexts: dict[str, BrowserContext]
 ) -> None:
-    # Anonymous: the sign-in shell is System, so the dark browser gets dark, the light one light.
-    for scheme, expected in (("light", LIGHT_BG), ("dark", DARK_BG)):
+    # PLAN-015 §4.4 re-pin (was "System follows the browser"): signed out, the sign-in shell is
+    # Dark in the light browser and in the dark one.
+    for scheme in ("light", "dark"):
         page = scheme_contexts[scheme].new_page()
         page.goto(f"{live_server.url}/account/login/")
-        assert page.get_attribute("html", "data-theme") == "system"
-        assert body_bg(page) == expected, scheme
+        assert page.get_attribute("html", "data-theme") == "dark"
+        assert body_bg(page) == DARK_BG, scheme
         shot(page, f"login-{scheme}")
         page.close()
-    # Signed in with no choice: still System. Then Light, saved on the server, wins in the dark
-    # browser.
-    page = sign_in(scheme_contexts["dark"], live_server, "e2e-12g-a-dark", Role.BILLING)
-    assert page.get_attribute("html", "data-theme") == "system" and body_bg(page) == DARK_BG
-    shot(page, "dashboard-system-dark")
+    # Signed in with no choice: Dark, in the light browser too; two segments, Dark pressed.
+    page = sign_in(scheme_contexts["light"], live_server, "e2e-12g-a-dark", Role.BILLING)
+    assert page.get_attribute("html", "data-theme") == "dark" and body_bg(page) == DARK_BG
+    assert page.locator("#theme-switch button").all_inner_texts() == ["Light", "Dark"]
+    assert page.locator('#theme-switch button[value=dark][aria-pressed="true"]').count() == 1
+    shot(page, "dashboard-default-dark")
+    # Light, saved on the server, wins in the dark browser.
+    page.close()
+    page = sign_in(scheme_contexts["dark"], live_server, "e2e-12g-a-light-choice", Role.BILLING)
     page.locator("#theme-switch button[value=light]").first.click()
     page.wait_for_load_state("networkidle")
     assert page.get_attribute("html", "data-theme") == "light" and body_bg(page) == LIGHT_BG
     assert page.locator('#theme-switch button[value=light][aria-pressed="true"]').count() >= 1
-    # Dark, chosen in the light browser, wins there too.
+    # Dark, chosen back in the light browser, wins there too.
     other = sign_in(scheme_contexts["light"], live_server, "e2e-12g-a-light", Role.ADMIN)
+    other.locator("#theme-switch button[value=light]").first.click()
+    other.wait_for_load_state("networkidle")
+    assert other.get_attribute("html", "data-theme") == "light" and body_bg(other) == LIGHT_BG
     other.locator("#theme-switch button[value=dark]").first.click()
     other.wait_for_load_state("networkidle")
     assert other.get_attribute("html", "data-theme") == "dark" and body_bg(other) == DARK_BG
@@ -125,8 +134,15 @@ def test_the_more_sheet_carries_the_control_on_the_phone(
         page.locator("#tab-more").click()
         sheet = page.locator("#more-sheet .more-appearance")
         assert sheet.is_visible() and "appearance" in sheet.inner_text().lower()
+        # PLAN-015 re-pin: two segments, Dark (the default) pressed; the user's card in the sheet.
+        assert sheet.locator("button").all_inner_texts() == ["Light", "Dark"]
+        assert page.locator("#more-sheet .more-user").is_visible()
         shot(page, "more-sheet-appearance-phone")
-        sheet.locator("button[value=dark]").click()
+        sheet.locator("button[value=light]").click()
+        page.wait_for_load_state("networkidle")
+        assert page.get_attribute("html", "data-theme") == "light" and body_bg(page) == LIGHT_BG
+        page.locator("#tab-more").click()
+        page.locator("#more-sheet .more-appearance button[value=dark]").click()
         page.wait_for_load_state("networkidle")
         assert page.get_attribute("html", "data-theme") == "dark" and body_bg(page) == DARK_BG
         shot(page, "dashboard-dark-phone")

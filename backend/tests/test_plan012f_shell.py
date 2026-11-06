@@ -135,6 +135,9 @@ BATCH_D_TOKENS = {
 #: The token Batch E adds (PLAN-012f-b E-4): the error flash message's text, DESIGN-SPEC §4
 #: States' #8A1C14.
 BATCH_E_TOKENS = {"--error-text": "#8A1C14"}
+#: PLAN-015 Batch 0: the sidebar user card's links, the sidebar text in light (re-pin: the
+#: name is new; its dark value is the teal --link).
+PLAN015_TOKENS = {"--sidebar-link": "var(--sidebar-text)"}
 #: The names PLAN-012g Batch A adds for the dark theme, with their light values (A1).
 BATCH_12G_TOKENS = {
     # PLAN-012g Batch D (the dark walk): the navy button, the pager and the dialog backdrop.
@@ -198,6 +201,7 @@ def test_the_tokens_file_holds_the_spec_block_name_for_name_and_value_for_value(
         **BATCH_D_TOKENS,
         **BATCH_E_TOKENS,
         **BATCH_12G_TOKENS,
+        **PLAN015_TOKENS,
     }
     assert spec["--teal"] == "#13A89E" and expected["--teal"] == "#13A89E"  # --teal unchanged
     assert "#EEF6F5" in SPEC.read_text(encoding="utf-8")  # the spec's value for the tint
@@ -235,6 +239,7 @@ def test_the_comparison_sees_a_changed_value() -> None:
         **BATCH_D_TOKENS,
         **BATCH_E_TOKENS,
         **BATCH_12G_TOKENS,
+        **PLAN015_TOKENS,
     }
     assert declarations(root) == expected
     assert changed != root and declarations(changed) != expected
@@ -356,8 +361,12 @@ def test_the_sidebar_marks_the_page_it_is_on(path: str, current: str | None) -> 
     else:
         assert 'href="/webhooks/"' in marked[0]
         assert '<details class="nav-disclosure" open>' in sidebar
-    # A group opens under its pages only.
-    assert ('class="nav-group is-open"' in sidebar) is (path in ("/reports/", "/arrears/"))
+    # A group opens under its pages only (PLAN-015 re-pin: Reports is a <details> beside its
+    # heading link, open on its pages, as Admin's is).
+    reports = sidebar[sidebar.index('id="nav-reports-menu"') : sidebar.index('id="nav-admin-menu"')]
+    assert ('<details class="nav-disclosure" open>' in reports) is (
+        path in ("/reports/", "/arrears/")
+    )
 
 
 @pytest.mark.django_db
@@ -366,11 +375,16 @@ def test_the_sidebar_marks_the_page_it_is_on(path: str, current: str | None) -> 
 )
 def test_the_user_card_names_the_user_and_the_role(role: Role, label: str) -> None:
     html = body(client_for(role, first_name="Fatih", last_name="D.").get("/"))
-    card = element(html, "user-card", "</div>\n    </div>")
-    assert '<span class="user-name" id="user-menu-name">Fatih D.</span>' in card
-    assert f'<span class="user-role" id="user-role">{label}</span> · ' in card
+    card = element(html, "user-card", "</form></div>")
+    # PLAN-015 re-pin: the initials tile, the name and the role under it, then the three links.
     assert (
-        '<a href="/settings/" id="nav-preferences">Preferences</a> · '
+        '<div class="user-identity"><span class="avatar-tile" aria-hidden="true">FD</span>'
+        '<div class="user-identity-text">'
+        '<span class="user-name" id="user-menu-name">Fatih D.</span>'
+        f'<span class="user-role" id="user-role">{label}</span></div></div>'
+    ) in card
+    assert (
+        '<div class="user-meta"><a href="/settings/" id="nav-preferences">Preferences</a> · '
         '<a href="/help/" id="nav-help">Help</a> · <form'
     ) in card
     assert re.search(

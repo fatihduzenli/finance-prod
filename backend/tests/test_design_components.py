@@ -25,6 +25,7 @@ from django.contrib.messages import constants, get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpResponse, HttpResponseBase
+from django.template import Context, Template
 from django.template.loader import render_to_string
 from django.test import Client, RequestFactory
 from django.urls import reverse
@@ -32,7 +33,16 @@ from django.urls import reverse
 import documents_storage
 from accounts.roles import Role
 from documents_storage.memory import MemoryDocumentStorage
-from finance.templatetags.components import FAMILIES, action_named, badge_family, with_done
+from finance.templatetags.components import (
+    CHIP_GLYPHS,
+    FAMILIES,
+    PERIODS,
+    action_named,
+    avatar_initials,
+    badge_family,
+    parse_period,
+    with_done,
+)
 from ledger.models import (
     LeaseEnd,
     Payment,
@@ -45,6 +55,7 @@ from tests.auth_helpers import make_user, verified_client
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
 from tests.test_lease_end import a_store_lease, deductions, draft, saved, settle
 from tests.test_transfer import ready as a_ready_transfer
+from tests.text_helpers import assert_absent
 
 pytestmark = pytest.mark.django_db
 
@@ -1004,3 +1015,259 @@ def test_the_refund_amount_is_a_field_with_its_error_under_it() -> None:
     ]
     block = block.split("</div>", 1)[0]
     assert block.index("<input") < block.index('class="help muted"') < block.index("field-error")
+
+
+# --- PLAN-015 Batch 0: Design v2's components (docs/qa/PLAN-015-design-v2.md §4.1) -------------
+
+
+def rendered(source: str, **context: Any) -> str:
+    return Template("{% load components %}" + source).render(Context(context))
+
+
+def svg_icon(name: str, size: int) -> str:
+    return f'<svg class="icon icon-{name}" width="{size}" height="{size}" viewBox="0 0 24 24"'
+
+
+def test_kpi2_renders_the_icon_title_sub_figure_badge_and_footer_link() -> None:
+    html = rendered(
+        '{% kpi2 "calendar" "Due this month" "38 stores · due Nov 1st" "$184,250.00" '
+        'badge="↑ 4.2%" badge_tone="paid" link="/grid/" link_text="Open monthly rent" %}'
+    )
+    assert html.startswith(
+        '<div class="kpi2"><div class="kpi2-head"><span class="kpi2-icon" aria-hidden="true">'
+        + svg_icon("calendar", 16)
+    )
+    assert (
+        '<div class="kpi2-titles"><p class="kpi2-title">Due this month</p>'
+        '<p class="kpi2-sub">38 stores · due Nov 1st</p></div></div>'
+    ) in html
+    assert (
+        '<div class="kpi2-amount"><span class="kpi2-value">$184,250.00</span>'
+        '<span class="kpi2-pill kpi2-pill-paid">↑ 4.2%</span></div>'
+    ) in html
+    assert '<a class="kpi2-link" href="/grid/"><span>Open monthly rent</span>' in html
+    assert html.index("Open monthly rent") < html.index(svg_icon("arrow-right", 16))
+    assert html.endswith("</a></div>")
+
+
+def test_kpi2_without_its_optional_parts_and_with_the_red_figure() -> None:
+    html = rendered('{% kpi2 "alert" "Overdue" value="$41,650.00" value_tone="unpaid" %}')
+    assert '<span class="kpi2-value tone-unpaid">$41,650.00</span>' in html
+    assert "kpi2-sub" not in html and "kpi2-pill" not in html and "<a " not in html
+
+
+@pytest.mark.parametrize("tone", ["paid", "pending", "neutral"])
+def test_kpi2_badge_tones(tone: str) -> None:
+    html = rendered("{% kpi2 'banknote' 'Deposits' badge='3 unmatched' badge_tone=t %}", t=tone)
+    assert f'<span class="kpi2-pill kpi2-pill-{tone}">3 unmatched</span>' in html
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        "value_tone='paid'",
+        "value_tone='red'",
+        "badge='x' badge_tone='unpaid'",
+        "badge='x' badge_tone=''",
+    ],
+)
+def test_kpi2_refuses_an_unknown_tone(arguments: str) -> None:
+    with pytest.raises(ValueError):
+        rendered("{% kpi2 'alert' 'Overdue' " + arguments + " %}")
+
+
+@pytest.mark.parametrize(
+    "link",
+    ["https://evil.example.com/", "//evil.example.com/", "javascript:alert(1)", "/\\evil", ""],
+)
+def test_kpi2_draws_a_link_to_this_site_only(link: str) -> None:
+    html = rendered("{% kpi2 'alert' 'Overdue' link=link link_text='See' %}", link=link)
+    assert "<a " not in html and 'href="' not in html
+    assert_absent(html, "evil")
+    assert_absent(html, "javascript")
+
+
+def test_kpi2_escapes_every_text() -> None:
+    html = rendered(
+        "{% kpi2 'alert' t sub=t value=t badge=t link='/x/' link_text=t %}", t="<b>Ada</b>"
+    )
+    assert "<b>" not in html and html.count("&lt;b&gt;Ada&lt;/b&gt;") == 5
+
+
+def test_the_period_control_is_a_get_form_of_three_submit_buttons() -> None:
+    html = rendered("{% period_control 'quarter' %}")
+    assert html == (
+        '<form method="get" class="segmented period-control" aria-label="Period">'
+        '<button type="submit" name="period" value="month" aria-pressed="false">This month</button>'
+        '<button type="submit" name="period" value="quarter" aria-pressed="true">Quarter</button>'
+        '<button type="submit" name="period" value="year" aria-pressed="false">Year</button>'
+        "</form>"
+    )
+    assert "action=" not in html  # the form submits to the page itself, no script needed
+
+
+@pytest.mark.parametrize(
+    "raw", [None, "", "week", "Month", " month", "YEAR", "../etc", "<script>", 3, "month\n"]
+)
+def test_a_fourth_period_falls_back_to_this_month(raw: object) -> None:
+    assert parse_period(raw) == "month"
+    html = rendered("{% period_control current %}", current=raw)
+    assert re.findall(r'value="(\w+)" aria-pressed="true"', html) == ["month"]
+    assert html.count("<button") == 3
+
+
+@pytest.mark.parametrize("value", ["month", "quarter", "year"])
+def test_parse_period_keeps_the_three(value: str) -> None:
+    assert parse_period(value) == value
+    assert [v for v, _ in PERIODS] == ["month", "quarter", "year"]
+
+
+def test_the_period_control_can_show_fewer_periods_and_refuses_an_unknown_one() -> None:
+    html = rendered("{% period_control 'year' choices %}", choices=["month", "year"])
+    assert re.findall(r'value="(\w+)"', html) == ["month", "year"]
+    with pytest.raises(ValueError):
+        rendered("{% period_control 'month' choices %}", choices=["month", "week"])
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("Northwind", "NO"),
+        ("Dana Whitfield", "DW"),
+        ("Harbor Lane Retail", "HL"),
+        ("summit corner shops", "SC"),
+        ("O'Brien & Sons, LLC", "OS"),
+        ("  Pinecrest   Markets  ", "PM"),
+        ("Élodie Düzenli", "ED"),
+        ("#101 Maple", "MA"),
+        ("A", "A"),
+        ("", "—"),
+        ("   ", "—"),
+        ("!!! 42", "—"),
+        (None, "—"),
+    ],
+)
+def test_the_avatar_initials(name: str | None, expected: str) -> None:
+    assert avatar_initials(name) == expected
+
+
+def test_the_avatar_tile_is_a_tinted_square_hidden_from_screen_readers() -> None:
+    assert (
+        rendered("{% avatar_tile 'Dana Whitfield' %}")
+        == '<span class="avatar-tile" aria-hidden="true">DW</span>'
+    )
+    assert (
+        rendered("{% avatar_tile 'Dana Whitfield' 36 %}")
+        == '<span class="avatar-tile avatar-tile-36" aria-hidden="true">DW</span>'
+    )
+    assert rendered("{% avatar_tile name %}", name="<b>x</b>") == (
+        '<span class="avatar-tile" aria-hidden="true">BX</span>'
+    )
+    with pytest.raises(ValueError):
+        rendered("{% avatar_tile 'Dana' 40 %}")
+
+
+@pytest.mark.parametrize(
+    ("tone", "glyph"),
+    [
+        ("paid", "check"),
+        ("unpaid", "dot"),
+        ("overdue", "dot"),
+        ("pending", "dot"),
+        ("partial", "dot"),
+        ("neutral", "circle"),
+    ],
+)
+def test_every_chip_leads_with_its_glyph(tone: str, glyph: str) -> None:
+    html = rendered("{% chip tone 'Due Nov 20, 2026' %}", tone=tone)
+    assert html.startswith(f'<span class="status-chip status-chip-{tone}">' + svg_icon(glyph, 12))
+    assert 'aria-hidden="true"' in html.split("</svg>", 1)[0]  # the words carry the meaning
+    assert html.endswith("</svg><span>Due Nov 20, 2026</span></span>")
+    assert CHIP_GLYPHS[tone] == glyph
+
+
+def test_a_chip_may_name_another_glyph_of_the_set_only_and_a_tone_it_knows() -> None:
+    html = rendered("{% chip 'neutral' 'Vacant · 23 days' 'dot' %}")
+    assert svg_icon("dot", 12) in html
+    for source in (
+        "{% chip 'neutral' 'x' 'trash' %}",
+        "{% chip 'waived' 'x' %}",
+        "{% chip '' 'x' %}",
+        "{% chip 'Paid' 'x' %}",
+    ):
+        with pytest.raises(ValueError):
+            rendered(source)
+    # A value from the view is escaped (a template literal is the template's own text).
+    assert "&lt;script&gt;" in rendered("{% chip 'paid' text %}", text="<script>")
+
+
+def test_the_card_head_puts_the_label_left_and_the_link_right() -> None:
+    html = render_to_string(
+        "finance/components/card_head.html",
+        {"label": "Operators", "link": "/operators/", "link_text": "All operators ›"},
+    )
+    assert html.endswith(
+        '<div class="card-head"><p class="section-label">Operators</p>'
+        '<a class="card-link" href="/operators/">All operators ›</a></div>'
+    )
+    bare = render_to_string("finance/components/card_head.html", {"label": "Collections"})
+    assert bare.endswith('<div class="card-head"><p class="section-label">Collections</p></div>')
+
+
+def test_the_new_components_take_their_colours_from_documented_pairs() -> None:
+    css = APP_CSS.read_text()
+
+    def rule(selector: str) -> str:
+        return css.split(f"\n{selector} {{", 1)[1].split("}", 1)[0]
+
+    for tone in CHIP_GLYPHS:
+        assert f"background: var(--{tone}-bg); color: var(--{tone}-text);" in rule(
+            f".status-chip-{tone}"
+        ), tone
+    for tone in ("paid", "pending", "neutral"):
+        assert f"background: var(--{tone}-bg); color: var(--{tone}-text);" in rule(
+            f".kpi2-pill-{tone}"
+        ), tone
+    for selector in (".kpi2-icon", ".avatar-tile"):
+        assert "background: var(--month-current); color: var(--link);" in rule(selector)
+    assert "color: var(--unpaid-text)" in rule(".kpi2-value.tone-unpaid")
+    tokens = TOKENS_CSS.read_text()
+    assert "pair: --link on --month-current" in tokens
+    assert "pair[dark]: --link on --month-current over --surface" in tokens
+    assert "pair[dark]: --link on --month-current over --surface-2" in tokens
+
+
+def test_every_dark_pair_meets_wcag_aa_with_the_dark_values() -> None:
+    """The ``pair[dark]:`` lines (PLAN-012g; PLAN-015 adds the avatar tile on the sidebar's
+    card) measured with the dark block's values over the light ones, the owner's one accepted
+    pair (the primary button, 3.97) excepted as in the light check."""
+    from tests.test_design_accessibility import (
+        ACCEPTED_UNDER_AA,
+        PAIR,
+        Pair,
+        definitions,
+        pair_ratio,
+    )
+    from tests.test_plan012g_a_tokens import block_after, declarations, strip_comments
+
+    tokens = TOKENS_CSS.read_text()
+    dark = definitions(tokens)
+    dark.update(declarations(block_after(strip_comments(tokens), r':root\[data-theme="dark"\]')))
+    dark_lines = [
+        Pair(fg, bg, kind, over)
+        for fg, bg, over, kind in PAIR.findall(
+            "\n".join(
+                line.replace("pair[dark]:", "pair:")
+                for line in tokens.splitlines()
+                if "pair[dark]:" in line
+            )
+        )
+    ]
+    assert len(dark_lines) >= 40
+    failures = []
+    for pair in dark_lines:
+        ratio = pair_ratio(pair, dark)
+        low, high = ACCEPTED_UNDER_AA.get(str(pair), (pair.minimum, float("inf")))
+        if not low <= ratio <= high:
+            failures.append(f"{pair}: {ratio:.2f}")
+    assert failures == []

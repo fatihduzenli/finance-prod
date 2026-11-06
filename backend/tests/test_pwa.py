@@ -230,13 +230,10 @@ def test_every_staff_page_links_the_manifest_and_registers_the_worker() -> None:
     assert (
         '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">' in page
     )
-    # PLAN-012g A2: a user who never chose a theme follows the device (System): two metas.
-    assert '<meta name="theme-color" content="#0b2545" media="(prefers-color-scheme: light)">' in (
-        page
-    )
-    assert '<meta name="theme-color" content="#171721" media="(prefers-color-scheme: dark)">' in (
-        page
-    )
+    # PLAN-012g A2; PLAN-015 §4.4 re-pin: a user who never chose a theme is Dark (System is not
+    # offered): the dark canvas's one meta.
+    assert '<meta name="theme-color" content="#171721">' in page
+    assert "prefers-color-scheme" not in page
     assert '<link rel="apple-touch-icon" href="/static/finance/brand/monvera_icon_192.png">' in page
     # PLAN-012c D4: the SVG favicon with the PNG fallback.
     assert (

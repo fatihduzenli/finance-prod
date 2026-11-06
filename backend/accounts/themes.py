@@ -1,4 +1,5 @@
-"""The user's theme (PLAN-012g A2; DESIGN-SPEC §7.1): Light, Dark or System, stored on
+"""The user's theme (PLAN-012g A2; DESIGN-SPEC §7.1): Light or Dark (Dark by default; System
+is not offered since PLAN-015 §4.4, owner 2026-11-05), stored on
 :class:`accounts.models.UserPreference`, rendered by the server as ``<html data-theme>``; and
 the dashboard Payment status card's period (PLAN-014 A3), Weekly or Monthly, on the same row.
 
@@ -19,13 +20,14 @@ from django.http import HttpRequest
 
 from accounts.models import PaymentStatusPeriod, Theme, UserPreference
 
-ThemeName = Literal["light", "dark", "system"]
-THEMES: tuple[ThemeName, ...] = ("light", "dark", "system")
-DEFAULT_THEME: ThemeName = "system"
+ThemeName = Literal["light", "dark"]
+THEMES: tuple[ThemeName, ...] = ("light", "dark")
+DEFAULT_THEME: ThemeName = "dark"
 
 
 def theme_for(user: AbstractBaseUser | AnonymousUser) -> ThemeName:
-    """The stored choice of ``user``; ``"system"`` for an anonymous user or one with no row."""
+    """The stored choice of ``user``; ``"dark"`` for an anonymous user, one with no row, or a
+    stored value that is no longer offered."""
     if not user.is_authenticated:
         return DEFAULT_THEME
     stored = UserPreference.objects.filter(user_id=user.pk).values_list("theme", flat=True).first()

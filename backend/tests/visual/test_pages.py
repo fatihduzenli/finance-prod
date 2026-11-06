@@ -214,8 +214,8 @@ def write_out(
 @pytest.fixture
 def anonymous_page(visual_browser: Browser) -> Iterator[Callable[[str], Page]]:
     """``anonymous(scheme)``: a page in a fresh context with the suite's settings and no sign-in
-    (the login page); the browser's colour scheme is ``light`` or ``dark`` (the page follows
-    System)."""
+    (the login page); the browser's colour scheme is ``light`` or ``dark`` (PLAN-015 §4.4: the
+    page is Dark either way, System is not offered)."""
     opened: list[BrowserContext] = []
 
     def anonymous(scheme: str) -> Page:
@@ -246,9 +246,9 @@ def page_for(
     anonymous: Callable[[str], Page],
     theme: str = "light",
 ) -> Page:
-    """The page to shoot: the signed-out context for the sign-in page (its theme is System, so
-    the browser's colour scheme sets it), else the role's user — the one with Dark stored for the
-    dark set (PLAN-012g D1)."""
+    """The page to shoot: the signed-out context for the sign-in page (Dark since PLAN-015 §4.4,
+    whatever the browser's colour scheme), else the role's user — the one with Dark stored for
+    the dark set (PLAN-012g D1), the one with Light stored for the light set."""
     if page_name in SIGNED_OUT:
         return anonymous(theme)
     role = "admin" if page_name in AS_ADMIN else "billing"
