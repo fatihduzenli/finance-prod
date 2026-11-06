@@ -95,6 +95,9 @@ Read the actual diff. Evaluate against:
 - **Full gate** — migrations, money paths, auth/security, data migration (Step 13b), and anything
   Fable flags: everything above in full, locally (Gate 1 to Gate 4 as written), then the PR's CI.
 
+The scripts that run both classes, the staging check and the merge chain live in `docs/qa/tools/`
+(its README says how); they are run from there, not from a scratch directory.
+
 ### 1.4 Findings and Rework
 
 Fable returns findings to Opus as a structured list. Each finding contains:
