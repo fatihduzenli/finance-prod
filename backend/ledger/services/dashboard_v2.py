@@ -384,7 +384,7 @@ class Collections:
 
 
 def _collections(
-    selected: reports.ReportRange, today: date
+    selected: reports.ReportRange,
 ) -> tuple[list[tuple[date, Decimal, Decimal]], Decimal]:
     """(month, collected, due) per month of ``selected``, and the total collected."""
     collected = reports.payments_by_method(selected)
@@ -402,7 +402,7 @@ def collections(year: int, today: date) -> Collections:
     """The months of ``year`` up to today's month (every month of a past year)."""
     first = date(year, 1, 1)
     last = today.replace(day=1) if year == today.year else date(year, 12, 1)
-    months, total = _collections(reports.ReportRange(first, last), today)
+    months, total = _collections(reports.ReportRange(first, last))
     this_month = today.replace(day=1)
     return Collections(
         bars=[
@@ -419,7 +419,7 @@ def collections(year: int, today: date) -> Collections:
 def collections_by_year(today: date, years: int = YEARS) -> Collections:
     """One bar per year of the last ``years`` years, the current one to today's month."""
     first = date(today.year - years + 1, 1, 1)
-    months, total = _collections(reports.ReportRange(first, today.replace(day=1)), today)
+    months, total = _collections(reports.ReportRange(first, today.replace(day=1)))
     by_year: dict[int, tuple[Decimal, Decimal]] = {
         year: (ZERO, ZERO) for year in range(first.year, today.year + 1)
     }

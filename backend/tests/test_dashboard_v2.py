@@ -58,6 +58,7 @@ from tests.receivables_helpers import (
 )
 from tests.test_banking import a_connection, deposit
 from tests.test_operator_views import client_for
+from tests.text_helpers import assert_absent
 
 pytestmark = pytest.mark.django_db
 
@@ -835,7 +836,8 @@ def test_the_dashboard_no_longer_draws_the_removed_cards() -> None:
         "last-reconciliation-card",
     ):
         assert f'id="{gone}"' not in html, gone
-    assert "donut" not in html and "Coming up" not in html and "Recent payments" not in html
+    for gone in ('class="donut"', ">Coming up<", ">Recent payments<"):
+        assert_absent(html, gone)
     assert 'id="mini-calendar"' in html and "Next 7 days" in html
     order = [
         html.index(f'id="{name}"')

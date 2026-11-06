@@ -83,7 +83,7 @@ def test_the_small_button_keeps_its_height_and_gains_width(css: str) -> None:
     [
         ("textarea", CTL),
         (".mini-popover", CTL),
-        (".status-box", CTL),
+        # PLAN-015 Batch 1: .status-box (the Payment status card) is gone.
         (".date-chip", CTL),
         (".pager-page", CTL),
         (".menu li a, .menu li button", None),

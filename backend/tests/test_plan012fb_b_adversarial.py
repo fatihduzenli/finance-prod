@@ -246,7 +246,8 @@ def test_a_blank_state_lands_in_needs_review_and_a_closed_store_does_not() -> No
     assert all(item.text.startswith("State needs choosing") for item in items)
     # The text is data; the page escapes it.
     billing, _ = client_for(Role.BILLING)
-    body = billing.get("/").content.decode()
+    # PLAN-015 Batch 1 re-pin: the items are the feed's Needs attention kind.
+    body = billing.get("/?kind=attention").content.decode()
     assert MARKUP not in body and "State needs choosing" in body
 
 
