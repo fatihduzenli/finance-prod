@@ -1670,12 +1670,19 @@ p.detail-more-notes { padding-left: 0; }
 .calendar-weekday { display: none; }
 .calendar-num { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 50%; }
 .calendar-day.today .calendar-num { background: var(--btn-primary-bg); color: var(--text-on-accent); }
-.calendar-add-day { padding: 0 4px; color: var(--muted); font-weight: 400; text-decoration: none; }
-.calendar-add-day:hover { color: var(--link); }
+/* The day's "+" (owner, 2026-11-06): 20 px in --link, unseen and not clickable until the cell is
+   hovered (a pointer device), the control focused (Tab) or the cell held on a touch screen
+   (.show-add, ledger/calendar_dialog.js). */
+.day-add { display: inline-flex; flex: 0 0 20px; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; color: var(--link); text-decoration: none; opacity: 0; pointer-events: none; }
+.day-add:focus-visible, .calendar-day.show-add .day-add { opacity: 1; pointer-events: auto; }
 @media (hover: hover) {
-  .calendar-add-day { opacity: 0; }
-  .calendar-day:hover .calendar-add-day, .calendar-add-day:focus-visible { opacity: 1; }
+  .calendar-day:hover .day-add { opacity: 1; pointer-events: auto; }
+  .day-add:hover { background: var(--month-current); }
 }
+@media (hover: none) {
+  .calendar-day { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+}
+.day-panel-head .section-label { margin: 0; }
 .calendar-day ul { list-style: none; margin: var(--space-1) 0 0; padding: 0; }
 .calendar-item, .calendar-more { margin-bottom: 3px; }
 .calendar-item a { display: block; overflow: hidden; padding: 2px 6px; border-radius: 4px; background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-xs); font-weight: 700; line-height: 1.5; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }

@@ -149,8 +149,8 @@ def test_the_dialog_has_its_parts_and_labels(billing: Client) -> None:
     # The opener: the header's primary, a link to the old URL without the script.
     assert re.search(
         r'<a class="btn btn-primary" id="calendar-new-entry" href="/calendar/new/\?on=2026-10-06" '
-        r'data-dialog-open="calendar-entry"><svg class="icon icon-plus"[^>]*>.*?</svg>'
-        r" New entry</a>",
+        r'data-dialog-open="calendar-entry" data-day="2026-10-06"><svg class="icon icon-plus"'
+        r"[^>]*>.*?</svg> New entry</a>",
         body,
         re.S,
     )
@@ -158,10 +158,46 @@ def test_the_dialog_has_its_parts_and_labels(billing: Client) -> None:
     assert "ledger/calendar_dialog.js" in body
 
 
+def test_the_day_panel_has_add_entry_on_its_day(billing: Client) -> None:
+    """Owner, 2026-11-06: "+ Add entry" at the top of the day's panel, a small secondary button
+    opening the dialog on the panel's day; without the script the old URL with ?on=."""
+    for path, on in (("/calendar/", "2026-10-06"), ("/calendar/?on=2026-12-03", "2026-12-03")):
+        panel = part(body_of(billing, path), "calendar-day-panel")
+        assert re.search(
+            r'<div class="card-head day-panel-head"><h2 class="section-label" '
+            r'id="calendar-day-title">[^<]+</h2><a class="btn btn-sm" id="panel-add-entry" '
+            rf'href="/calendar/new/\?on={on}" data-dialog-open="calendar-entry" data-day="{on}">'
+            r'<svg class="icon icon-plus"[^>]*>.*?</svg> Add entry</a></div>',
+            panel,
+            re.S,
+        ), path
+        assert "btn-primary" not in panel
+
+
+def test_each_day_of_the_month_has_its_labelled_plus(billing: Client) -> None:
+    """The day's "+" (.day-add): one per day of the month shown, each opening the dialog on its
+    day, named "Add an entry on <day>" for screen readers; none on the other months' days."""
+    month = part(body_of(billing, "/calendar/"), "calendar-month")
+    found = re.findall(
+        r'<a class="day-add" href="/calendar/new/\?on=(2026-\d\d-\d\d)" '
+        r'data-dialog-open="calendar-entry" data-day="\1" title="Add an entry on ([^"]+)" '
+        r'aria-label="Add an entry on \2"><svg class="icon icon-plus"',
+        month,
+    )
+    assert [day for day, _ in found] == [f"2026-10-{n:02d}" for n in range(1, 32)]
+    assert found[5] == ("2026-10-06", "Oct 6, 2026")
+    # A click on the day itself is the panel's link, never the dialog.
+    assert (
+        '<a class="calendar-num-link" href="?month=2026-10&amp;on=2026-10-06" '
+        'aria-label="Oct 6, 2026" aria-current="date">'
+    ) in month
+
+
 def test_a_viewer_has_no_dialog_and_no_opener() -> None:
     viewer = client_for(Role.VIEWER)[0]
     body = body_of(viewer, "/calendar/")
     assert 'id="calendar-entry"' not in body and 'id="calendar-new-entry"' not in body
+    assert 'id="panel-add-entry"' not in body and "day-add" not in body
     assert "calendar_dialog.js" not in body
     assert viewer.get(ADD).status_code == 403
     assert viewer.get(f"{ADD}?on=2026-10-22").status_code == 403

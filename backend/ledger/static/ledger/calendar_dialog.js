@@ -1,8 +1,10 @@
 // The New calendar entry dialog (owner, 2026-11-06; ledger/calendar/_entry_dialog.html), opened
 // by "+ New entry" through finance/dialog.js. This script keeps the rest:
-// - a click on a day of the month (its number, its +, its empty space; not an item's link)
-//   opens the dialog with that day as the Date; without the script the number and the + stay
-//   links (the day's panel, the old URL with the dialog open);
+// - an opener with data-day ("+ New entry", the day panel's "+ Add entry", a day's "+") sets
+//   that day as the Date (finance/dialog.js opens the dialog; without the script each is a
+//   link to the old URL with ?on=). A click on a day itself selects it for the panel;
+// - on a touch screen a day held for 500 ms (a pointerdown not moved or lifted) shows its "+"
+//   (.show-add) and the click that ends the hold is not followed; a plain tap selects the day;
 // - the day beside Date as the page reads it ("Nov 6, 2026") while the date changes;
 // - the link's type-ahead: typing in #entry-link asks ledger:calendar:search (150 ms after the
 //   last key) and lists the stores, operators and leases found, each a button; the arrow keys
@@ -40,19 +42,50 @@
     var parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.value);
     day.textContent = parts ? MONTHS[Number(parts[2]) - 1] + " " + Number(parts[3]) + ", " + parts[1] : "";
   }
-  function open(on) {
-    if (date && on) { date.value = on; showDay(); }
-    if (!dialog.open) { dialog.showModal(); }
-  }
 
   if (date) { date.addEventListener("input", showDay); date.addEventListener("change", showDay); }
+  document.addEventListener("click", function (event) {
+    var opener = event.target.closest ? event.target.closest("[data-dialog-open=calendar-entry][data-day]") : null;
+    if (opener && date && modal()) {
+      date.value = opener.getAttribute("data-day");
+      showDay();
+    }
+  });
   if (month) {
-    month.addEventListener("click", function (event) {
-      var cell = event.target.closest ? event.target.closest(".calendar-day") : null;
-      if (!cell || !modal() || event.target.closest(".calendar-item, .calendar-more")) { return; }
-      event.preventDefault();
-      open(cell.getAttribute("data-day"));
+    var HOLD_MS = 500;
+    var held = null;
+    var holdTimer = null;
+    var start = null;
+    var swallow = false;
+    function stopHold() { window.clearTimeout(holdTimer); holdTimer = null; }
+    month.addEventListener("pointerdown", function (event) {
+      swallow = false;
+      if (event.pointerType !== "touch") { return; }
+      var cell = event.target.closest(".calendar-day");
+      if (!cell || !cell.querySelector(".day-add")) { return; }
+      start = {x: event.clientX, y: event.clientY};
+      stopHold();
+      holdTimer = window.setTimeout(function () {
+        holdTimer = null;
+        if (held && held !== cell) { held.classList.remove("show-add"); }
+        held = cell;
+        cell.classList.add("show-add");
+        swallow = true;
+      }, HOLD_MS);
     });
+    month.addEventListener("pointermove", function (event) {
+      if (holdTimer && start && Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) > 10) { stopHold(); }
+    });
+    month.addEventListener("pointerup", stopHold);
+    month.addEventListener("pointercancel", stopHold);
+    month.addEventListener("contextmenu", function (event) {
+      if (swallow || holdTimer) { event.preventDefault(); }
+    });
+    month.addEventListener("click", function (event) {
+      if (!swallow) { return; }
+      swallow = false;
+      if (!event.target.closest(".day-add")) { event.preventDefault(); event.stopPropagation(); }
+    }, true);
   }
   if (cancel) {
     cancel.addEventListener("click", function (event) {

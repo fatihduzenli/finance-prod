@@ -1,13 +1,16 @@
 """The New calendar entry dialog in a browser (owner, 2026-11-06): "+ New entry" opens it over
-the Calendar page without leaving it, Cancel closes it; a click on a day opens it with that day
-as the Date and its words beside the input; typing in the link field lists the matches and
-choosing one shows the chip (its × brings the field back); Save closes the dialog and the entry
-is on its day, linked to the store's lease and operator; on a phone the dialog is a sheet at the
-bottom of the screen."""
+the Calendar page without leaving it, Cancel closes it; a click on a day selects it in the side
+panel and never opens the dialog; the panel's "+ Add entry" and the day's "+" (shown on hover)
+open it with that day as the Date and its words beside the input; typing in the link field
+lists the matches and choosing one shows the chip (its × brings the field back); Save closes the
+dialog and the entry is on its day, linked to the store's lease and operator; on a phone the
+dialog is a sheet at the bottom of the screen, a tap selects a day and a tap-and-hold shows its
+"+"."""
 
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
@@ -92,17 +95,35 @@ def test_new_entry_on_the_laptop(live_server: LiveServer, laptop: BrowserContext
     dialog.locator("#cancel-calendar-entry").click()
     expect(dialog).to_be_hidden()
     assert page.url == calendar_url
-    # A click on a day opens it with that day.
+    # A click on a day selects it in the panel; the dialog stays closed.
     chosen = today.replace(day=20)
-    page.locator(f'.calendar-day[data-day="{chosen.isoformat()}"] .calendar-num-link').click()
+    cell = page.locator(f'.calendar-day[data-day="{chosen.isoformat()}"]')
+    cell.locator(".calendar-num-link").click()
+    page.wait_for_url(f"{live_server.url}/calendar/?month={chosen:%Y-%m}&on={chosen.isoformat()}")
+    expect(page.locator("#calendar-entry")).to_be_hidden()
+    expect(page.locator("#calendar-day-title")).to_contain_text(f"{chosen:%b} {chosen.day}")
+    # The panel's "+ Add entry" opens the dialog on the panel's day.
+    page.locator("#panel-add-entry").click()
     expect(dialog).to_be_visible()
-    assert page.url == calendar_url
     expect(dialog.locator("[name=on]")).to_have_value(chosen.isoformat())
     expect(dialog.locator("#entry-day")).to_have_text(day_text(chosen))
-    # The date's words follow the input.
-    dialog.locator("[name=on]").fill(chosen.replace(day=21).isoformat())
-    expect(dialog.locator("#entry-day")).to_have_text(day_text(chosen.replace(day=21)))
+    dialog.locator("#cancel-calendar-entry").click()
+    expect(dialog).to_be_hidden()
+    # The day's "+": unseen until the cell is hovered, then it opens the dialog on its day.
+    other = today.replace(day=21)
+    plus = page.locator(f'.calendar-day[data-day="{other.isoformat()}"] .day-add')
+    expect(plus).to_have_attribute("aria-label", f"Add an entry on {day_text(other)}")
+    expect(plus).to_have_css("opacity", "0")
+    page.locator(f'.calendar-day[data-day="{other.isoformat()}"]').hover()
+    expect(plus).to_have_css("opacity", "1")
+    plus.click()
+    expect(dialog).to_be_visible()
+    assert page.url.endswith(f"?month={chosen:%Y-%m}&on={chosen.isoformat()}")
+    expect(dialog.locator("[name=on]")).to_have_value(other.isoformat())
+    expect(dialog.locator("#entry-day")).to_have_text(day_text(other))
     dialog.locator("[name=on]").fill(chosen.isoformat())
+    expect(dialog.locator("#entry-day")).to_have_text(day_text(chosen))
+    expect(dialog.locator("#entry-day")).to_have_text(day_text(chosen))
     # Reminder, a title, the morning e-mail.
     dialog.locator("label.kind-card", has_text="Reminder").click()
     dialog.locator("[name=title]").fill("Collect the keys")
@@ -144,6 +165,49 @@ def test_new_entry_on_the_laptop(live_server: LiveServer, laptop: BrowserContext
         lease.operator_id,
     )
     shot(page, "calendar-entry-saved-laptop")
+
+
+def test_a_tap_selects_a_day_and_a_hold_shows_its_plus_on_the_phone(
+    live_server: LiveServer, phone: BrowserContext
+) -> None:
+    today = timezone.localdate()
+    held = today.replace(day=20)
+    tapped = today.replace(day=21)
+    for on in (held, tapped):  # the phone lists the days with items only
+        CalendarEntry.objects.create(kind="note", on=on, title=f"Note {on.day}")
+    page = signed_in(phone, live_server, "e2e-calendar-entry-hold")
+    page.goto(f"{live_server.url}/calendar/")
+    dialog = page.locator("#calendar-entry")
+    cell = page.locator(f'.calendar-day[data-day="{held.isoformat()}"]')
+    plus = cell.locator(".day-add")
+    expect(plus).to_have_css("opacity", "0")
+    # Tap-and-hold (a touch pointerdown held 500 ms): the "+" shows, the page stays.
+    box = cell.locator(".calendar-date").bounding_box()
+    assert box is not None
+    point = {"clientX": box["x"] + 4, "clientY": box["y"] + 4}
+    touch = {"pointerType": "touch", "isPrimary": True, "bubbles": True, **point}
+    url = page.url
+    cell.locator(".calendar-date").dispatch_event("pointerdown", touch)
+    page.wait_for_timeout(700)
+    cell.locator(".calendar-date").dispatch_event("pointerup", touch)
+    cell.locator(".calendar-num-link").dispatch_event("click")
+    expect(cell).to_have_class(re.compile(r"\bshow-add\b"))
+    expect(plus).to_have_css("opacity", "1")
+    assert page.url == url
+    shot(page, "calendar-hold-phone")
+    # A tap on the "+" opens the sheet on that day.
+    plus.tap()
+    expect(dialog).to_be_visible()
+    expect(dialog.locator("[name=on]")).to_have_value(held.isoformat())
+    expect(dialog.locator("#entry-day")).to_have_text(day_text(held))
+    dialog.locator("#cancel-calendar-entry").tap()
+    expect(dialog).to_be_hidden()
+    # A plain tap on another day selects it; its "+" stays unseen.
+    other = page.locator(f'.calendar-day[data-day="{tapped.isoformat()}"]')
+    other.locator(".calendar-num-link").tap()
+    page.wait_for_url(f"{live_server.url}/calendar/?month={tapped:%Y-%m}&on={tapped.isoformat()}")
+    expect(page.locator("#calendar-entry")).to_be_hidden()
+    expect(other.locator(".day-add")).to_have_css("opacity", "0")
 
 
 def test_new_entry_is_a_sheet_on_the_phone(live_server: LiveServer, phone: BrowserContext) -> None:

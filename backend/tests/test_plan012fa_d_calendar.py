@@ -194,9 +194,13 @@ def test_today_is_marked_and_each_day_number_selects_it(today: date) -> None:
         '<a class="calendar-num-link" href="?month=2026-10&amp;on=2026-10-06" '
         'aria-label="Oct 6, 2026" aria-current="date">' in body
     )
-    # Billing has the add link per day of the month; a viewer has none.
-    assert 'href="/calendar/new/?on=2026-10-20" title="Add on Oct 20, 2026"' in body
-    assert "calendar-add-day" not in page(role=Role.VIEWER)
+    # Billing has the "+" per day of the month (owner, 2026-11-06); a viewer has none.
+    assert (
+        '<a class="day-add" href="/calendar/new/?on=2026-10-20" data-dialog-open="calendar-entry" '
+        'data-day="2026-10-20" title="Add an entry on Oct 20, 2026" '
+        'aria-label="Add an entry on Oct 20, 2026">'
+    ) in body
+    assert "day-add" not in page(role=Role.VIEWER)
 
 
 def test_the_legend_names_every_kind(today: date) -> None:
