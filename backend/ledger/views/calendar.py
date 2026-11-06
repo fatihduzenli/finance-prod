@@ -404,6 +404,13 @@ def _save(request: HttpRequest, entry: CalendarEntry | None) -> HttpResponse:
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def calendar_add(request: HttpRequest) -> HttpResponse:
+    """The New calendar entry dialog: a GET is the calendar page with it open (``?on=``
+    its day)."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    if request.method != "POST":
+        return _page(request, entry_open=True)
     return _save(request, None)
 
 

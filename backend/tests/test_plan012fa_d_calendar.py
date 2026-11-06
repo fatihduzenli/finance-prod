@@ -217,7 +217,8 @@ def test_the_day_panel_shows_today_by_default(today: date) -> None:
         f'href="/calendar/{entry.pk}/">Collect the keys</a><span class="day-entry-meta">Note</span>'
         in panel
     )
-    assert 'id="calendar-add" href="/calendar/new/?on=2026-10-06"' in panel
+    # The header's "+ New entry" (owner, 2026-11-06) opens the dialog on the day shown.
+    assert 'id="calendar-new-entry" href="/calendar/new/?on=2026-10-06"' in page()
 
 
 def test_the_day_panel_follows_on_and_moves_the_month(today: date) -> None:
@@ -226,7 +227,7 @@ def test_the_day_panel_follows_on_and_moves_the_month(today: date) -> None:
     assert '<h2 id="calendar-title">Dec 2026</h2>' in body
     panel = part(body, "calendar-day-panel")
     assert "Thursday, Dec 3" in panel and "December call" in panel
-    assert 'id="calendar-add" href="/calendar/new/?on=2026-12-03"' in panel
+    assert 'id="calendar-new-entry" href="/calendar/new/?on=2026-12-03"' in body
     assert 'class="calendar-day selected" data-day="2026-12-03"' in body
     # A day outside the month shown is still read (one read for the three ranges).
     other = page("/calendar/?month=2026-10&on=2026-12-03")

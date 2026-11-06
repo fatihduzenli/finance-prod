@@ -747,7 +747,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:payments:void_manual": lambda w: BREADCRUMBS["ledger:payments:detail"](w),
     "ledger:calendar:page": lambda w: (["Reports"], "Calendar"),
     "ledger:calendar:detail": lambda w: (["Calendar: Oct 2026"], "Walk note"),
-    "ledger:calendar:add": lambda w: (["Calendar"], "New calendar entry"),
+    # Owner, 2026-11-06: the old URL is the Calendar page with the New calendar entry dialog.
+    "ledger:calendar:add": lambda w: BREADCRUMBS["ledger:calendar:page"](w),
     "ledger:calendar:edit": lambda w: (["Calendar", "Walk note"], "Edit calendar entry"),
     "ledger:webhooks:detail": lambda w: (
         ["Messages from Stax"],

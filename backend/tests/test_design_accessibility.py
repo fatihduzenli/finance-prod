@@ -521,6 +521,8 @@ def page_paths(seeded: visual_world.World) -> list[tuple[str, Role | None, str]]
         ("payments", Role.BILLING, "/payments/"),
         ("returns", Role.BILLING, "/returns/"),
         ("calendar", Role.BILLING, "/calendar/"),
+        # Owner, 2026-11-06: the New calendar entry dialog open over the Calendar page.
+        ("calendar, New calendar entry", Role.BILLING, "/calendar/new/?on=2026-10-22"),
         ("record a payment", Role.BILLING, f"/stores/{store}/payments/new/"),
         (
             "add payment (rent charge)",

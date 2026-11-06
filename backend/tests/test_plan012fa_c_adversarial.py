@@ -104,10 +104,15 @@ def test_every_form_page_has_its_cards_and_one_primary_in_the_summary() -> None:
         assert dialog is not None and " open" in dialog.group(0)[:200], path
         assert dialog.group(1).count("btn-primary") == 1, path
         assert body.count('id="page-header"') == 1, path
+    # Owner, 2026-11-06: New calendar entry is the Log contact frame (dialog-sm) over the
+    # Calendar page, its one primary in the dialog's foot.
+    body = admin.get(reverse("ledger:calendar:add")).content.decode()
+    dialog = re.search(r"<dialog[^>]*class=\"dialog dialog-sm\"[^>]*>(.*?)</dialog>", body, re.S)
+    assert dialog is not None and " open" in dialog.group(0)[:200]
+    assert dialog.group(1).count("btn-primary") == 1
     for path in (
         reverse("ledger:leases:create"),
         reverse("ledger:stores:record_payment", kwargs={"pk": lease.store_id}),
-        reverse("ledger:calendar:add"),
     ):
         body = admin.get(path).content.decode()
         assert body.count('class="card form-card') + body.count("card form-card") >= 1, path
