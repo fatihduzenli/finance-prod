@@ -1,8 +1,0 @@
-{% comment %}The Cashflow card (PLAN-012f-b D3, D4; PLAN-012g C2; DESIGN-SPEC §4a, §7.5), as one card or two. Without
-?range= the view computes the last 12 months ("cashflow") and the last 6 ("cashflow_narrow"): the first is
-the wide card (.cashflow-wide, marked .has-narrow), shown above 768 px, the second the phone's
-(.cashflow-narrow), shown at 768 px and under. With an explicit range there is one card, at every width.
-Each card is dashboard/_cashflow_card.html with its block, its range's form values and its ids' suffix
-("-narrow" on the second, so the ids stay unique).{% endcomment %}
-{% include "ledger/dashboard/_cashflow_card.html" with block=cashflow suffix="" variant="cashflow-wide" has_narrow=cashflow_narrow card_key=range_key card_from=range_from card_to=range_to %}
-{% if cashflow_narrow %}{% include "ledger/dashboard/_cashflow_card.html" with block=cashflow_narrow suffix="-narrow" variant="cashflow-narrow" has_narrow=None card_key=cashflow_narrow.range.key card_from=cashflow_narrow.range.from_month card_to=cashflow_narrow.range.to_month %}{% endif %}

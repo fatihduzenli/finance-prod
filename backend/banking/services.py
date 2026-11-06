@@ -59,6 +59,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
@@ -284,6 +285,39 @@ def readiness(
     if (connection or active_connection()) is None:
         return NO_CONNECTION
     return ""
+
+
+@dataclass(frozen=True, slots=True)
+class Summary:
+    """The dashboard's Bank deposits figure (PLAN-015 Batch 1): what the page lists."""
+
+    #: The credits posted in the range, in every state (the page's "All" filter).
+    total: Decimal
+    #: The deposits still New, whatever their date (the page's default list).
+    unmatched: int
+    connection: BankConnection | None
+
+    @property
+    def account(self) -> str:
+        """The account as the card names it, "Chase ····4821" (the connection's institution
+        and Plaid's mask of the business's own account); ``""`` without a connection."""
+        if self.connection is None:
+            return ""
+        name = self.connection.institution or "Bank account"
+        return f"{name} ····{self.connection.mask}" if self.connection.mask else name
+
+
+def summary(start: date, end: date) -> Summary:
+    """:class:`Summary` for the days ``start`` to ``end`` (two queries)."""
+    found = BankTransaction.objects.aggregate(
+        total=Sum("amount", filter=Q(posted_on__gte=start, posted_on__lte=end)),
+        unmatched=Count("pk", filter=Q(status=Status.NEW)),
+    )
+    return Summary(
+        total=Decimal(str(found["total"])) if found["total"] is not None else ZERO,
+        unmatched=found["unmatched"] or 0,
+        connection=active_connection(),
+    )
 
 
 def card() -> dict[str, Any]:

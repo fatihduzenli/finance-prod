@@ -1056,7 +1056,8 @@ def test_kpi2_without_its_optional_parts_and_with_the_red_figure() -> None:
     assert "kpi2-sub" not in html and "kpi2-pill" not in html and "<a " not in html
 
 
-@pytest.mark.parametrize("tone", ["paid", "pending", "neutral"])
+# PLAN-015 Batch 1 re-pin: the unpaid tone joins for the Collected card's "↓ x%".
+@pytest.mark.parametrize("tone", ["paid", "unpaid", "pending", "neutral"])
 def test_kpi2_badge_tones(tone: str) -> None:
     html = rendered("{% kpi2 'banknote' 'Deposits' badge='3 unmatched' badge_tone=t %}", t=tone)
     assert f'<span class="kpi2-pill kpi2-pill-{tone}">3 unmatched</span>' in html
@@ -1067,7 +1068,7 @@ def test_kpi2_badge_tones(tone: str) -> None:
     [
         "value_tone='paid'",
         "value_tone='red'",
-        "badge='x' badge_tone='unpaid'",
+        "badge='x' badge_tone='overdue'",
         "badge='x' badge_tone=''",
     ],
 )
@@ -1224,7 +1225,7 @@ def test_the_new_components_take_their_colours_from_documented_pairs() -> None:
         assert f"background: var(--{tone}-bg); color: var(--{tone}-text);" in rule(
             f".status-chip-{tone}"
         ), tone
-    for tone in ("paid", "pending", "neutral"):
+    for tone in ("paid", "unpaid", "pending", "neutral"):
         assert f"background: var(--{tone}-bg); color: var(--{tone}-text);" in rule(
             f".kpi2-pill-{tone}"
         ), tone
