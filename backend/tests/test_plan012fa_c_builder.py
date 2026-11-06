@@ -406,7 +406,6 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
             ["How is this being paid?"],
             "save-payment",
         ),
-        (reverse("ledger:calendar:add"), ["Entry"], "save-calendar-entry"),
     ]
     for path, expected, button in pages:
         body = get(Role.ADMIN, path)

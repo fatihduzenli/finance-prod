@@ -403,6 +403,8 @@ NOT_PAGES: dict[str, str] = {
     # PLAN-012f-c D13: opened without its charge it answers a refusal.
     "ledger:plans:split_preview": "Split into installments' preview (JSON for the page's script)",
     "ledger:search_stores": "the store picker's rows (JSON for the picker's script)",
+    # Owner, 2026-11-06: the New calendar entry dialog's link type-ahead.
+    "ledger:calendar:search": "the calendar entry dialog's link rows (JSON for its script)",
     "ledger:invoices:print": "the invoice document's print page (its own layout)",
     "ledger:lease_ends:pdf": "the statement PDF",
     "ledger:documents:download": "a stored file",
@@ -745,7 +747,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:payments:void_manual": lambda w: BREADCRUMBS["ledger:payments:detail"](w),
     "ledger:calendar:page": lambda w: (["Reports"], "Calendar"),
     "ledger:calendar:detail": lambda w: (["Calendar: Oct 2026"], "Walk note"),
-    "ledger:calendar:add": lambda w: (["Calendar"], "New calendar entry"),
+    # Owner, 2026-11-06: the old URL is the Calendar page with the New calendar entry dialog.
+    "ledger:calendar:add": lambda w: BREADCRUMBS["ledger:calendar:page"](w),
     "ledger:calendar:edit": lambda w: (["Calendar", "Walk note"], "Edit calendar entry"),
     "ledger:webhooks:detail": lambda w: (
         ["Messages from Stax"],

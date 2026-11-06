@@ -559,6 +559,9 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # The calendar page and an entry's page (PLAN-011b D8): any verified role.
         "ledger:calendar:page",
         "ledger:calendar:detail",
+        # The New calendar entry dialog's link type-ahead as JSON (owner, 2026-11-06): any
+        # verified role; GET only.
+        "ledger:calendar:search",
         # One's own settings page (PLAN-011b D8): any verified role.
         "finance:settings",
         # The help pages (PLAN-012e-2 D10): static, any verified role.
