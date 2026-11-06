@@ -89,6 +89,8 @@ def test_public_set_is_exactly_login_healthz_webhook_receiver_and_static() -> No
         "webhooks:receive",
         "ledger:calendar:feed",
         "ledger:statement_link",
+        # Owner, 2026-11-05: the web app manifest, GET and HEAD only; it carries no data.
+        "finance:manifest",
     }
     assert registry.PUBLIC_UNSAFE_ROUTE_NAMES == {"two_factor:login", "webhooks:receive"}
     assert registry.PUBLIC_PATH_PREFIXES == (f"/{settings.STATIC_URL.lstrip('/')}",)

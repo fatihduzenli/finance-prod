@@ -1,19 +1,23 @@
 {% load static %}{% comment %}
 The operator portal's shell (PLAN-014 H3): light by default, phone first, its own. The 12g
 tokens (finance/tokens.css: data-theme light, dark or system) and portal/portal.css; no staff
-navigation, no manifest, no service worker. The top bar: the company's name, the store switcher
+navigation, no service worker. The top bar: the company's name, the store switcher
 (a <details> list of the operator's stores, no script), the Light · Dark · System control (a
 POST to portal:account) and Sign out (a POST to portal:logout). Signed out, the bar holds the
-company's name only. Nothing here reads the staff user.
+company's name only. Nothing here reads the staff user. The head carries the app's identity
+(finance/_app_identity.html: the icons, the public manifest, the app-name metas; owner,
+2026-11-05) and the tab title "<page> · Monvera"; the company's name is the top bar's.
 {% endcomment %}<!doctype html>
 <html lang="en" data-theme="{{ portal_theme|default:'system' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>{% block title %}{% endblock %} · {{ company.name }}</title>
+  <title>{% block title %}{% endblock %} · Monvera</title>
+  {% include "finance/_theme_color.html" with theme=portal_theme|default:"system" %}
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'portal/portal.css' %}">
+  {% include "finance/_app_identity.html" %}
   {% if refresh %}<meta http-equiv="refresh" content="5">{% endif %}
 </head>
 <body class="portal">

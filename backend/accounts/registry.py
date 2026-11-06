@@ -48,7 +48,9 @@ class RouteRule:
 #: webhook receiver, which checks its URL token itself (PLAN-008 D2), the calendar
 #: feed, whose token in the path is the credential and which takes GET and HEAD only
 #: (PLAN-011b D8), and the operator's statement behind a signed, expiring, revocable
-#: link, GET and HEAD only (PLAN-011b D4).
+#: link, GET and HEAD only (PLAN-011b D4), and the web app manifest, GET and HEAD only,
+#: which carries no setting and no data (owner, 2026-11-05: a phone reads it from the
+#: sign-in page).
 PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset(
     {
         "two_factor:login",
@@ -56,6 +58,7 @@ PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset(
         "webhooks:receive",
         "ledger:calendar:feed",
         "ledger:statement_link",
+        "finance:manifest",
     }
 )
 
@@ -518,8 +521,7 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:reconciliation:export",
         "ledger:documents:export_store",
         "ledger:documents:export_lease",
-        # The web app manifest and the service worker (PLAN-011 D9): any verified role.
-        "finance:manifest",
+        # The service worker (PLAN-011 D9): any verified role. The manifest is public.
         "finance:service_worker",
         # The notes & follow-ups page and its CSV export (PLAN-011b D7): any verified role.
         "ledger:operators:contacts",

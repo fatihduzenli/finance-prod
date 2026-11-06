@@ -73,29 +73,33 @@ def test_the_manifest_is_served_as_a_web_app_manifest() -> None:
     assert response.status_code == 200
     assert response["Content-Type"] == "application/manifest+json"
     data = json.loads(response.content)
-    # PLAN-012c D2, D4: the company's names, the brand icons; PLAN-012f D4: the theme is
-    # --navy and the splash background --bg, from the tokens.
+    # Owner, 2026-11-05: the app's own name and the dark --bg; the brand icons with the
+    # maskable one.
     assert data["name"] == "Monvera" and data["short_name"] == "Monvera"
     assert data["start_url"] == "/" and data["scope"] == "/"
     assert data["display"] == "standalone"
-    assert (data["theme_color"], data["background_color"]) == ("#0b2545", "#f4f6f9")
-    assert [(icon["src"], icon["sizes"], icon["type"]) for icon in data["icons"]] == [
-        ("/static/finance/brand/monvera_icon_192.png", "192x192", "image/png"),
-        ("/static/finance/brand/monvera_icon_512.png", "512x512", "image/png"),
-        ("/static/finance/brand/monvera_icon.svg", "any", "image/svg+xml"),
+    assert (data["theme_color"], data["background_color"]) == ("#171721", "#171721")
+    assert [
+        (icon["src"], icon["sizes"], icon["type"], icon["purpose"]) for icon in data["icons"]
+    ] == [
+        ("/static/finance/brand/monvera_icon_192.png", "192x192", "image/png", "any"),
+        ("/static/finance/brand/monvera_icon_512.png", "512x512", "image/png", "any"),
+        ("/static/finance/brand/monvera_icon_512_maskable.png", "512x512", "image/png", "maskable"),
+        ("/static/finance/brand/monvera_icon.svg", "any", "image/svg+xml", "any"),
     ]
 
 
-def test_the_manifest_follows_the_company_settings() -> None:
+def test_the_manifest_keeps_the_apps_name_whatever_the_company_settings() -> None:
     row = CompanySettings.current()
     row.name, row.short_name = "Acme Rentals", "Acme"
     row.save()
     data = json.loads(client_for().get("/manifest.webmanifest").content)
-    assert (data["name"], data["short_name"]) == ("Acme Rentals", "Acme")
+    assert (data["name"], data["short_name"]) == ("Monvera", "Monvera")
 
 
 @pytest.mark.parametrize(
-    ("path", "size"), [(path, sizes) for path, sizes, kind in pwa.ICONS if kind == "image/png"]
+    ("path", "size"),
+    [(path, sizes) for path, sizes, kind, _purpose in pwa.ICONS if kind == "image/png"],
 )
 def test_each_icon_is_a_png_of_its_declared_size(path: str, size: str) -> None:
     found = finders.find(path)
@@ -115,12 +119,20 @@ def test_the_manifest_carries_no_setting_no_host_and_no_secret() -> None:
         assert icon["src"].startswith("/static/finance/brand/")
 
 
-@pytest.mark.parametrize("path", ["/manifest.webmanifest", "/sw.js"])
-def test_both_routes_need_a_verified_sign_in(path: str) -> None:
-    response = Client().get(path)
+def test_the_worker_needs_a_verified_sign_in() -> None:
+    response = Client().get("/sw.js")
     assert response.status_code == 401
-    body = response.content.decode()
-    assert "PRECACHE" not in body and "standalone" not in body
+    assert "PRECACHE" not in response.content.decode()
+
+
+def test_the_manifest_answers_signed_out() -> None:
+    # Owner, 2026-11-05: a phone reads it from the sign-in page, without a session.
+    response = Client().get("/manifest.webmanifest")
+    assert response.status_code == 200
+    assert response["Content-Type"] == "application/manifest+json"
+    assert json.loads(response.content) == pwa.manifest_data()
+    directives = {d.strip() for d in response["Cache-Control"].split(",")}
+    assert {"private", "no-store"} <= directives
 
 
 @pytest.mark.parametrize("path", ["/manifest.webmanifest", "/sw.js"])
@@ -227,9 +239,9 @@ def test_the_worker_source_embeds_no_setting() -> None:
 
 def test_every_staff_page_links_the_manifest_and_registers_the_worker() -> None:
     page = client_for().get("/").content.decode()
-    assert (
-        '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">' in page
-    )
+    # Public, so linked without credentials (owner, 2026-11-05).
+    assert '<link rel="manifest" href="/manifest.webmanifest">' in page
+    assert "crossorigin" not in page
     # PLAN-012g A2: a user who never chose a theme follows the device (System): two metas.
     assert '<meta name="theme-color" content="#0b2545" media="(prefers-color-scheme: light)">' in (
         page
@@ -237,11 +249,14 @@ def test_every_staff_page_links_the_manifest_and_registers_the_worker() -> None:
     assert '<meta name="theme-color" content="#171721" media="(prefers-color-scheme: dark)">' in (
         page
     )
-    assert '<link rel="apple-touch-icon" href="/static/finance/brand/monvera_icon_192.png">' in page
-    # PLAN-012c D4: the SVG favicon with the PNG fallback.
     assert (
-        '<link rel="icon" href="/static/finance/brand/monvera_icon_192.png" type="image/png" '
-        'sizes="192x192">' in page
+        '<link rel="apple-touch-icon" sizes="180x180" '
+        'href="/static/finance/brand/monvera_touch_180.png">' in page
+    )
+    # The SVG favicon with the 32 and 16 px PNG fallbacks (owner, 2026-11-05).
+    assert (
+        '<link rel="icon" href="/static/finance/brand/favicon-32.png" type="image/png" '
+        'sizes="32x32">' in page
     )
     assert (
         '<link rel="icon" href="/static/finance/brand/monvera_icon.svg" type="image/svg+xml">'

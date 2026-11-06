@@ -22,7 +22,8 @@ At 768 px and under the left panel is a short header (the logo and the headline 
 mosaic) and the form takes the width. The logo is the brand's own file, never
 the company row's override (a stored document needs a session). The colours and sizes are
 app.css's (tokens.css first); the forms and their flow are the package's own. The tab title is
-"<short name> · <page>" from the company settings (PLAN-012c D2).
+"<page> · Monvera", the app's name (owner, 2026-11-05); the head's icons, manifest and app-name
+metas are finance/_app_identity.html's, as in the staff shell.
 The theme (PLAN-012g A2; DESIGN-SPEC §7.1): no user yet, so the pages follow the device
 (data-theme="system", resolved by tokens.css through prefers-color-scheme, with no script) and
 carry the two System theme-color metas.
@@ -31,12 +32,11 @@ carry the two System theme-color metas.
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ company.short_name }} · {% block title %}{% endblock %}</title>
+  <title>{% block title %}{% endblock %} · Monvera</title>
   {% include "finance/_theme_color.html" with theme="system" %}
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'finance/app.css' %}">
-  <link rel="icon" href="{% static 'finance/brand/monvera_icon_192.png' %}" type="image/png" sizes="192x192">
-  <link rel="icon" href="{% static 'finance/brand/monvera_icon.svg' %}" type="image/svg+xml">
+  {% include "finance/_app_identity.html" %}
   {% block extra_media %}{% endblock %}
 </head>
 <body class="auth">

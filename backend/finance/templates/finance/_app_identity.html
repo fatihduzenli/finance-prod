@@ -1,0 +1,7 @@
+{% load static %}{% comment %}The app's identity on a home screen and in a tab (owner, 2026-11-05), the same in the staff shell (finance/base.html), the sign-in frame (two_factor/_base.html) and the portal (portal/base.html): the SVG favicon with the 32 and 16 px PNGs, the 180 px opaque touch icon for iOS, the public manifest (finance.pwa, no credentials needed) and the app's name, "Monvera", whatever the company's. The theme-color meta is finance/_theme_color.html's, included by each base.{% endcomment %}<link rel="icon" href="{% static 'finance/brand/monvera_icon.svg' %}" type="image/svg+xml">
+  <link rel="icon" href="{% static 'finance/brand/favicon-32.png' %}" type="image/png" sizes="32x32">
+  <link rel="icon" href="{% static 'finance/brand/favicon-16.png' %}" type="image/png" sizes="16x16">
+  <link rel="apple-touch-icon" sizes="180x180" href="{% static 'finance/brand/monvera_touch_180.png' %}">
+  <link rel="manifest" href="{% url 'finance:manifest' %}">
+  <meta name="application-name" content="Monvera">
+  <meta name="apple-mobile-web-app-title" content="Monvera">

@@ -930,8 +930,8 @@ def test_the_login_page_has_the_two_panels_of_the_reference(login_page: str) -> 
         '<p class="auth-note" id="auth-note">Access is by invitation. Ask an admin if you need '
         "an account.</p>"
     ) in main
-    # The tab title stays the package's word.
-    assert "<title>[SANDBOX] Monvera · Login</title>" in login_page
+    # The tab title stays the package's word, then the app's name (owner, 2026-11-05).
+    assert "<title>[SANDBOX] Login · Monvera</title>" in login_page
 
 
 def test_the_login_form_keeps_its_fields_names_and_flow(login_page: str) -> None:
