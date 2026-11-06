@@ -1,7 +1,8 @@
 {% load components money responsive dates %}{% comment %}The Recent activity card (PLAN-015 Batch 1; ledger.services.dashboard_v2.activity): the
 head row with the search field ("Store, operator or amount", ?q=) and the kind select (?kind=; the script submits it
 on change, a Show button without it) as one GET form keeping the period and the bars; the table Activity · Store ·
-Operator · Date · Amount · Status (a card per row on a phone, the lists' pattern), each status a {% chip %}; five
+Operator · Date · Amount · Status, one row an entry (a card per row under 720 px only, the lists' pattern; the
+rows are .feed-row, never the audit page's .activity-row), each status a {% chip %}; five
 rows a page and the list footer ("1–5 of 24", ‹ Previous · 1 2 3 · Next ›, ledger/_list_footer.html); one sentence
 when nothing matches. Context: activity, kinds, state, pager_query.{% endcomment %}
 <section class="card activity-card" id="activity-card" aria-labelledby="activity-heading">
@@ -19,7 +20,7 @@ when nothing matches. Context: activity, kinds, state, pager_query.{% endcomment
       <thead><tr><th>Activity</th><th>Store</th><th>Operator</th><th>Date</th><th class="money">Amount</th><th>Status</th></tr></thead>
       <tbody>
         {% for row in activity.rows %}
-          <tr class="activity-row" data-kind="{{ row.kind }}">
+          <tr class="feed-row" data-kind="{{ row.kind }}">
             <td class="activity-what" data-role="title">{% if row.url %}<a href="{{ row.url }}"><strong>{{ row.activity }}</strong></a>{% else %}<strong>{{ row.activity }}</strong>{% endif %}</td>
             <td class="activity-store" data-role="meta">{{ row.store|default:"—" }}</td>
             <td class="activity-operator" data-role="meta">{{ row.operator|default:"—" }}</td>

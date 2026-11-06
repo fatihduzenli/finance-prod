@@ -161,9 +161,21 @@ def test_monthly_switches_to_yearly_and_back(
 def test_the_feed_pages_and_searches(live_server: LiveServer, laptop: BrowserContext) -> None:
     a_world()
     page = signed_in(laptop, live_server, "e2e-v2-feed")
-    rows = page.locator("#activity-table tbody tr.activity-row")
+    rows = page.locator("#activity-table tbody tr.feed-row")
     counts = page.locator("#activity-card .pager-count")
     assert rows.count() == 5 and counts.inner_text() == "1–5 of 7"
+    # At 1280 the feed is a six-column table: each entry one row, its six cells on one line
+    # under the six visible headers (Fable's gate run 2).
+    assert page.locator("#activity-table thead th:visible").count() == 6
+    for index in range(rows.count()):
+        cells = rows.nth(index).locator("td")
+        assert cells.count() == 6
+        tops = {round((cells.nth(n).bounding_box() or {"y": -1})["y"]) for n in range(6)}
+        assert len(tops) == 1, tops
+        assert (
+            page.evaluate("row => getComputedStyle(row).display", rows.nth(index).element_handle())
+            == "table-row"
+        )
     page.locator("#activity-card a[rel=next]").click()
     page.wait_for_url(lambda url: "page=2" in url)
     assert rows.count() == 2 and counts.inner_text() == "6–7 of 7"
@@ -195,15 +207,34 @@ def test_the_phone_layout_two_kpis_a_row_one_tile_a_row_and_feed_cards(
     due, collected, overdue, bank = (box for box in boxes if box)
     assert abs(due["y"] - collected["y"]) < 2 and collected["x"] > due["x"]
     assert abs(overdue["y"] - bank["y"]) < 2 and overdue["y"] > due["y"] + due["height"] - 2
+    # The period control: one row of three segments, left-aligned under the title.
+    segments = page.locator("#dashboard-actions .period-control button")
+    assert segments.count() == 3
+    seg_boxes = [segments.nth(n).bounding_box() for n in range(3)]
+    assert all(seg_boxes)
+    assert len({round(box["y"]) for box in seg_boxes if box}) == 1, seg_boxes
+    assert sum(box["width"] for box in seg_boxes if box) < PHONE["width"] - 32
+    # No money figure wraps inside itself (its box at most 1.5 lines of its font size).
+    figures = page.locator(".kpi2-value")
+    assert figures.count() == 4
+    for n in range(4):
+        box = figures.nth(n).bounding_box()
+        size = float(
+            page.evaluate(
+                "el => parseFloat(getComputedStyle(el).fontSize)", figures.nth(n).element_handle()
+            )
+        )
+        assert box and box["height"] <= 1.5 * size, (n, box, size)
     tiles = page.locator("#operator-tiles > li")
     assert tiles.count() >= 2
     first, second = tiles.nth(0).bounding_box(), tiles.nth(1).bounding_box()
     assert first and second and second["y"] >= first["y"] + first["height"] - 1
     assert abs(first["x"] - second["x"]) < 2
-    row = page.locator("#activity-table tbody tr.activity-row").first
+    row = page.locator("#activity-table tbody tr.feed-row").first
     row_box = row.bounding_box()
     assert row_box and row_box["width"] <= PHONE["width"]
     assert page.locator("#activity-table thead").is_hidden()  # the lists' phone cards
+    assert page.evaluate("row => getComputedStyle(row).display", row.element_handle()) == "flex"
     width = page.evaluate("document.documentElement.scrollWidth")
     assert width <= PHONE["width"], width  # no sideways page scroll
     calendar = page.locator("#mini-calendar").bounding_box()

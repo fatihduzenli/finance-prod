@@ -653,6 +653,9 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
 .activity-filters input[type=search] { width: 15rem; max-width: 100%; padding: 7px 10px; font-size: var(--fs-base); }
 .activity-filters select { width: auto; padding: 7px 10px; font-size: var(--fs-base); }
 .activity-card .list-footer { padding: var(--space-3) 0 0; }
+.activity-table td { vertical-align: middle; }
+.activity-table td.activity-store { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-table td.money { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .activity-empty { margin: var(--space-3) 0; }
 /* The mini calendar (D6; PLAN-012g C3, DESIGN-SPEC §7.5): the month's name (a link to the
    Calendar page) with ‹ › at the right (.mini-nav), the 7-column .mini-grid, today's number in
@@ -1751,6 +1754,15 @@ p.detail-more-notes { padding-left: 0; }
      scroll sideways inside their card; the header's controls wrap under the title. */
   .operator-tiles { grid-template-columns: minmax(0, 1fr); }
   .dashboard-header .page-actions { width: 100%; }
+  /* The period control keeps one row of three segments, each its text's width, left-aligned
+     (as the sidebar's Light · Dark), whatever the form rule above says of a form's buttons. */
+  .period-control { flex-wrap: nowrap; align-self: flex-start; }
+  .period-control button { width: auto; flex: 0 0 auto; }
+  /* A money figure never wraps inside itself: 22 px, on one line; the cards fall back to one a
+     row when a figure would still not fit; the badge may drop under the figure. */
+  .kpi-row.kpi2-row { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+  .kpi2-row > div { min-width: 0; }
+  .kpi2-value { font-size: 22px; white-space: nowrap; overflow-wrap: normal; }
   main, main.wide { margin: 0; padding: var(--space-4); border: 0; border-radius: 0; max-width: none; }
   dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 10px; }
   /* A 16 px field keeps a phone from zooming in on focus. */

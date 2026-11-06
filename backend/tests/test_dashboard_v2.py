@@ -522,7 +522,7 @@ def seven_kinds() -> dict[str, Any]:
 
 def rows_of(html: str) -> list[str]:
     table = section(html, 'id="activity-table"', "</table>")
-    return re.findall(r'<tr class="activity-row".*?</tr>', table, re.S)
+    return re.findall(r'<tr class="feed-row".*?</tr>', table, re.S)
 
 
 def chip_of(row: str) -> tuple[str, str]:
