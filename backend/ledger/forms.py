@@ -3255,9 +3255,9 @@ class NoteDeleteForm(forms.Form):
         return reason
 
 
-class CalendarEntryForm(forms.Form):
-    """Add or change a calendar note or reminder (D8). Record choices are UUIDs; the
-    view checks they exist."""
+class _CalendarEntryFields(forms.Form):
+    """The fields of a calendar note or reminder (D8) that the edit page and the New calendar
+    entry dialog share."""
 
     kind = _QuietChoiceField(
         choices=CalendarEntryKind.choices, error_messages={"required": "Choose note or reminder."}
@@ -3280,6 +3280,18 @@ class CalendarEntryForm(forms.Form):
         label="E-mail me that morning",
         help_text="An e-mail to you on the morning of that day (09:00 New York).",
     )
+
+    def clean_title(self) -> str:
+        title = visible_text(self.cleaned_data["title"])
+        if not title:
+            raise forms.ValidationError(self.fields["title"].error_messages["required"])
+        return title
+
+
+class CalendarEntryForm(_CalendarEntryFields):
+    """Change a calendar note or reminder (D8; the edit page): the Store, Operator and Lease
+    selects. Record choices are UUIDs; the view checks they exist."""
+
     store = _QuietChoiceField(required=False, label="Store")
     operator = _QuietChoiceField(required=False, label="Operator")
     lease = _QuietChoiceField(required=False, label="Lease")
@@ -3311,11 +3323,63 @@ class CalendarEntryForm(forms.Form):
             if isinstance(field, forms.ChoiceField):
                 field.choices = [("", "None")] + options
 
-    def clean_title(self) -> str:
-        title = visible_text(self.cleaned_data["title"])
-        if not title:
-            raise forms.ValidationError(self.fields["title"].error_messages["required"])
-        return title
+
+#: What the New calendar entry dialog links an entry to (``link_kind``), with the model.
+CALENDAR_LINK_MODELS: dict[str, type[Store] | type[Operator] | type[Lease]] = {
+    "store": Store,
+    "operator": Operator,
+    "lease": Lease,
+}
+CALENDAR_LINK_UNKNOWN = "Choose a store, operator or lease from the list."
+
+
+def _calendar_link_exists(kind: str, key: uuid.UUID) -> bool:
+    """A record of ``kind`` with ``key`` exists (an operator: not archived)."""
+    if kind == "operator":
+        return Operator.objects.filter(pk=key, archived_at__isnull=True).exists()
+    model = CALENDAR_LINK_MODELS.get(kind)
+    return model is not None and model._default_manager.filter(pk=key).exists()
+
+
+class CalendarEntryDialogForm(_CalendarEntryFields):
+    """The New calendar entry dialog (owner, 2026-11-06; ledger/calendar/_entry_dialog.html):
+    Kind as radio cards, and one link (``link_kind`` and ``link_id``, hidden, set by the
+    type-ahead of ledger/calendar_dialog.js) in place of the three selects. A link must name a
+    record that exists (an operator not archived); both empty is no link. The view turns a
+    store into the store with its current lease and that lease's operator."""
+
+    kind = _QuietChoiceField(
+        choices=CalendarEntryKind.choices,
+        widget=forms.RadioSelect,
+        label="Kind",
+        error_messages={"required": "Choose note or reminder."},
+    )
+    # Checked together in clean(): a hidden field's own error would show nowhere.
+    link_kind = forms.CharField(required=False, widget=forms.HiddenInput)
+    link_id = forms.CharField(required=False, widget=forms.HiddenInput)
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # The dialog writes "09:00 New York" beside the switch in place of the help text.
+        morning = self.fields["email_morning"]
+        morning.help_text = ""
+        morning.widget.attrs.update({"class": "switch", "role": "switch"})
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
+        kind = cleaned.get("link_kind") or ""
+        raw = cleaned.get("link_id") or ""
+        cleaned["link_kind"], cleaned["link_id"] = "", None
+        if not kind and not raw:
+            return cleaned
+        try:
+            key = uuid.UUID(raw)
+        except ValueError:
+            key = None
+        if key is None or not _calendar_link_exists(kind, key):
+            raise forms.ValidationError(CALENDAR_LINK_UNKNOWN)
+        cleaned["link_kind"], cleaned["link_id"] = kind, key
+        return cleaned
 
 
 # --- Installment plans (PLAN-012e D10, D11) ----------------------------------------------

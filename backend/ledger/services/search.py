@@ -11,6 +11,10 @@ store's Create invoice page.
 or whitespace-only query is no filter. :func:`words` splits it on whitespace (a word
 repeated, in any case, counts once).
 
+**The calendar entry's link** (:func:`link_rows`, owner 2026-11-06): the New calendar entry
+dialog's one search over stores, operators (not archived) and leases, at most
+:data:`LINK_MAX` of each, one query each.
+
 **A store matches** (:func:`filter_stores`) when every word matches one of: its store
 number as a prefix (``24`` finds 2477; a leading ``#`` is allowed; digits only), its
 name, its city, or the display name of the operator of one of its leases in effect or to
@@ -34,7 +38,9 @@ from django.db.models.functions import Cast, Lower
 from django.urls import reverse
 from django.utils import timezone
 
+from finance.dates import day_text
 from ledger.models import Lease, Operator, Store
+from ledger.services.collections import mask_address
 
 #: The longest query used, in characters (D16); the rest is dropped before any use.
 QUERY_MAX_LENGTH = 100
@@ -218,3 +224,86 @@ def store_rows(
             }
         )
     return rows
+
+
+# --- The New calendar entry dialog's link (owner, 2026-11-06) ------------------------------
+
+#: The most rows of each kind the link's type-ahead lists.
+LINK_MAX = 8
+
+
+def _store_label(number: int | None, name: str) -> str:
+    return f"#{number} {name}" if number is not None else name
+
+
+def _lease_word(word: str) -> Q:
+    condition = Q(store__external_label__icontains=word) | Q(operator__display_name__icontains=word)
+    number = number_prefix(word)
+    if number is not None:
+        condition |= Q(_search_number__startswith=number)
+    return condition
+
+
+def link_rows(query: str, limit: int = LINK_MAX) -> list[dict[str, str]]:
+    """The link's rows for ``query`` (already cleaned): the stores matching every word as the
+    top-bar search matches them, the operators not archived whose name or e-mail holds each
+    word, and the leases whose store (name or number) or operator holds each word; at most
+    ``limit`` of each, each ``{"kind", "id", "label", "sub"}``: a store's number and name over
+    its city, an operator's name over its e-mail masked, a lease's store and start over its
+    operator. ``[]`` when the query has no word. Three queries."""
+    if not words(query):
+        return []
+    stores = filter_stores(Store.objects.all(), query).order_by(
+        F("store_number").asc(nulls_last=True), Lower("external_label"), "id"
+    )[:limit]
+    operators = filter_operators(Operator.objects.filter(archived_at__isnull=True), query).order_by(
+        Lower("display_name"), "id"
+    )[:limit]
+    leases = Lease.objects.select_related("store", "operator").annotate(
+        _search_number=Cast("store__store_number", CharField())
+    )
+    for word in words(query):
+        leases = leases.filter(_lease_word(word))
+    rows: list[dict[str, str]] = [
+        {
+            "kind": "store",
+            "id": str(store.pk),
+            "label": _store_label(store.store_number, store.external_label),
+            "sub": store.city,
+        }
+        for store in stores
+    ]
+    rows += [
+        {
+            "kind": "operator",
+            "id": str(operator.pk),
+            "label": operator.display_name,
+            "sub": mask_address(operator.email) if operator.email else "",
+        }
+        for operator in operators
+    ]
+    rows += [
+        {
+            "kind": "lease",
+            "id": str(lease.pk),
+            "label": lease_label(lease),
+            "sub": lease.operator.display_name if lease.operator is not None else "",
+        }
+        for lease in leases.order_by(Lower("store__external_label"), "started_on", "id")[:limit]
+    ]
+    return rows
+
+
+def lease_label(lease: Lease) -> str:
+    """A lease as the link names it: its store, then "from" its start ("no start date")."""
+    started = day_text(lease.started_on) if lease.started_on else "no start date"
+    return f"{_store_label(lease.store.store_number, lease.store.external_label)} from {started}"
+
+
+def link_label(record: Store | Operator | Lease) -> str:
+    """The chip's words for a linked record (the dialog shown again after a refusal)."""
+    if isinstance(record, Lease):
+        return lease_label(record)
+    if isinstance(record, Store):
+        return _store_label(record.store_number, record.external_label)
+    return record.display_name

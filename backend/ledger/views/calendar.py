@@ -3,9 +3,19 @@
 - ``ledger:calendar:page`` (any role): a month, previous and next, filtered by item kind
   and by store, operator or lease; every item links to its page.
 - ``ledger:calendar:detail`` (any role): one stored entry.
-- ``ledger:calendar:add`` and ``ledger:calendar:edit`` (billing; the author edits their
-  own entry, an admin any) and ``ledger:calendar:delete`` (the same). The registry
-  refuses the POST below billing; the views refuse the forms' GET below billing too.
+- ``ledger:calendar:add`` (billing): the New calendar entry dialog (owner, 2026-11-06;
+  ledger/calendar/_entry_dialog.html). The calendar page carries it for billing, opened by
+  "+ New entry" and a click on a day (ledger/calendar_dialog.js); a GET of this route is the
+  calendar page with the dialog open (``?on=`` its day); a saved entry goes to its month
+  with ``#entry-<pk>``; a refusal shows the page again with the dialog open and its errors.
+- ``ledger:calendar:search`` (any role; read-only in ``accounts.registry``): the dialog's
+  link type-ahead, ``{"results": [{kind, id, label, sub}]}`` from
+  :func:`ledger.services.search.link_rows` for ``q`` (cleaned as the top-bar search cleans
+  it; empty: no row), escaped as ``ledger:search_stores`` escapes. Nothing is written.
+- ``ledger:calendar:edit`` (billing; the author edits their own entry, an admin any) keeps
+  its form page with the Store, Operator and Lease selects for now, and
+  ``ledger:calendar:delete`` (the same). The registry refuses the POST below billing; the
+  views refuse the forms' GET below billing too.
 - ``ledger:calendar:feed``: ``/calendar/feed/<token>.ics``, public (the token is the
   credential, :mod:`ledger.services.calendar`). Every refusal is the same empty 404,
   marked as logged so that Django's request log never writes the path with the token;
@@ -32,6 +42,7 @@ from django.http import (
     HttpRequest,
     HttpResponse,
     HttpResponseNotFound,
+    JsonResponse,
 )
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -39,15 +50,19 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from accounts.roles import Role, meets
+from finance.dates import day_text
 from finance.ratelimit import SlidingWindowLimiter
-from ledger.forms import CalendarEntryForm
+from ledger.forms import CALENDAR_LINK_MODELS, CalendarEntryDialogForm, CalendarEntryForm
 from ledger.models import CalendarEntry, Lease, Operator, Store
 from ledger.services import calendar
+from ledger.services import search as search_service
+from ledger.services.grid import current_lease
 from ledger.services.pnl import add_months
 from ledger.views.contacts import drop_payment_data
 from ledger.views.detail_cards import activity_context
 from ledger.views.operators import _actor, _role, role_required
 from ledger.views.run import _billing_only
+from ledger.views.search import _EscapedJSONEncoder
 
 #: Requests a minute per client address on the feed (D8).
 FEED_LIMIT = 60
@@ -62,6 +77,9 @@ BAD_DAY = "Unknown day; showing today."
 #: (the phone's list, a laptop choice by ``?view=list``). There is no week view.
 VIEW_MONTH = "month"
 VIEW_LIST = "list"
+#: The dialog's form ids ("entry-kind", "entry-on", …): the page's filters hold "store" and
+#: "operator" already.
+ENTRY_IDS = "entry-%s"
 NO_FEED = "You have no calendar feed."
 FEED_REVOKED = "Calendar feed revoked. Its address no longer works."
 
@@ -134,9 +152,27 @@ def calendar_page(request: HttpRequest) -> HttpResponse:
     """``ledger:calendar:page``: one month of items (PLAN-012f-a D6: the month card, or the
     list by ``?view=list``; the side column's day, ``?on=`` or today, the next seven days and
     the user's feed). The month, the day and the next seven days are read together
-    (:func:`calendar.items_in`, three queries)."""
+    (:func:`calendar.items_in`, three queries). For billing, the New calendar entry dialog,
+    closed."""
+    return _page(request)
+
+
+def _page(
+    request: HttpRequest,
+    *,
+    entry_form: CalendarEntryDialogForm | None = None,
+    entry_open: bool = False,
+    on: date | None = None,
+) -> HttpResponse:
+    """The calendar page (``on``, when given, its selected day in place of ``?on=``) with the
+    New calendar entry dialog for billing: ``entry_form`` (else a new one on the day shown),
+    open when ``entry_open``."""
     today = timezone.localdate()
-    selected, day_message = _day((request.GET.get("on", "") or "").strip())
+    selected: date | None
+    if on is not None:
+        selected, day_message = on, ""
+    else:
+        selected, day_message = _day((request.GET.get("on", "") or "").strip())
     raw_month = (request.GET.get("month", "") or "").strip()
     if selected is not None and not raw_month:
         month, month_message = selected.replace(day=1), ""
@@ -163,6 +199,11 @@ def calendar_page(request: HttpRequest) -> HttpResponse:
         query = urlencode([("month", f"{target:%Y-%m}")])
         return f"?{query}&{keep}" if keep else f"?{query}"
 
+    can_add = meets(_role(request), Role.BILLING)
+    if can_add and entry_form is None:
+        entry_form = CalendarEntryDialogForm(
+            initial={"kind": calendar.KIND_NOTE, "on": day}, auto_id=ENTRY_IDS
+        )
     return render(
         request,
         "ledger/calendar/page.html",
@@ -192,9 +233,50 @@ def calendar_page(request: HttpRequest) -> HttpResponse:
             "operators": Operator.objects.filter(archived_at__isnull=True).order_by(
                 "display_name", "id"
             ),
-            "can_add": meets(_role(request), Role.BILLING),
+            "can_add": can_add,
+            **(_dialog_context(entry_form, month, day, keep) if entry_form is not None else {}),
+            "entry_open": entry_open,
         },
     )
+
+
+def _dialog_context(
+    form: CalendarEntryDialogForm, month: date, day: date, keep: str
+) -> dict[str, object]:
+    """The dialog's parts the template cannot read from the form: the day's words beside the
+    Date ("Nov 6, 2026"), the chosen link's chip and where Cancel goes (the page behind)."""
+    value = form["on"].value()
+    try:
+        shown = value if isinstance(value, date) else date.fromisoformat(str(value or ""))
+    except ValueError:
+        shown = None
+    back = f"{reverse('ledger:calendar:page')}?month={month:%Y-%m}&on={day:%Y-%m-%d}"
+    return {
+        "entry_form": form,
+        "entry_day": day_text(shown) if shown is not None else "",
+        "entry_link": _chosen_link(form),
+        "entry_back_url": f"{back}&{keep}" if keep else back,
+    }
+
+
+def _chosen_link(form: CalendarEntryDialogForm) -> dict[str, str] | None:
+    """The link a refused form was posted with (its chip shown again), else ``None``."""
+    data = getattr(form, "cleaned_data", {})
+    kind, key = str(data.get("link_kind") or ""), data.get("link_id")
+    model = CALENDAR_LINK_MODELS.get(kind)
+    record = model._default_manager.filter(pk=key).first() if model and key else None
+    if record is None:
+        return None
+    label = f"{kind.capitalize()}: {search_service.link_label(record)}"
+    return {"kind": kind, "id": str(key), "label": label}
+
+
+@role_required
+@require_safe
+def calendar_search(request: HttpRequest) -> HttpResponse:
+    """``ledger:calendar:search``: the dialog's link rows as JSON (see the module docstring)."""
+    query = search_service.clean_query(request.GET.get("q"))
+    return JsonResponse({"results": search_service.link_rows(query)}, encoder=_EscapedJSONEncoder)
 
 
 def _entry(pk: str) -> CalendarEntry:
@@ -233,21 +315,41 @@ def calendar_detail(request: HttpRequest, pk: str) -> HttpResponse:
     )
 
 
-def _input(form: CalendarEntryForm) -> calendar.EntryInput:
+def _links(form: CalendarEntryForm | CalendarEntryDialogForm) -> dict[str, uuid.UUID | None]:
+    """The entry's store, operator and lease: the edit page's three selects, or the dialog's
+    one link: a store with its current lease (:func:`ledger.services.grid.current_lease`) and
+    that lease's operator; a lease with its store and operator; an operator alone."""
     data = form.cleaned_data
+    if isinstance(form, CalendarEntryForm):
+        return {
+            name: uuid.UUID(data[name]) if data.get(name) else None
+            for name in ("store", "operator", "lease")
+        }
+    kind, key = data.get("link_kind"), data.get("link_id")
+    if not isinstance(key, uuid.UUID):
+        return {"store": None, "operator": None, "lease": None}
+    if kind == "store":
+        lease = current_lease(list(Lease.objects.filter(store_id=key)), timezone.localdate())
+        return {
+            "store": key,
+            "operator": lease.operator_id if lease is not None else None,
+            "lease": lease.pk if lease is not None else None,
+        }
+    if kind == "lease":
+        found = Lease.objects.get(pk=key)
+        return {"store": found.store_id, "operator": found.operator_id, "lease": found.pk}
+    return {"store": None, "operator": key if kind == "operator" else None, "lease": None}
 
-    def key(name: str) -> uuid.UUID | None:
-        return uuid.UUID(data[name]) if data.get(name) else None
 
+def _input(form: CalendarEntryForm | CalendarEntryDialogForm) -> calendar.EntryInput:
+    data = form.cleaned_data
     return calendar.EntryInput(
         kind=data["kind"],
         on=data["on"],
         title=data["title"],
         body=data.get("body") or "",
         email_morning=bool(data.get("email_morning")),
-        store=key("store"),
-        operator=key("operator"),
-        lease=key("lease"),
+        **_links(form),
     )
 
 

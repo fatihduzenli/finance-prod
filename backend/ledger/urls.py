@@ -437,6 +437,7 @@ calendar_patterns = (
     [
         path("", calendar.calendar_page, name="page"),
         path("new/", calendar.calendar_add, name="add"),
+        path("search/", calendar.calendar_search, name="search"),
         # Public: the token in the path is the credential (PLAN-011b D8). Everything after
         # feed/ is captured, so every variant of the path reaches the view and gets its
         # silent 404 rather than an unresolved-path answer logged with the path.

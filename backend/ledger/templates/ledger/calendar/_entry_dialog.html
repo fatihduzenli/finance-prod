@@ -1,0 +1,33 @@
+{% comment %}The New calendar entry dialog (owner, 2026-11-06; ledger.views.calendar._page): the Log contact frame, the {% dialog %} at 440 px, a sheet at the bottom of a phone's screen, over the calendar page for billing. Opened by "+ New entry" (data-dialog-open) and by a click on a day (ledger/calendar_dialog.js sets the day), or by the server ("entry_open": the old URL ledger:calendar:add, a refused save). The form ("entry_form", ledger.forms.CalendarEntryDialogForm, ids "entry-…"): Kind as radio cards in a fieldset (Note · Reminder, each a label with its icon); the Date with the day as the page reads it ("entry_day", kept by the script); Title; Text; "E-mail me that morning" as the switch with "09:00 New York" (the daily job's morning e-mail); the link: one type-ahead (#entry-link, over ledger:calendar:search) whose choice shows as a chip with its × and posts the hidden link_kind and link_id (a store links its current lease and operator, the server resolves it). Without the script the type-ahead is a plain text input with no name, which the server never reads: the hidden fields stay empty and the entry is saved without a link. The one help line; Cancel and Save.{% endcomment %}{% load components icons %}{% dialog id="calendar-entry" title="New calendar entry" size="sm" open=entry_open return_url=entry_back_url %}
+<form method="post" action="{% url 'ledger:calendar:add' %}" id="calendar-entry-form" class="js-single-submit dialog-form calendar-entry-form" autocomplete="off">
+  {% csrf_token %}
+  {{ entry_form.non_field_errors }}
+  <fieldset class="field kind-cards{% if entry_form.kind.errors %} has-error{% endif %}" id="entry-kind">
+    <legend>Kind</legend>
+    <div class="kind-card-grid">{% for radio in entry_form.kind %}<label class="kind-card" for="{{ radio.id_for_label }}">{{ radio.tag }}{% if radio.data.value == "reminder" %}{% icon "bell" 20 %}{% else %}{% icon "file" 20 %}{% endif %}<span class="kind-card-name">{{ radio.choice_label }}</span></label>{% endfor %}</div>
+    {{ entry_form.kind.errors }}
+  </fieldset>
+  <div class="field{% if entry_form.on.errors %} has-error{% endif %}">
+    <label for="{{ entry_form.on.id_for_label }}">Date</label>
+    <div class="entry-date-row">{{ entry_form.on }}<span class="muted" id="entry-day" aria-live="polite">{{ entry_day }}</span></div>
+    {{ entry_form.on.errors }}
+  </div>
+  {% include "ledger/stores/_form_field.html" with field=entry_form.title %}
+  {% include "ledger/stores/_form_field.html" with field=entry_form.body hide_help=True %}
+  <div class="field switch-field entry-morning{% if entry_form.email_morning.errors %} has-error{% endif %}">
+    <label class="inline" for="{{ entry_form.email_morning.id_for_label }}">{{ entry_form.email_morning }} {{ entry_form.email_morning.label }}</label>
+    <span class="muted" id="entry-morning-time">09:00 New York</span>
+    {{ entry_form.email_morning.errors }}
+  </div>
+  <div class="field entry-link-field" id="entry-link-field">
+    <label for="entry-link">Link to a store, operator or lease (optional)</label>
+    <input type="search" id="entry-link" autocomplete="off" maxlength="100" placeholder="Store number, name or operator" aria-controls="entry-link-results" data-url="{% url 'ledger:calendar:search' %}"{% if entry_link %} hidden{% endif %}>
+    <span class="status-chip status-chip-neutral link-chip" id="entry-link-chip"{% if not entry_link %} hidden{% endif %}>{% icon "circle" 12 %}<span id="entry-link-text">{{ entry_link.label }}</span><button type="button" class="link-chip-remove" id="entry-link-remove" aria-label="Remove the link">&times;</button></span>
+    <ul class="store-picker-results entry-link-results" id="entry-link-results"></ul>
+    <p class="muted store-picker-status" id="entry-link-status" aria-live="polite"></p>
+    <input type="hidden" name="link_kind" id="entry-link_kind" value="{{ entry_link.kind|default:'' }}"><input type="hidden" name="link_id" id="entry-link_id" value="{{ entry_link.id|default:'' }}">
+  </div>
+  <p class="muted log-contact-help" id="entry-help">Shared with all staff. Never write card or account numbers.</p>
+  <div class="dialog-foot"><a class="btn" id="cancel-calendar-entry" href="{{ entry_back_url }}">Cancel</a><button class="btn btn-primary" type="submit" id="save-calendar-entry">Save</button></div>
+</form>
+{% enddialog %}

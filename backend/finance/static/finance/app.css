@@ -1141,6 +1141,22 @@ fieldset.card > legend + * { clear: both; }
 .outcome-chip:has(input:checked) { border-color: var(--teal); background: var(--surface); color: var(--text); font-weight: 600; }
 .log-contact-help { margin: var(--space-2) 0 0; font-size: var(--fs-sm); }
 #log-contact-about { margin: 0; }
+/* New calendar entry (owner, 2026-11-06; ledger/calendar/_entry_dialog.html): the Log contact
+   frame and its kind cards, one column per kind; the Date input with the day's words beside it;
+   the switch with "09:00 New York"; the link's type-ahead rows (the picker's list, each row a
+   button) and the chosen link as a neutral chip with its × (.link-chip-remove). */
+#calendar-entry { max-height: 90vh; overflow: auto; }
+.calendar-entry-form .field input:not([type=radio]):not([type=checkbox]):not([type=date]), .calendar-entry-form textarea { width: 100%; }
+#entry-kind .kind-card-grid { grid-template-columns: none; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; }
+.entry-date-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.entry-morning { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); }
+.entry-morning label.inline { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; font-weight: 600; }
+.entry-link-field [hidden] { display: none; }
+.entry-link-results li button { display: block; width: 100%; min-height: 0; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-ctl); background: none; color: var(--text); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.entry-link-results li button:hover, .entry-link-results li.is-active button { background: var(--month-current); }
+.link-chip { max-width: 100%; white-space: normal; }
+.link-chip-remove { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; min-height: 20px; margin: 0 -4px 0 2px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
+.link-chip-remove:hover { background: var(--surface-2); }
 .store-picker-form { margin: 0; }
 .store-picker-form input[type=search] { width: 100%; box-sizing: border-box; }
 .store-picker-results { margin: var(--space-3) 0 0; padding: 0; list-style: none; }
