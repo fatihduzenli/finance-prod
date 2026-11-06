@@ -5,8 +5,8 @@ navigation, no service worker. The top bar: the company's name, the store switch
 (a <details> list of the operator's stores, no script), the Light · Dark · System control (a
 POST to portal:account) and Sign out (a POST to portal:logout). Signed out, the bar holds the
 company's name only. Nothing here reads the staff user. The head carries the app's identity
-(finance/_app_identity.html: the icons, the public manifest, the app-name metas; owner,
-2026-11-05) and the tab title "<page> · Monvera"; the company's name is the top bar's.
+(finance/_app_identity.html: the icons, the portal's own public manifest, portal:manifest,
+which opens on /portal/, and the app-name metas; owner, 2026-11-05) and the tab title "<page> · Monvera"; the company's name is the top bar's.
 {% endcomment %}<!doctype html>
 <html lang="en" data-theme="{{ portal_theme|default:'system' }}">
 <head>
@@ -17,7 +17,7 @@ company's name only. Nothing here reads the staff user. The head carries the app
   {% include "finance/_theme_color.html" with theme=portal_theme|default:"system" %}
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'portal/portal.css' %}">
-  {% include "finance/_app_identity.html" %}
+  {% url 'portal:manifest' as portal_manifest_url %}{% include "finance/_app_identity.html" with manifest_url=portal_manifest_url %}
   {% if refresh %}<meta http-equiv="refresh" content="5">{% endif %}
 </head>
 <body class="portal">

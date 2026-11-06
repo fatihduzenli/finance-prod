@@ -45,13 +45,15 @@ PNGS = [
     ("finance/brand/favicon-32.png", 32),
     ("finance/brand/favicon-16.png", 16),
 ]
-#: The head block, as each shell renders it.
+STAFF_MANIFEST = '<link rel="manifest" href="/manifest.webmanifest">'
+PORTAL_MANIFEST = '<link rel="manifest" href="/portal/manifest.webmanifest">'
+#: The head block, as each shell renders it (the manifest link apart: the staff shell's or the
+#: portal's).
 HEAD_LINKS = (
     f'<link rel="icon" href="{BRAND}monvera_icon.svg" type="image/svg+xml">',
     f'<link rel="icon" href="{BRAND}favicon-32.png" type="image/png" sizes="32x32">',
     f'<link rel="icon" href="{BRAND}favicon-16.png" type="image/png" sizes="16x16">',
     f'<link rel="apple-touch-icon" sizes="180x180" href="{BRAND}monvera_touch_180.png">',
-    '<link rel="manifest" href="/manifest.webmanifest">',
     '<meta name="application-name" content="Monvera">',
     '<meta name="apple-mobile-web-app-title" content="Monvera">',
 )
@@ -128,6 +130,34 @@ def test_the_manifest_answers_signed_out_with_its_fields_exactly() -> None:
 def test_the_manifest_is_the_same_signed_in_and_signed_out() -> None:
     signed_out = Client().get("/manifest.webmanifest").content
     assert staff_client().get("/manifest.webmanifest").content == signed_out
+
+
+def test_the_portals_manifest_opens_on_the_portal_signed_out() -> None:
+    response = Client().get("/portal/manifest.webmanifest")
+    assert response.status_code == 200
+    assert response["Content-Type"] == "application/manifest+json"
+    data = json.loads(response.content)
+    assert (data["start_url"], data["scope"]) == ("/portal/", "/portal/")
+    # Everything else is the staff manifest's: the same app.
+    staff = json.loads(Client().get("/manifest.webmanifest").content)
+    assert (staff["start_url"], staff["scope"]) == ("/", "/")
+    for key in ("start_url", "scope"):
+        del data[key], staff[key]
+    assert data == staff
+    directives = {d.strip() for d in response["Cache-Control"].split(",")}
+    assert {"private", "no-store"} <= directives
+
+
+def test_the_portals_manifest_is_the_same_for_a_portal_or_a_staff_session() -> None:
+    signed_out = Client().get("/portal/manifest.webmanifest").content
+    assert staff_client().get("/portal/manifest.webmanifest").content == signed_out
+
+
+@pytest.mark.parametrize("method", ["post", "put", "delete"])
+def test_the_portals_manifest_refuses_an_unsafe_method(method: str) -> None:
+    response = getattr(Client(), method)("/portal/manifest.webmanifest")
+    assert response.status_code in (403, 405)
+    assert "standalone" not in response.content.decode()
 
 
 def test_the_manifest_colours_are_the_dark_bg_of_tokens_css() -> None:
@@ -224,9 +254,9 @@ def test_the_svg_favicon_is_the_gradient_square_and_the_mark() -> None:
 # --- The three heads ---------------------------------------------------------------------------
 
 
-def _assert_identity_head(html: str) -> None:
+def _assert_identity_head(html: str, manifest: str = STAFF_MANIFEST) -> None:
     head = head_of(html)
-    missing = [line for line in HEAD_LINKS if line not in head]
+    missing = [line for line in (*HEAD_LINKS, manifest) if line not in head]
     assert missing == []
     assert head.count('<link rel="manifest"') == 1
     assert head.count('<link rel="apple-touch-icon"') == 1
@@ -246,7 +276,8 @@ def test_a_portal_page_carries_the_identity_head() -> None:
     response = Client().get("/portal/login/")
     assert response.status_code == 200
     html = response.content.decode()
-    _assert_identity_head(html)
+    # Its own manifest, which opens on /portal/, not the staff one.
+    _assert_identity_head(html, PORTAL_MANIFEST)
     # The theme-color meta is the shared one, rendered once per scheme for System.
     assert head_of(html).count('<meta name="theme-color"') == 2
 

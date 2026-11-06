@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from django.urls import path, re_path
 
+from finance import pwa
 from portal import views
 
 app_name = "portal"
@@ -26,6 +27,8 @@ urlpatterns = [
     path("statement/", views.statement, name="statement"),
     path("account/", views.account, name="account"),
     path("account/password/", views.password, name="password"),
+    # The portal's web app manifest (public; finance.pwa): opens on /portal/.
+    path("manifest.webmanifest", pwa.portal_manifest, name="manifest"),
     # Last: any other path under /portal/ is the portal's 404, never the staff 401.
     re_path(r"^.*$", views.not_found, name="not_found"),
 ]

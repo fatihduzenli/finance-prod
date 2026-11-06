@@ -878,9 +878,10 @@ def test_home_lists_the_operators_stores_only_with_the_ended_one_marked(world: W
     # The store switcher lists the same stores, and no staff navigation is on the page.
     switcher = page.split('id="store-switcher"', 1)[1].split("</details>", 1)[0]
     assert "#101 Alphaville" in switcher and "#102 Oldtown" in switcher and "#202" not in switcher
-    # Owner, 2026-11-05: the portal links the app's public manifest (the same app on a home
-    # screen) but registers no service worker.
-    assert page.count('<link rel="manifest" href="/manifest.webmanifest">') == 1
+    # Owner, 2026-11-05: the portal links its own public manifest (the same app on a home
+    # screen, opening on /portal/) but registers no service worker.
+    assert page.count('<link rel="manifest" href="/portal/manifest.webmanifest">') == 1
+    assert 'href="/manifest.webmanifest"' not in page
     assert_absent(page, "serviceWorker")
     assert 'id="sidebar"' not in page and "/operators/" not in page
 

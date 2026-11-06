@@ -76,6 +76,8 @@ PORTAL_PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset(
         "portal:reset_confirm",
         "portal:logout",
         "portal:not_found",
+        # Owner, 2026-11-05: the portal's web app manifest, GET and HEAD only; no data.
+        "portal:manifest",
     }
 )
 PORTAL_ROUTE_NAMES: frozenset[str] = PORTAL_PUBLIC_ROUTE_NAMES | frozenset(
