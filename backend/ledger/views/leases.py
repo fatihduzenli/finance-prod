@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -50,7 +50,7 @@ from ledger.forms import (
     EnrolForm,
     LeaseBillingForm,
     LeaseCreateForm,
-    LeaseForm,
+    LeaseEditForm,
     LinkForm,
     OperatorCreateForm,
 )
@@ -121,12 +121,6 @@ def _load(pk: str) -> Lease:
     except ValueError:
         raise Http404 from None
     return get_object_or_404(Lease.objects.select_related("store", "operator"), pk=key)
-
-
-def _initial(lease: Lease) -> dict[str, Any]:
-    """The latest rent row, which an edit compares against (it may start later)."""
-    rent = service.open_rent(lease)
-    return {"rent": rent.amount if rent is not None else None}
 
 
 # --- Read ---------------------------------------------------------------------------
@@ -620,33 +614,44 @@ def _checklist_refusal(refusal: SetupRefused) -> str:
     return f"{name}: {refusal.message} The lease was not saved."
 
 
-def _edit_form(lease: Lease, data: Any, context: store_context.StoreContext | None) -> LeaseForm:
-    form = LeaseForm(data, instance=lease, initial=None if data is not None else _initial(lease))
-    if context is not None:
-        _lock_known(form, ("store", "operator"))
-    return form
+def _edit_form(lease: Lease, data: Any, *, billed: bool, today: date) -> LeaseEditForm:
+    """The Edit lease form (PLAN-015a) of ``lease``: "Prorate the first month" only while the
+    first month is not ``billed``; a rent change defaults to the next rent due date."""
+    open_row = service.open_rent(lease)
+    return LeaseEditForm(
+        data,
+        instance=lease,
+        first_month_billed=billed,
+        open_rent=open_row.amount if open_row is not None else None,
+        rent_default=service.next_rent_due(lease, today),
+    )
 
 
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def lease_edit(request: HttpRequest, pk: str) -> HttpResponse:
-    """Edit a lease; opened from the store page (``?store=&lease=``, PLAN-012d D2) the
-    store and operator are hidden and the save returns to the store page (D8)."""
+    """Edit a lease (PLAN-015a): the debit days, the channel, the proration until the first
+    month is billed, and a rent change from a date (empty: the next rent due date). The
+    store, operator, start and status are read-only here. Opened from the store page
+    (``?store=&lease=``, PLAN-012d D2) the save returns to the store page (D8)."""
     refused = _admin_only(request)
     if refused is not None:
         return refused
     lease = _load(pk)
     context = store_context.for_lease(request, lease)
     target = f"lease-edit:{lease.pk}"
+    today = timezone.localdate()
+    first_charge = service.first_month_charge(lease)
+    billed = first_charge is not None
     if request.method == "POST":
-        form = _edit_form(lease, request.POST, context)
+        form = _edit_form(lease, request.POST, billed=billed, today=today)
         if form.is_valid():
             try:
                 service.update_lease(
                     lease.pk,
                     form.cleaned_data,
                     rent=form.cleaned_data["rent"],
-                    rent_effective_from=form.cleaned_data.get("rent_effective_from"),
+                    rent_effective_from=form.cleaned_data["rent_effective_from"],
                     actor=_actor(request),
                 )
             except LeaseRefused as refusal:
@@ -656,9 +661,9 @@ def lease_edit(request: HttpRequest, pk: str) -> HttpResponse:
                 return redirect(_saved_url(request, lease, context))
         _hold(request, target, form)
         return redirect(request.get_full_path())
-    form = _held(request, target, lambda data: _edit_form(lease, data, context)) or _edit_form(
-        lease, None, context
-    )
+    form = _held(
+        request, target, lambda data: _edit_form(lease, data, billed=billed, today=today)
+    ) or _edit_form(lease, None, billed=billed, today=today)
     return render(
         request,
         "ledger/leases/form.html",

@@ -15,13 +15,13 @@
       <h2>Lease</h2>
       <p class="muted">A rent change is never overwritten: the current rent ends the day before the new one takes effect, and the history keeps both. A lease with autopay keeps its autopay; any autopay that no longer matches is marked Needs review.</p>
       {{ form.non_field_errors }}
-      {% for field in form.lease_fields %}
+      {% for field in form.visible_fields %}
         {% if field.name != "debit_day" and field.name != "second_debit_day" and field.name != "payment_channel" %}{% include "ledger/stores/_form_field.html" %}{% endif %}
       {% endfor %}
     </section>
     <section class="card form-card" id="debits-card">
       <h2>Debits</h2>
-      {% for field in form.lease_fields %}
+      {% for field in form.visible_fields %}
         {% if field.name == "second_debit_day" %}{% include "ledger/leases/_twice_monthly.html" %}{% endif %}
         {% if field.name == "debit_day" or field.name == "second_debit_day" or field.name == "payment_channel" %}{% include "ledger/stores/_form_field.html" %}{% endif %}
       {% endfor %}

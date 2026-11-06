@@ -519,7 +519,9 @@ def _twice_monthly(second_debit_day: forms.BoundField) -> bool:
 
 
 class LeaseForm(_LeaseFormBase):
-    """Create and edit a lease. Rent is a separate field: a change writes history (D5)."""
+    """A new lease's own fields (the New lease page builds on it, :class:`LeaseCreateForm`).
+    Rent is a separate field: the service writes its first history row (D5). The Edit lease
+    page has its own form since PLAN-015a (:class:`LeaseEditForm`)."""
 
     #: The status of a form without the Status field (the New lease page saves ``active``).
     fixed_status: str | None = None
@@ -541,16 +543,10 @@ class LeaseForm(_LeaseFormBase):
         max_digits=12,
         decimal_places=2,
     )
-    rent_effective_from = forms.DateField(
-        label="New rent takes effect on",
-        required=False,
-        widget=forms.DateInput(attrs={"type": "date"}),
-        help_text="Only used when the rent changes. Empty means today.",
-    )
 
     class Meta:
         model = Lease
-        # The store, operator and status selects never repeat a refused value (B3-1).
+        # The store and operator selects never repeat a refused value (B3-1).
         formfield_callback = _quiet_formfield
         fields = (
             "store",
@@ -559,12 +555,10 @@ class LeaseForm(_LeaseFormBase):
             "second_debit_day",
             "payment_channel",
             "started_on",
-            "collection_status",
             "prorate_first_month",
         )
         widgets = {"started_on": forms.DateInput(attrs={"type": "date"})}
         labels = {
-            "collection_status": "Status",
             "started_on": "Start date",
             "prorate_first_month": "Prorate first month",
         }
@@ -586,38 +580,34 @@ class LeaseForm(_LeaseFormBase):
             operator.queryset = Operator.objects.filter(
                 Q(archived_at__isnull=True) | Q(pk=current)
             ).order_by("display_name", "id")
-        if not self.instance.pk:
-            del self.fields["rent_effective_from"]
 
     def twice_monthly(self) -> bool:
         """Whether the page's "Debited twice a month" tick starts ticked (PLAN-012c D8)."""
         return _twice_monthly(self["second_debit_day"])
 
-    def lease_fields(self) -> list[forms.BoundField]:
-        """The visible fields of the lease itself (the create form adds a checklist and
-        the billing details)."""
-        return [
-            field
-            for field in self.visible_fields()
-            if not field.name.startswith(SETUP) and field.name not in BILLING_STEP_FIELDS
-        ]
-
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
-        day = data.get("debit_day")
-        second = data.get("second_debit_day")
-        if second is not None and day is None:
-            self.add_error("second_debit_day", "Set the first debit day first.")
-        elif second is not None and second == day:
-            self.add_error("second_debit_day", "The second debit day must differ from the first.")
-        if data.get("collection_status", self.fixed_status) == CollectionStatus.ACTIVE:
-            if data.get("operator") is None:
-                self.add_error("operator", "An active lease needs an operator.")
-            if day is None:
-                self.add_error("debit_day", "An active lease needs a debit day.")
-            if data.get("payment_channel") == PaymentChannel.UNKNOWN:
-                self.add_error("payment_channel", "An active lease needs a known channel.")
+        active = data.get("collection_status", self.fixed_status) == CollectionStatus.ACTIVE
+        if active and data.get("operator") is None:
+            self.add_error("operator", "An active lease needs an operator.")
+        _check_debits(self, data, active=active)
         return data
+
+
+def _check_debits(form: forms.BaseForm, data: dict[str, Any], *, active: bool) -> None:
+    """The debit rules of both lease forms: a second debit day needs a first one and differs
+    from it; an active lease needs a debit day and a known channel."""
+    day = data.get("debit_day")
+    second = data.get("second_debit_day")
+    if second is not None and day is None:
+        form.add_error("second_debit_day", "Set the first debit day first.")
+    elif second is not None and second == day:
+        form.add_error("second_debit_day", "The second debit day must differ from the first.")
+    if active:
+        if day is None:
+            form.add_error("debit_day", "An active lease needs a debit day.")
+        if data.get("payment_channel") == PaymentChannel.UNKNOWN:
+            form.add_error("payment_channel", "An active lease needs a known channel.")
 
 
 def ordinal(day: int) -> str:
@@ -661,6 +651,25 @@ OPERATOR_EMPTY_LABEL = "Choose an operator\u2026"
 DEPOSIT_LABEL = "Deposit"
 
 
+def _channel_cards(
+    bound: forms.BoundField, cards: Sequence[tuple[str, Any, Any, Any]]
+) -> list[dict[str, Any]]:
+    """The channel cards of a lease form (the New and Edit lease pages): per card its value,
+    title, muted line, short name (the summaries' words), radio id and whether it is chosen."""
+    chosen = str(bound.value() or "")
+    return [
+        {
+            "value": value,
+            "title": title,
+            "note": note,
+            "short": short,
+            "id": f"id_payment_channel_{index}",
+            "checked": value == chosen,
+        }
+        for index, (value, title, note, short) in enumerate(cards)
+    ]
+
+
 class LeaseCreateForm(BillingStepMixin, LeaseForm):
     """Adds the one-time key rendered with the form, so a resubmission saves nothing,
     and the setup checklist (PLAN-010b D5; PLAN-012d D9): per fee type of
@@ -696,7 +705,6 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        del self.fields["collection_status"]
         self.instance.collection_status = CollectionStatus.ACTIVE
         self.fields["debit_day"] = _QuietTypedChoiceField(
             label="Debit day", choices=DEBIT_DAY_CHOICES, coerce=int, initial=1
@@ -742,18 +750,7 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
 
     def channel_cards(self) -> list[dict[str, Any]]:
         """The three channel cards, each a radio with its title and muted line."""
-        chosen = str(self["payment_channel"].value() or "")
-        return [
-            {
-                "value": value,
-                "title": title,
-                "note": note,
-                "short": short,
-                "id": f"id_payment_channel_{index}",
-                "checked": value == chosen,
-            }
-            for index, (value, title, note, short) in enumerate(CHANNEL_CARDS)
-        ]
+        return _channel_cards(self["payment_channel"], CHANNEL_CARDS)
 
     def _value(self, name: str) -> Any:
         """The field's value as the form holds it, cleaned; ``None`` when it does not clean."""
@@ -875,6 +872,162 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
                 )
             )
         return items
+
+
+# --- Edit lease (PLAN-015a) --------------------------------------------------------------
+
+#: A current value the Edit lease page no longer offers is one more choice, so an unchanged
+#: lease stays valid: "30th (current)", "Wire (current)".
+CURRENT_SUFFIX = " (current)"
+#: The muted line of the card of a channel outside the three cards.
+CURRENT_CHANNEL_NOTE = "This lease's channel today. Not offered for a new lease."
+#: The Changes card's words where they differ from the field's label.
+CHANGE_LABELS = {"rent": "Monthly rent", "rent_effective_from": "From"}
+#: A lease with no rent row and no rent typed (a lease the service always gives one).
+RENT_REQUIRED = "Enter the monthly rent: this lease has none yet."
+
+
+def _debit_day_choices(current: int | None, *, blank: bool) -> list[tuple[Any, str]]:
+    """The 1st to the 28th, after "—" when ``blank``; a current day above the 28th is one
+    more choice, labelled as the current one."""
+    choices: list[tuple[Any, str]] = [("", NO_VALUE)] if blank else []
+    choices += DEBIT_DAY_CHOICES
+    if current is not None and current > DEBIT_DAY_CHOICES[-1][0]:
+        choices.append((current, f"{ordinal(current)}{CURRENT_SUFFIX}"))
+    return choices
+
+
+class LeaseEditForm(_LeaseFormBase):
+    """The Edit lease page (PLAN-015a §3): the Collection card (the debit day or days, the 1st
+    to the 28th, and the channel, one of :data:`CHANNEL_CARDS`), "Prorate the first month"
+    until the first month is billed (``first_month_billed``: the field is removed, so a posted
+    value is ignored) and "Change rent" (``rent``: empty means unchanged;
+    ``rent_effective_from``: empty means the next rent due date, ``rent_default``; a valid
+    form's ``rent`` and ``rent_effective_from`` are what ``update_lease`` takes). A current
+    day above the 28th or a current channel outside the cards is one more choice, so an
+    unchanged lease stays valid; a new one is refused. The store, the operator, the start date
+    and the status are not fields here (the transfer and lease-end wizards change them): a
+    posted value is ignored, never saved. ``open_rent``: the latest rent row's amount, which a
+    rent change replaces.
+
+    Each editable control carries ``data-initial`` (the lease's value) and ``data-label`` (the
+    Changes card's words, ``ledger/edit_lease.js``); the channel cards carry them in their
+    markup (:meth:`channel_cards`)."""
+
+    rent = forms.DecimalField(
+        label="New monthly rent",
+        required=False,
+        min_value=Decimal("0.01"),
+        max_value=RENT_MAX,
+        max_digits=12,
+        decimal_places=2,
+    )
+    rent_effective_from = forms.DateField(
+        label="Takes effect on",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="The current rent ends the day before.",
+    )
+
+    class Meta:
+        model = Lease
+        formfield_callback = _quiet_formfield
+        fields = ("debit_day", "second_debit_day", "payment_channel", "prorate_first_month")
+        labels = {"prorate_first_month": "Prorate the first month"}
+
+    def __init__(
+        self,
+        *args: Any,
+        first_month_billed: bool = False,
+        open_rent: Decimal | None = None,
+        rent_default: date | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        lease = self.instance
+        self.open_rent = open_rent
+        self.rent_default = rent_default
+        # An active lease needs a debit day: "—" only where it may have none.
+        blank = lease.debit_day is None or lease.collection_status != CollectionStatus.ACTIVE
+        self.fields["debit_day"] = _QuietTypedChoiceField(
+            label="Debit day",
+            choices=_debit_day_choices(lease.debit_day, blank=blank),
+            coerce=int,
+            empty_value=None,
+            required=False,
+        )
+        self.fields["second_debit_day"] = _QuietTypedChoiceField(
+            label="Second debit day",
+            choices=_debit_day_choices(lease.second_debit_day, blank=True),
+            coerce=int,
+            empty_value=None,
+            required=False,
+            # PLAN-012c D8: shown while "Twice a month" is ticked; hidden, it is not posted.
+            widget=forms.Select(attrs={SHOWN_WHEN: TWICE_MONTHLY_ID}),
+        )
+        self.cards = list(CHANNEL_CARDS)
+        current = lease.payment_channel
+        if current and current not in {card[0] for card in CHANNEL_CARDS}:
+            name = PaymentChannel(current).label if current in PaymentChannel.values else current
+            self.cards.append((current, f"{name}{CURRENT_SUFFIX}", CURRENT_CHANNEL_NOTE, name))
+        self.fields["payment_channel"] = _QuietChoiceField(
+            label="Payment channel",
+            choices=[(value, title) for value, title, _, _ in self.cards],
+            widget=forms.RadioSelect,
+            error_messages={"invalid_choice": CHANNEL_REFUSED},
+        )
+        if first_month_billed:
+            del self.fields["prorate_first_month"]
+        else:
+            prorate = self.fields["prorate_first_month"]
+            prorate.widget.attrs.update({"class": "switch", "role": "switch"})
+        if rent_default is not None:
+            self.fields["rent_effective_from"].initial = rent_default
+        initial: dict[str, Any] = {
+            "debit_day": lease.debit_day,
+            "second_debit_day": lease.second_debit_day,
+            "prorate_first_month": "true" if lease.prorate_first_month else "false",
+            "rent": "",
+            "rent_effective_from": rent_default.isoformat() if rent_default else "",
+        }
+        for name, value in initial.items():
+            field = self.fields.get(name)
+            if field is None:
+                continue
+            field.widget.attrs["data-initial"] = "" if value is None else str(value)
+            field.widget.attrs["data-label"] = CHANGE_LABELS.get(name, str(field.label))
+        if open_rent is not None:
+            self.fields["rent"].widget.attrs["data-current"] = f"{open_rent:.2f}"
+            self.fields["rent"].widget.attrs["data-current-text"] = format_amount(open_rent)
+
+    def twice_monthly(self) -> bool:
+        """Whether the page's "Twice a month" tick starts ticked (PLAN-012c D8)."""
+        return _twice_monthly(self["second_debit_day"])
+
+    def channel_cards(self) -> list[dict[str, Any]]:
+        """The channel cards (the three, and the current one outside them), each a radio
+        with its title, muted line and short name; ``initial`` the lease's channel."""
+        initial = self.instance.payment_channel or ""
+        return [
+            {**card, "initial": initial}
+            for card in _channel_cards(self["payment_channel"], self.cards)
+        ]
+
+    def clean(self) -> dict[str, Any]:
+        data = super().clean() or {}
+        active = self.instance.collection_status == CollectionStatus.ACTIVE
+        _check_debits(self, data, active=active)
+        if "rent" in self.errors:
+            return data
+        if data.get("rent") is None:
+            if self.open_rent is None:
+                self.add_error("rent", RENT_REQUIRED)
+            # An empty rent is no change: the open row's amount, no date.
+            data["rent"] = self.open_rent
+            data["rent_effective_from"] = None
+        elif data.get("rent_effective_from") is None:
+            data["rent_effective_from"] = self.rent_default
+        return data
 
 
 # --- Setup charges (PLAN-010b D5, D6) ------------------------------------------------------

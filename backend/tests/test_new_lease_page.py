@@ -234,18 +234,24 @@ def an_operator_with(name: str, **fields: Any) -> Operator:
     return operator
 
 
-def test_no_status_and_no_rent_date_on_create_both_on_edit(admin: Client, today: date) -> None:
+def test_no_status_on_create_or_edit_and_the_rent_date_on_edit_only(
+    admin: Client, today: date
+) -> None:
     store = vacant_store()
     html_text = page(admin, create_path(store))
     assert 'name="collection_status"' not in html_text
     assert 'name="rent_effective_from"' not in html_text
-    assert "New rent takes effect on" not in html_text
+    assert "Takes effect on" not in html_text
     lease = a_lease(a_store("7101", number=7101), an_operator("Edit Me"))
     edit = page(admin, f"/leases/{lease.pk}/edit/")
-    assert 'name="collection_status"' in edit and "New rent takes effect on" in edit
-    # The edit select keeps every channel and gains "E-mail invoice".
-    assert tag_with(edit, 'value="invoice"') and ">E-mail invoice</option>" in edit
-    assert tag_with(edit, 'value="zelle"')
+    # Re-pinned (Opus, PLAN-015a): Edit lease has no Status either (the lease-end wizard
+    # ends a lease); the rent date is "Change rent"'s.
+    assert 'name="collection_status"' not in edit
+    assert tag_with(edit, 'name="rent_effective_from"') and "Takes effect on" in edit
+    # The edit cards are New lease's three; Zelle is not offered to a lease without it.
+    assert tag_with(edit, 'name="payment_channel"', 'value="invoice"')
+    assert "E-mail invoice" in edit
+    assert not tag_with(edit, 'name="payment_channel"', 'value="zelle"')
 
 
 def test_a_saved_lease_is_active_and_the_debit_day_starts_at_the_1st(
@@ -294,28 +300,31 @@ def test_the_cards_name_the_provider_from_the_settings(admin: Client, today: dat
 
 
 @pytest.mark.parametrize("channel", ["zelle", "wire", "unknown"])
-def test_another_channel_is_refused_on_create_and_accepted_on_edit(
+def test_another_channel_is_refused_on_create_and_on_edit_unless_it_is_current(
     admin: Client, today: date, channel: str
 ) -> None:
     store = vacant_store()
     post_create(admin, store, create_data(store, an_operator("Z"), payment_channel=channel))
     assert not Lease.objects.filter(store=store).exists()
+    # Re-pinned (Opus, PLAN-015a): Edit lease offers New lease's three cards; a lease's
+    # current channel outside them stays a card ("Wire (current)"), a new one is refused.
     lease = a_lease(a_store("7102", number=7102), an_operator("Edit Z"))
-    if channel != "unknown":
-        data = {
-            "store": str(lease.store_id),
-            "operator": str(lease.operator_id),
-            "debit_day": "5",
-            "second_debit_day": "",
-            "payment_channel": channel,
-            "started_on": "2025-01-01",
-            "collection_status": "active",
-            "rent": "3500.00",
-            "rent_effective_from": "",
-        }
-        assert admin.post(f"/leases/{lease.pk}/edit/", data).status_code == 302
-        lease.refresh_from_db()
-        assert lease.payment_channel == channel
+    data = {"debit_day": "5", "second_debit_day": "", "payment_channel": channel, "rent": ""}
+    assert admin.post(f"/leases/{lease.pk}/edit/", data).status_code == 302
+    lease.refresh_from_db()
+    assert lease.payment_channel == "stax"
+    assert "Choose Autopay (bank debit)" in page(admin, f"/leases/{lease.pk}/edit/")
+    if channel == "unknown":
+        return
+    current = a_lease(a_store("7103", number=7103), an_operator("Current Z"), channel=channel)
+    edit = page(admin, f"/leases/{current.pk}/edit/")
+    label = {"zelle": "Zelle", "wire": "Wire"}[channel]
+    assert f"{label} (current)" in edit
+    assert tag_with(edit, 'name="payment_channel"', f'value="{channel}"', "checked")
+    data = {**data, "debit_day": "6"}
+    assert admin.post(f"/leases/{current.pk}/edit/", data).status_code == 302
+    current.refresh_from_db()
+    assert (current.payment_channel, current.debit_day) == (channel, 6)
 
 
 def test_the_deposit_is_the_refundable_types_price_in_terms(admin: Client, today: date) -> None:
