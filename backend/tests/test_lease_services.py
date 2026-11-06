@@ -33,6 +33,7 @@ from ledger.models import (
     LeaseRentHistory,
     Operator,
     PaymentChannel,
+    RentCharge,
     ScheduleState,
     Store,
     StoreStatus,
@@ -53,6 +54,7 @@ from payments.provider import (
 )
 from payments.stax.adapter import DEFAULT_PAYMENT_PAGE_URL, StaxProvider
 from tests.auth_helpers import make_user
+from tests.receivables_helpers import a_lease, a_rent_charge, an_invoice
 from tests.stax_helpers import make_rig, sequence
 from tests.test_lease_sync import requires_postgresql
 
@@ -1988,3 +1990,77 @@ def test_deleting_a_lease_removes_its_billing_but_a_shared_account_lease_is_kept
     assert not LeaseBilling.objects.filter(lease_id=sharer.pk).exists()
     holder.delete()
     assert not LeaseBilling.objects.filter(lease_id=holder.pk).exists()
+
+
+# --- PLAN-015a: the Edit lease page's next rent due date and first-month lock ----------------
+
+
+def _due(debit_day: int | None, second: int | None, today: date) -> date:
+    return service.next_rent_due(Lease(debit_day=debit_day, second_debit_day=second), today)
+
+
+@pytest.mark.parametrize(
+    ("debit_day", "second", "today", "expected"),
+    [
+        # Strictly after today: the debit day itself rolls to next month.
+        (5, None, date(2026, 10, 4), date(2026, 10, 5)),
+        (5, None, date(2026, 10, 5), date(2026, 11, 5)),
+        (28, None, date(2026, 12, 28), date(2027, 1, 28)),  # across the year end
+        # 29 to 31 on a short month's last day.
+        (31, None, date(2026, 2, 10), date(2026, 2, 28)),
+        (30, None, date(2028, 2, 1), date(2028, 2, 29)),  # a leap February
+        (31, None, date(2026, 4, 30), date(2026, 5, 31)),  # April's last day passed
+        (29, None, date(2026, 1, 31), date(2026, 2, 28)),
+        # Twice a month: the nearer of the two days.
+        (1, 15, date(2026, 10, 1), date(2026, 10, 15)),
+        (1, 15, date(2026, 10, 15), date(2026, 11, 1)),
+        (15, 1, date(2026, 10, 2), date(2026, 10, 15)),  # stored out of order
+        (10, 31, date(2026, 11, 20), date(2026, 11, 30)),
+        # No debit day: the first of next month.
+        (None, None, date(2026, 10, 1), date(2026, 11, 1)),
+        (None, None, date(2026, 12, 31), date(2027, 1, 1)),
+    ],
+)
+def test_next_rent_due_is_the_nearer_debit_day_strictly_after_today(
+    debit_day: int | None, second: int | None, today: date, expected: date
+) -> None:
+    assert _due(debit_day, second, today) == expected
+
+
+def test_next_rent_due_reads_no_table(django_assert_num_queries: Any) -> None:
+    lease = make_lease()
+    with django_assert_num_queries(0):
+        assert service.next_rent_due(lease, date(2026, 10, 20)) == date(2026, 11, 15)
+
+
+def test_the_first_month_is_billed_once_its_start_month_has_a_charge(
+    django_assert_num_queries: Any,
+) -> None:
+    lease = a_lease(started=date(2026, 9, 14))
+    with django_assert_num_queries(1):
+        assert service.first_month_billed(lease) is False
+    # A later month's charge is not the first month's.
+    a_rent_charge(lease, date(2026, 10, 1))
+    assert service.first_month_billed(lease) is False
+    first = a_rent_charge(lease, date(2026, 9, 1))
+    with django_assert_num_queries(1):
+        assert service.first_month_billed(lease) is True
+    assert service.first_month_charge(lease) == first
+
+    # A prorated charge counts, as does one billed by an invoice.
+    prorated = a_lease(started=date(2026, 9, 14))
+    charge = a_rent_charge(prorated, date(2026, 9, 1), due="1000.00")
+    RentCharge.objects.filter(pk=charge.pk).update(proration_text="14–30 Sep")
+    assert service.first_month_billed(prorated) is True
+    invoiced = a_lease(started=date(2026, 9, 1))
+    assert invoiced.operator is not None
+    charge = a_rent_charge(invoiced, date(2026, 9, 1))
+    invoice = an_invoice(invoiced.operator, 77, "3500.00")
+    RentCharge.objects.filter(pk=charge.pk).update(billed_by_invoice=invoice)
+    assert service.first_month_billed(invoiced) is True
+
+
+def test_a_lease_without_a_start_date_has_no_first_month(django_assert_num_queries: Any) -> None:
+    lease = a_lease(started=None)
+    with django_assert_num_queries(0):
+        assert service.first_month_billed(lease) is False
