@@ -16,6 +16,7 @@ tests.
 from __future__ import annotations
 
 import importlib
+import re
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -125,8 +126,11 @@ def test_d_for_an_ended_lease_has_one_sentence_and_no_second_contact_us() -> Non
     charge.refresh_from_db()
     message = queue_d(lease, charge)
     body = message.rendered_body
-    link = messaging.context_for(lease, charge, MessageRule.D, today=TODAY)["pay_link"]
-    assert ENDED.format(link=link) in body
+    # The pay link is a signed statement token whose timestamp ticks by the second, so a link
+    # computed after the render can differ from the rendered one (a main run of 2026-11-06 saw
+    # it): the sentence is checked around the link rather than with a recomputed copy.
+    ended = re.escape(ENDED).replace(re.escape("{link}"), r"http://localhost:8000/\S+")
+    assert re.search(ended, body), body
     assert "Continued non-payment" not in body
     assert body.count("contact us") == 1
     assert message.status == MessageStatus.QUEUED
