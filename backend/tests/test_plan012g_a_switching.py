@@ -215,9 +215,11 @@ def test_a_page_reads_the_preference_row_once_for_the_theme_and_the_period(path:
     html, reads = preference_reads(client, path)
     assert reads == 1, path
     assert html_tag(html) == '<html lang="en" data-theme="dark">'
-    if path != "/stores/":  # the stored period (or ?ps=), from the same read
-        expected = "weekly" if path == "/?ps=weekly" else "monthly"
-        assert pressed_period(html) == expected, path
+    if path != "/stores/":
+        # PLAN-015 Batch 1 re-pin: the Payment status card and its stored period are gone; the
+        # dashboard's period control (?period=, This month by default) reads no preference and
+        # ?ps= is ignored.
+        assert pressed_period(html) == "month", path
 
 
 def test_without_a_row_the_dashboard_reads_once_and_follows_the_defaults() -> None:
@@ -225,4 +227,4 @@ def test_without_a_row_the_dashboard_reads_once_and_follows_the_defaults() -> No
     html, reads = preference_reads(client, "/")
     assert reads == 1
     assert html_tag(html) == '<html lang="en" data-theme="dark">'  # PLAN-015 re-pin
-    assert pressed_period(html) == "weekly"
+    assert pressed_period(html) == "month"  # PLAN-015 Batch 1 re-pin: the period control

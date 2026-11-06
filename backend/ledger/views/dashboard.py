@@ -1,21 +1,23 @@
 """The home page, the month grid and the arrears list
-(docs/qa/PLAN-011-dashboard-reports-mobile.md D1 to D3, D10).
+(docs/qa/PLAN-011-dashboard-reports-mobile.md D1 to D3, D10; the home page as Design v2,
+docs/qa/PLAN-015-design-v2.md §4.2, §4.3).
 
 Read only and open to every role: ``accounts.registry`` lists every route here as
 read-only, so any unsafe method is refused (403), and the views take GET and HEAD only
 (405 otherwise). "Today" is the date in the project's ``TIME_ZONE``. The query strings
-are read by :func:`ledger.services.grid.parse_query` and
-:func:`ledger.services.receivables.parse_arrears_filter`, which never fail: an unusable
-value is dropped and the page says so. Each export applies the page's query. The grid,
-the arrears list and their exports run inside the reports' statement timeout
-(:func:`ledger.views.reports.bounded`); a cancelled query answers the page with the
-sentence :data:`ledger.views.reports.TOO_SLOW`.
+are read by :func:`ledger.services.grid.parse_query`,
+:func:`ledger.services.receivables.parse_arrears_filter` and the dashboard's own parsers
+(:func:`finance.templatetags.components.parse_period`,
+:func:`ledger.services.dashboard_v2.parse_kind`), which never fail: an unusable value is
+dropped. Each export applies the page's query. The dashboard's figures, the grid, the arrears
+list and their exports run inside the reports' statement timeout
+(:func:`ledger.views.reports.bounded`); a cancelled query answers the page with the sentence
+:data:`ledger.views.reports.TOO_SLOW`.
 """
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date
 from urllib.parse import urlencode
 
@@ -28,260 +30,210 @@ from django.utils.safestring import SafeString
 from django.views.decorators.http import require_safe
 
 from accounts.roles import Role, meets, role_of
-from accounts.themes import PAYMENT_STATUS_PERIODS, preference_for
-from finance.dates import month_text
-from finance.templatetags.components import GLYPHS, badge_family
+from accounts.views import forbidden
+from finance.dates import month_long_text
+from finance.templatetags.components import GLYPHS, PERIODS, badge_family, parse_period
 from finance.us_states import US_STATES
-from ledger.models import PaymentChannel, PaymentMethod, PaymentStatus, Store
-from ledger.services import (
-    attention,
-    grid,
-    list_filters,
-    one_off_charges,
-    receivables,
-    rent_run,
-    stores,
-)
+from ledger.models import PaymentChannel, PaymentStatus
 from ledger.services import dashboard as dashboard_blocks
+from ledger.services import dashboard_v2, grid, list_filters, receivables, search
+from ledger.services.csv_export import CsvWriter
 from ledger.views.operators import csv_response, role_required
 from ledger.views.reports import TOO_SLOW, ReportTooSlow, bounded
-from ledger.wording import format_amount
+
+#: ``?chart=``: the Collections card's Monthly (the default) or Yearly bars.
+CHART_MONTHLY = "monthly"
+CHART_YEARLY = "yearly"
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardState:
+    """What the page's query string chose, each value already checked."""
+
+    period: str
+    chart: str
+    query: str
+    kind: str
+    page: str
+
+    def query_string(self, **changes: str) -> str:
+        """The page's query string (without the mini calendar's month) with ``changes``;
+        empty values left out."""
+        values = {
+            "period": self.period,
+            "chart": self.chart,
+            "q": self.query,
+            "kind": self.kind,
+            "page": self.page,
+            **changes,
+        }
+        return urlencode({name: value for name, value in values.items() if value})
+
+
+def _state(request: HttpRequest) -> DashboardState:
+    period = parse_period(request.GET.get("period"))
+    page = request.GET.get("page", "") or ""
+    return DashboardState(
+        period=period if period != PERIODS[0][0] else "",
+        chart=CHART_YEARLY if request.GET.get("chart") == CHART_YEARLY else "",
+        query=search.clean_query(request.GET.get("q")),
+        kind=dashboard_v2.parse_kind(request.GET.get("kind")),
+        page=page if page.isascii() and page.isdigit() else "",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Figures:
+    kpis: dashboard_v2.Kpis
+    collections: dashboard_v2.Collections
+    tiles: list[dashboard_v2.OperatorTile]
+    activity: dashboard_v2.Activity
+
+
+def _figures(state: DashboardState, today: date) -> Figures:
+    """Every figure of the page: the open balances, Needs attention, the P&L's rows and
+    Payments by method each read once (Fable's gate on PLAN-015 Batch 1)."""
+    yearly = state.chart == CHART_YEARLY
+    balances = receivables.open_balances(today)
+    needs = dashboard_v2.needs_attention(today, balances)
+    read = dashboard_v2.page_reads(state.period, today, yearly)
+    return Figures(
+        kpis=dashboard_v2.kpis(
+            state.period,
+            today,
+            balances=balances,
+            attention_count=dashboard_v2.attention_total(needs),
+            read=read,
+        ),
+        collections=(
+            dashboard_v2.collections_by_year(today, read=read)
+            if yearly
+            else dashboard_v2.collections(today.year, today, read=read)
+        ),
+        tiles=dashboard_v2.operator_tiles(today, balances=balances),
+        activity=dashboard_v2.activity(today, state.query, state.kind, state.page, found=needs),
+    )
 
 
 @role_required
 @require_safe
 def home(request: HttpRequest) -> HttpResponse:
-    """``ledger:home`` (D1; the approved design's layout, PLAN-012f D7, and the staging
-    review's, PLAN-012f-b D3 to D6): the four figures, the Cashflow card, what needs
-    attention (PLAN-011b D6) beside the mini calendar, the recent payments beside the Payment
-    status card (PLAN-014 A2: the Coming up and Collection cards are gone), then today's run,
-    the failed attempts, the waived charges, the invoices not sent and the last nightly check.
-    ``?range=`` (with ``from`` and ``to``) is the Cashflow card's range and ``?cal=`` the mini
-    calendar's month; an unusable range does not compute the card and says so. ``?ps=weekly|
-    monthly`` and ``?ps_at=YYYY-MM-DD`` are the Payment status card's own period (PLAN-014 A3,
-    :func:`_payment_status_period`). Without ``?range=`` (PLAN-012g C2; DESIGN-SPEC §7.5)
-    the range is the last 12 months, and the Cashflow card is computed for the last 6 months
-    as well (``cashflow_narrow``, the phone's card, shown by the style sheet at 768 px and under);
-    both come from one read of the P&L's rows. The Cashflow cards run inside the reports'
-    statement timeout."""
+    """``ledger:home`` (PLAN-015 Batch 1): the header (the period control, Download
+    spreadsheet, New invoice and Record payment for billing and above), the four KPIs, the
+    Collections card (``?chart=yearly``), the Operators tiles, the Recent activity feed
+    (``?q=``, ``?kind=``, ``?page=``) beside the mini calendar (``?cal=``)."""
     today = timezone.localdate()
-    selected = dashboard_blocks.parse_range(request.GET, today)
-    range_from, range_to = dashboard_blocks.form_months(request.GET, today)
+    state = _state(request)
     cal_month = dashboard_blocks.parse_cal(request.GET.get("cal", "") or "", today)
-    narrow = (
-        dashboard_blocks.parse_range({"range": dashboard_blocks.RANGE_DEFAULT_NARROW}, today)
-        if "range" not in request.GET
-        else None
-    )
-    cashflow: dashboard_blocks.Cashflow | None = None
-    cashflow_narrow: dashboard_blocks.Cashflow | None = None
-    cashflow_message = ""
-    if selected is not None:
-        ranges = (selected,) if narrow is None else (selected, narrow)
-        try:
-            found = bounded(lambda: dashboard_blocks.cashflows(ranges))
-        except ReportTooSlow:
-            cashflow_message = TOO_SLOW
-        else:
-            cashflow = found[0]
-            cashflow_narrow = found[1] if narrow is not None else None
-    # The mini calendar's ‹ › keep an explicit range only: without one the page stays on the
-    # two default cards.
-    range_query = urlencode(selected.as_query()) if selected is not None and narrow is None else ""
-    period = _payment_status_period(request, today)
-    role = role_of(request.user)
-    data = receivables.dashboard(today)
-    leases = attention.dashboard_leases()
-    needs = _titled(attention.attention(today, leases=leases))
-    debits = dashboard_blocks.pending_debits()
-    collection = dashboard_blocks.collection_progress(today)
-    run_line = rent_run.run_line(today)
-    payments_query = urlencode(
-        {
-            "date_from": data.month_start.isoformat(),
-            "date_to": data.month_end.isoformat(),
-            "status": PaymentStatus.SETTLED,
-        }
-    )
+    figures: Figures | None
+    try:
+        figures = bounded(lambda: _figures(state, today))
+    except ReportTooSlow:
+        figures = None
+    can_act = meets(role_of(request.user), Role.BILLING)
     return render(
         request,
         "ledger/dashboard/home.html",
         {
-            "data": data,
-            "attention": needs,
-            # PLAN-012g C5: "All n ›" counts the whole list, the items the per-kind limit left
-            # out included.
-            "attention_total": len(needs.items) + sum(needs.more.values()),
-            # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
-            "can_record_outcome": meets(role, Role.BILLING),
-            # PLAN-012f D7: a row's action button and "+ New invoice" are billing's; a viewer
-            # reads the rows and follows their links.
-            "can_act": meets(role, Role.BILLING),
-            "payments_query": payments_query,
-            "kpis": _kpis(data, collection, debits, run_line, payments_query),
-            "recent_payments": dashboard_blocks.recent_payments(today),
-            # PLAN-012d D11: today's rent run in one line, from its audit rows.
-            "run_line": run_line,
-            "waived_live_heading": one_off_charges.WAIVED_LIVE_HEADING,
-            "not_sent": [
-                (invoice, receivables.invoice_store_label(invoice)) for invoice in data.not_sent
-            ],
-            "failed_attempts": [
-                (invoice, receivables.invoice_store_label(invoice))
-                for invoice in data.failed_attempts
-            ],
-            # PLAN-012f-b D3 to D6: the shared range, its two cards and the mini calendar.
-            "range": selected,
-            "range_choices": dashboard_blocks.RANGE_CHOICES,
-            "range_key": selected.key if selected is not None else dashboard_blocks.RANGE_CUSTOM,
-            "range_from": selected.from_month if selected is not None else range_from,
-            "range_to": selected.to_month if selected is not None else range_to,
-            "range_months": dashboard_blocks.picker_months(selected, range_from, range_to, today),
-            "range_message": dashboard_blocks.RANGE_MESSAGE if selected is None else "",
-            "range_query": range_query,
-            "cashflow": cashflow,
-            "cashflow_narrow": cashflow_narrow,
-            "cashflow_message": cashflow_message,
-            # PLAN-014 A3: the Payment status card's own period and its pill's and arrows' links.
-            "period": period,
-            "period_links": _period_links(request, period),
-            "payment_status": dashboard_blocks.payment_status(period, today),
+            "today": today,
+            "month_label": month_long_text(today),
+            "state": state,
+            "period": state.period or PERIODS[0][0],
+            "figures": figures,
+            "too_slow": TOO_SLOW if figures is None else "",
+            "can_act": can_act,
+            "kinds": dashboard_v2.KINDS,
+            "export_query": state.query_string(page=""),
+            "pager_query": state.query_string(page=""),
+            "state_query": state.query_string(),
+            "chart_links": {
+                CHART_MONTHLY: state.query_string(chart=""),
+                CHART_YEARLY: state.query_string(chart=CHART_YEARLY),
+            },
+            "payments_query": urlencode(
+                {
+                    "date_from": figures.kpis.window.start.isoformat(),
+                    "date_to": figures.kpis.window.end.isoformat(),
+                    "status": PaymentStatus.SETTLED,
+                }
+            )
+            if figures is not None
+            else "",
             "mini_calendar": dashboard_blocks.mini_calendar(cal_month, today),
         },
     )
 
 
-_ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
+#: The spreadsheet's columns: the KPI rows (Section "Figure") then the activity rows.
+EXPORT_HEADER = ("Section", "Kind", "Store", "Operator", "Date", "Amount (USD)", "Status", "Detail")
+SECTION_FIGURE = "Figure"
+SECTION_ACTIVITY = "Activity"
 
 
-def _payment_status_period(request: HttpRequest, today: date) -> dashboard_blocks.Period:
-    """The Payment status card's period (PLAN-014 A3): ``?ps=`` when it is ``weekly`` or
-    ``monthly``, else the user's stored choice (the request's one read of the preference row,
-    shared with the shell's theme; a GET never writes it); ``?ps_at=``
-    when it is a ``YYYY-MM-DD`` day, else today."""
-    kind = request.GET.get("ps", "")
-    if kind not in PAYMENT_STATUS_PERIODS:
-        kind = preference_for(request).payment_status_period
-    raw = request.GET.get("ps_at", "")
-    at: date | None = None
-    if _ISO_DAY.fullmatch(raw):
-        try:
-            at = date.fromisoformat(raw)
-        except ValueError:  # 2026-02-30
-            at = None
-    return dashboard_blocks.period_for(kind, at, today)
-
-
-@dataclass(frozen=True, slots=True)
-class PeriodLinks:
-    """The Payment status card's links, each the page's own query string with ``ps`` (and
-    ``ps_at``) set, so the Cashflow range and the mini calendar's month stay as they were."""
-
-    #: ``(kind, label, query, pressed)`` per segment of the pill, in its order.
-    segments: list[tuple[str, str, str, bool]]
-    previous: str
-    next: str
-
-
-def _period_query(request: HttpRequest, **changes: str) -> str:
-    """``?…``: the page's query string with ``changes`` set."""
-    params = request.GET.copy()
-    for name, value in changes.items():
-        params[name] = value
-    return f"?{params.urlencode()}"
-
-
-def _period_links(request: HttpRequest, period: dashboard_blocks.Period) -> PeriodLinks:
-    return PeriodLinks(
-        segments=[
-            (kind, label, _period_query(request, ps=kind), kind == period.kind)
-            for kind, label in dashboard_blocks.PERIOD_CHOICES
+def export_records(
+    kpis: dashboard_v2.Kpis, rows: list[dashboard_v2.ActivityRow]
+) -> list[list[object]]:
+    """The four KPIs (title, figure, sub-line and badge), then every activity row."""
+    figures: list[list[object]] = [
+        [SECTION_FIGURE, kpis.due.title, "", "", None, kpis.due.amount, "", kpis.due.sub],
+        [
+            SECTION_FIGURE,
+            "Collected",
+            "",
+            "",
+            None,
+            kpis.collected.amount,
+            kpis.collected.badge,
+            kpis.collected.sub,
         ],
-        previous=_period_query(request, ps=period.kind, ps_at=period.prev_at.isoformat()),
-        next=_period_query(request, ps=period.kind, ps_at=period.next_at.isoformat()),
-    )
-
-
-def _titled(found: attention.Attention) -> attention.Attention:
-    """The items with their store as the store page and the grid title it ("#1991 Istanbul",
-    :func:`ledger.services.stores.title`; one query for the stores the items name)."""
-    ids = {item.store_id for item in found.items if item.store_id is not None}
-    titles = {store.pk: stores.title(store) for store in Store.objects.filter(pk__in=ids)}
-    found.items = [
-        replace(item, store=titles[item.store_id]) if item.store_id in titles else item
-        for item in found.items
+        [SECTION_FIGURE, "Overdue", "", "", None, kpis.overdue.amount, "", kpis.overdue.sub],
+        [
+            SECTION_FIGURE,
+            "Bank deposits",
+            "",
+            "",
+            None,
+            kpis.bank.amount,
+            kpis.bank.badge,
+            kpis.bank.sub,
+        ],
     ]
-    return found
-
-
-@dataclass(frozen=True, slots=True)
-class Kpi:
-    """One of the dashboard's four figures (PLAN-012f D7): ``url`` makes the card a link;
-    ``note`` is escaped text, or markup built here with its parts escaped."""
-
-    element_id: str
-    label: str
-    value: str
-    note: str
-    tone: str = ""
-    url: str = ""
-
-
-def _plural(count: int, word: str) -> str:
-    return f"{count} {word}{'' if count == 1 else 's'}"
-
-
-def _kpis(
-    data: receivables.Dashboard,
-    collection: dashboard_blocks.Collection,
-    debits: dashboard_blocks.PendingDebits,
-    run_line: rent_run.RunLine | None,
-    payments_query: str,
-) -> list[Kpi]:
-    """Unpaid balances, Collected this month, Pending bank debits, Today's daily charges."""
-    share = (
-        f"{collection.percent}% of {month_text(collection.month)} rent"
-        if collection.percent is not None
-        else "—"
-    )
-    run_page = reverse("ledger:run:today")
-    details = format_html('<a href="{}">details</a>', run_page)
-    run_note = (
-        format_html("created · {} skipped · {}", run_line.skipped, details)
-        if run_line is not None
-        else format_html("not created yet · {}", details)
-    )
-    pending_query = urlencode({"status": PaymentStatus.PENDING, "method": PaymentMethod.ACH})
-    return [
-        Kpi(
-            "figure-outstanding",
-            "Unpaid balances",
-            format_amount(data.outstanding),
-            f"{_plural(data.outstanding_stores, 'store')} · {data.overdue_stores} overdue",
-            tone="unpaid",
-            url=reverse("ledger:arrears:page"),
-        ),
-        Kpi(
-            "figure-paid",
-            "Collected this month",
-            format_amount(data.paid_this_month),
-            share,
-            url=f"{reverse('ledger:payments:list')}?{payments_query}",
-        ),
-        Kpi(
-            "figure-pending",
-            "Pending bank debits",
-            format_amount(debits.amount),
-            debits.note,
-            url=f"{reverse('ledger:payments:list')}?{pending_query}",
-        ),
-        Kpi(
-            "figure-run",
-            "Today's daily charges",
-            str(run_line.created) if run_line is not None else "—",
-            run_note,
-        ),
+    return figures + [
+        [SECTION_ACTIVITY, row.activity, row.store, row.operator, row.on, row.amount, row.chip, ""]
+        for row in rows
     ]
+
+
+@role_required
+@require_safe
+def home_export(request: HttpRequest) -> HttpResponseBase:
+    """``ledger:dashboard_export`` (billing and above): the period's KPIs, then the activity
+    rows of the page's search and kind, every page (:data:`EXPORT_HEADER`)."""
+    if not meets(role_of(request.user), Role.BILLING):
+        return forbidden(request)
+    today = timezone.localdate()
+    state = _state(request)
+
+    def compute() -> list[list[object]]:
+        balances = receivables.open_balances(today)
+        needs = dashboard_v2.needs_attention(today, balances)
+        found = dashboard_v2.kpis(
+            state.period,
+            today,
+            balances=balances,
+            attention_count=dashboard_v2.attention_total(needs),
+        )
+        rows = dashboard_v2.activity_rows(today, state.query, state.kind, found=needs)
+        return export_records(found, rows)
+
+    try:
+        records = bounded(compute)
+    except ReportTooSlow:
+        return home(request)
+    period = state.period or PERIODS[0][0]
+    return csv_response(
+        CsvWriter(EXPORT_HEADER).lines(records), f"dashboard-{period}-{today:%Y-%m-%d}.csv"
+    )
 
 
 #: Stands for a charge's id in its page's URL, reversed once per page (PLAN-011 D6).

@@ -174,10 +174,10 @@ def test_the_dashboard_figures_are_formatted() -> None:
     a_rent_charge(lease, SEPTEMBER, due="12345.60")
     viewer, _ = client_for(Role.VIEWER)
     figures = page(viewer, "/").split('id="figures-card"')[1].split("</section>")[0]
-    # PLAN-012f D6: the figures are KPI cards ({% kpi %}).
-    # PLAN-012f D7: Unpaid balances in the unpaid red.
-    assert '<span class="kpi-value tone-unpaid">$12,345.60</span>' in figures
-    assert '<span class="kpi-value">$0.00</span>' in figures  # paid this month
+    # PLAN-015 Batch 1 re-pin: the figures are Design v2's KPI cards ({% kpi2 %}); Overdue in
+    # the unpaid red, Collected plain.
+    assert '<span class="kpi2-value tone-unpaid">$12,345.60</span>' in figures
+    assert '<span class="kpi2-value">$0.00</span>' in figures  # collected this month
 
 
 def test_the_promise_cells_and_the_closed_sentence_are_formatted() -> None:
@@ -465,12 +465,13 @@ PAIRS: list[tuple[str, str, str]] = [
     # §4.6 template sentences
     ("_job_status.html", " UTC", "started {{ job.created_at|moment }}"),
     # PLAN-012f-b E-4: the sentence is the failed-attempts empty state's line.
+    # PLAN-015 Batch 1 re-pin: the dashboard's operational cards moved to Daily charges.
     (
-        "dashboard/home.html",
+        "run/_operations.html",
         "ATTEMPTED",
         'text="Invoices "|add:company.provider_name|add:" could not collect are listed here."',
     ),
-    ("dashboard/home.html", "Last reconciliation", "Last nightly check"),
+    ("run/_operations.html", "Last reconciliation", "Last nightly check"),
     ("disputes/page.html", "Last synced", f"Last updated from {P}"),
     ("disputes/page.html", "Not synced yet.", "Not updated yet."),
     ("stores/_tab_schedules.html", "the provider runs the schedule", f"{P} runs the autopay"),
@@ -529,7 +530,7 @@ PAIRS: list[tuple[str, str, str]] = [
     ("stores/detail.html", "No leases.", "No lease yet. New lease from the action bar."),
     ("stores/_tab_payments.html", "No payments.<", "No payments yet. Add one from the action bar."),
     ("reconciliation/page.html", "No reconciliation has run yet.", "No nightly check has run yet."),
-    ("dashboard/home.html", "No reconciliation has run yet.", "No nightly check has run yet."),
+    ("run/_operations.html", "No reconciliation has run yet.", "No nightly check has run yet."),
     ("webhooks/list.html", "No webhook events match.", f"No messages from {P} match."),
     (
         "lease_ends/blockers.html",
@@ -698,6 +699,11 @@ def test_no_forbidden_word_is_on_the_main_pages() -> None:
     found = []
     for path in main_pages():
         text = visible_text(page(admin, path))
+        if path == "/":
+            # PLAN-015 Batch 1 (the owner's decision 3, docs/qa/PLAN-015-design-v2.md §9): the
+            # dashboard's primary button reads "Record payment", as the owner's mockup; every
+            # other page keeps "Add payment".
+            text = re.sub(r"New invoice\s+Record payment", "New invoice", text, count=1)
         for word, pattern in FORBIDDEN.items():
             for match in pattern.finditer(text):
                 around = text[max(0, match.start() - 40) : match.end() + 40]

@@ -229,8 +229,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: since the Outbox's "Preview next 30 days" (ledger:outbox:preview) and "Copy invite link"
 #: (ledger:operators:portal_copy_link), owner, 2026-11-01; 317 since the Outbox's "Send all held
 #: for settings" (ledger:outbox:send_held_for_settings), owner, 2026-11-02; 318 since the
-#: portal's own web app manifest (portal:manifest, opening on /portal/), owner, 2026-11-05.
-FROZEN_ROUTES = (318, "f566d4cec6a05b546397adc9327fe3a4510f2ea2cd9e7bc811a0b6cb051a9c76")
+#: portal's own web app manifest (portal:manifest, opening on /portal/), owner, 2026-11-05;
+#: 319 since the dashboard's "Download spreadsheet" (ledger:dashboard_export), PLAN-015 Batch 1.
+FROZEN_ROUTES = (319, "6f42ec4e0137b7f7d461a05d719d6b82b436f3836481c15d75fefd8778ae6ade")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

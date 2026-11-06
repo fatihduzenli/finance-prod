@@ -1,9 +1,8 @@
-"""PLAN-012g Batch C (Fable): the dashboard in the §7.5 order with the §7.3 colours — the order
-and the three rows, the 6-month preset and the 12-month default, the two Cashflow cards only when
-no range is asked for, the mini calendar's legend, dots by kind and no-script day lists, the
-Payment status boxes, the attention card's "All n ›" — and the adversarial cases of plan §5
-(`?range=6m` on the laptop, `?cal=2026-13`, forty attention rows, a day with every kind, an empty
-dashboard)."""
+"""PLAN-012g Batch C (Fable): the dashboard's mini calendar — its legend, dots by kind and
+no-script day lists — and the adversarial cases of plan §5 (`?cal=2026-13`, a day with every
+kind, an empty dashboard, a stale `?range=`). PLAN-015 Batch 1 removed the Cashflow, Payment
+status and Needs attention cards and their tests (the order, the presets, the colours, the
+boxes, "All n ›"); tests/test_dashboard_v2.py covers the new page."""
 
 from __future__ import annotations
 
@@ -15,10 +14,8 @@ from django.test import Client
 
 from accounts.roles import Role
 from ledger.services import calendar
-from ledger.services import dashboard as blocks
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
 from tests.test_operator_views import client_for
-from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -43,81 +40,6 @@ def page(client: Client, query: str = "") -> str:
 def section(html: str, element_id: str) -> str:
     start = html.index(f'id="{element_id}"')
     return html[start : html.index("</section>", start)]
-
-
-def card_classes(html: str, element_id: str) -> str:
-    """The class attribute of the section carrying ``element_id`` (it precedes the id)."""
-    match = re.search(r'<section class="([^"]*)"[^>]*id="' + element_id + '"', html)
-    assert match, element_id
-    return match.group(1)
-
-
-# --- Order and ranges -----------------------------------------------------------------------------
-
-
-def test_the_rows_are_the_spec_s_order_with_two_thirds_rows() -> None:
-    # PLAN-014 A2: the Coming up and Collection row is gone (10 ids, two thirds rows).
-    html = page(client_for(Role.BILLING)[0])
-    order = [
-        'id="figures-card"',
-        'id="cashflow-card"',
-        'id="attention"',
-        'id="mini-calendar"',
-        'id="recent-payments"',
-        'id="payment-status"',
-        'id="today-run"',
-        'id="failed-attempts"',
-        'id="not-sent-card"',
-        'id="last-reconciliation-card"',
-    ]
-    positions = [html.index(marker) for marker in order]
-    assert positions == sorted(positions)
-    assert html.count('class="dashboard-row-thirds"') == 2
-    assert 'id="coming-up"' not in html and 'id="collection-card"' not in html
-
-
-def test_the_six_month_preset_exists_and_twelve_is_the_default() -> None:
-    assert dict(blocks.RANGE_CHOICES)["6m"] == "Last 6 months"
-    assert blocks._PRESET_MONTHS["6m"] == 6
-    chosen = blocks.parse_range({}, TODAY)
-    assert chosen is not None and chosen.key == "12m"
-    assert blocks.parse_range({"range": "6m"}, TODAY).key == "6m"  # type: ignore[union-attr]
-
-
-def test_without_a_range_the_page_carries_both_cards_and_with_one_only_one() -> None:
-    client, _ = client_for(Role.BILLING)
-    html = page(client)
-    assert 'id="cashflow-card"' in html and 'id="cashflow-card-narrow"' in html
-    wide, narrow = section(html, "cashflow-card"), section(html, "cashflow-card-narrow")
-    assert '<option value="12m" selected>' in wide and '<option value="6m" selected>' in narrow
-    assert 'id="range-select"' in wide and 'id="range-select-narrow"' in narrow
-    assert "has-narrow" in card_classes(html, "cashflow-card")
-    for query in (
-        "?range=6m",
-        "?range=12m",
-        "?range=this",
-        "?range=custom&from=2026-01&to=2026-03",
-    ):
-        html = page(client, query)
-        assert 'id="cashflow-card"' in html and 'id="cashflow-card-narrow"' not in html, query
-        assert "has-narrow" not in card_classes(html, "cashflow-card"), query
-
-
-def test_six_months_draws_six_bar_pairs_and_twelve_draws_twelve() -> None:
-    client, _ = client_for(Role.BILLING)
-    six = section(page(client, "?range=6m"), "cashflow-card")
-    twelve = section(page(client, "?range=12m"), "cashflow-card")
-    assert six.count('class="bar-pair"') == 6 and twelve.count('class="bar-pair"') == 12
-
-
-def test_the_chart_colours_are_tokens_and_the_legend_names_the_three_series() -> None:
-    html = section(page(client_for(Role.VIEWER)[0]), "cashflow-card")
-    for token in ("--chart-income", "--chart-expenses", "--chart-net"):
-        assert f"var({token})" in html, token
-    assert not re.search(r'(?:fill|stroke)="#[0-9A-Fa-f]{3,6}"', html)
-    legend = html[html.index('class="cashflow-legend"') :]
-    for word in ("Income", "Expenses", "Net"):
-        assert has_token(legend, word), word
 
 
 # --- Mini calendar --------------------------------------------------------------------------------
@@ -170,42 +92,18 @@ def test_a_month_without_items_has_no_legend_and_no_day_lists() -> None:
 # --- Payment status and the attention card --------------------------------------------------------
 
 
-def test_the_status_boxes_carry_their_colour_bar_and_the_pending_line() -> None:
-    lease = a_lease(a_store("1601"), an_operator("Boxes Co"))
-    a_rent_charge(lease, date(2026, 9, 1), due="900.00")
-    html = section(page(client_for(Role.BILLING)[0]), "payment-status")
-    for key in ("overdue", "paid", "upcoming"):
-        assert f'id="status-{key}"' in html, key
-    label = re.search(r'<span class="donut-label">(\w+)</span>', html)
-    assert label is not None and label.group(1) in ("charge", "charges")
-    assert "pending · rent and fees" in html or 'id="payment-status-pending"' not in html
-
-
-def test_the_attention_card_says_all_n_with_the_full_count() -> None:
-    client, _ = client_for(Role.BILLING)
-    for n in range(40):
-        lease = a_lease(a_store(f"17{n:02d}"), an_operator(f"Late {n}"))
-        a_rent_charge(lease, date(2026, 8, 1), due="500.00")
-    html = section(page(client), "attention")
-    link = re.search(r'<a class="card-link" id="all-unpaid" href="([^"]+)">All (\d+) ›</a>', html)
-    assert link is not None
-    count = int(link.group(2))
-    assert count >= 40
-    assert link.group(1).startswith("/")
-
-
 def test_an_empty_dashboard_still_renders_every_card() -> None:
     html = page(client_for(Role.VIEWER)[0])
+    # PLAN-015 Batch 1 re-pin: Design v2's cards; an empty feed says so in one sentence.
     for marker in (
-        "attention",
+        "figures-card",
+        "collections-card",
+        "operators-card",
+        "activity-card",
         "mini-calendar",
-        "recent-payments",
-        "payment-status",
-        "cashflow-card",
     ):
         assert f'id="{marker}"' in html, marker
-    # Nothing to attend to: no "All 0 ›" link (the empty state says it).
-    assert 'id="all-unpaid"' not in section(html, "attention")
+    assert 'id="activity-empty">No activity matches.<' in html
 
 
 # --- Hostile parameters ---------------------------------------------------------------------
@@ -229,4 +127,4 @@ def test_a_bad_cal_falls_back_to_the_current_month(query: str) -> None:
 )
 def test_a_bad_or_mixed_range_never_breaks_the_page(query: str) -> None:
     html = page(client_for(Role.VIEWER)[0], query)
-    assert 'id="cashflow-card"' in html
+    assert 'id="collections-card"' in html  # PLAN-015 Batch 1 re-pin: ?range= is not read

@@ -151,7 +151,7 @@ def test_at_390_a_charge_row_is_the_two_line_card(
     assert "$500.00" in text and "$1,500.00" in text and "Partially paid" in text
 
 
-def test_at_390_the_stores_list_and_the_recent_payments_read_as_cards(
+def test_at_390_the_stores_list_reads_as_cards(
     live_server: LiveServer, phone: BrowserContext
 ) -> None:
     a_store_with_an_unpaid_and_a_partial_charge()
@@ -160,10 +160,8 @@ def test_at_390_the_stores_list_and_the_recent_payments_read_as_cards(
     rows = page.locator('.table-cards table tbody tr:has(td[data-role="title"])')
     rows.first.wait_for()
     two_line_card(rows.first, page)
-    page.goto(f"{live_server.url}/")
-    recent = page.locator('#recent-payments-table tbody tr:has(td[data-role="title"])')
-    if recent.count():
-        two_line_card(recent.first, page)
+    # PLAN-015 Batch 1: the dashboard's Recent payments card is gone; the Recent activity feed's
+    # phone rows are tests/e2e/test_dashboard_v2.py's.
 
 
 def test_at_1280_the_table_keeps_every_column_and_its_header(

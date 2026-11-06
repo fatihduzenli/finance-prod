@@ -192,12 +192,16 @@ EXPECTED_ROUTES = {
     "ledger:operators:contacts_export",
     # PLAN-012 D8: the dispute list.
     "ledger:disputes:export",
+    # PLAN-015 Batch 1: the dashboard's "Download spreadsheet".
+    "ledger:dashboard_export",
 }
 #: Exports whose page needs more than a viewer: the export needs the same.
 EXPORT_ROLES = {
     "ledger:audit:export": Role.ADMIN,
     "ledger:reconciliation:export": Role.BILLING,
     "ledger:disputes:export": Role.BILLING,
+    # PLAN-015 Batch 1: the dashboard shows the button to billing and above.
+    "ledger:dashboard_export": Role.BILLING,
 }
 
 

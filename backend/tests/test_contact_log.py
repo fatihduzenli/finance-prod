@@ -1245,9 +1245,10 @@ def test_broken_from_the_attention_list_comes_back_to_the_dashboard(today: date)
     client, _ = client_for(Role.BILLING)
     operator = an_operator()
     old = promise(operator, by=date(2026, 10, 1))
-    dashboard = page_of(client, "/")
-    assert outcome_buttons(dashboard, old) == ["kept", "rescheduled", "broken"]
-    assert f"/contacts/{old.pk}/outcome/broken/?next=%2F" in dashboard
+    # PLAN-015 Batch 1 re-pin: the dashboard's Needs attention card (and its Kept, Reschedule
+    # and Broken) is gone; the operator page's banners keep the buttons, and an outcome posted
+    # with next=/ still comes back to the dashboard.
+    assert outcome_buttons(page_of(client, "/"), old) == []
     banners = page_of(client, f"/operators/{operator.pk}/")
     banners = banners[banners.index('id="attention"') : banners.index("</section>")]
     assert outcome_buttons(banners, old) == ["kept", "rescheduled", "broken"]

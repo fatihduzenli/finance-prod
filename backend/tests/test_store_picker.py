@@ -149,7 +149,8 @@ def test_signed_out_a_viewer_and_a_post_are_refused() -> None:
 def test_the_dashboard_embeds_the_picker_for_billing(billing: Client) -> None:
     page = billing.get("/").content.decode()
     assert (
-        '<a class="btn btn-primary" id="new-invoice" href="/search/?intent=new_invoice" '
+        # PLAN-015 Batch 1 re-pin: a secondary button beside the primary Record payment.
+        '<a class="btn" id="new-invoice" href="/search/?intent=new_invoice" '
         'data-dialog-open="store-picker">'
     ) in page
     assert '<dialog class="dialog dialog-sm" id="store-picker"' in page

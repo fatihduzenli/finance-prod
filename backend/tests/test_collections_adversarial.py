@@ -315,7 +315,7 @@ def test_past_promises_show_at_once_whatever_the_balance_and_future_ones_do_not(
     assert [i.since for i in items] == [today - timedelta(days=5), today - timedelta(days=1)]
     assert all(isinstance(i.since, _date) and i.since < today for i in items)
     viewer, _ = client_for(Role.VIEWER)
-    page = viewer.get("/").content.decode()
+    page = viewer.get("/?kind=attention").content.decode()  # PLAN-015 Batch 1 re-pin
     assert page.count("not kept") == 2
 
 

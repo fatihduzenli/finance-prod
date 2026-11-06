@@ -12,7 +12,8 @@ written.
 ``intent=new_invoice`` (PLAN-012f-b D7, the "Which store?" picker without scripts): the page
 reads "New invoice — which store?", each store links to its Create invoice page, the one
 store matched jumps there (never to an operator) and the box keeps the intent; for a viewer
-the intent is ignored.
+the intent is ignored. ``intent=record_payment`` (PLAN-015 Batch 1, the dashboard's "Record
+payment") is the same with each store's Add payment page ("Add payment — which store?").
 
 ``ledger:search_stores`` (GET, billing and above; read-only in ``accounts.registry``): the
 picker's type-ahead, ``{"stores": [...]}`` from :func:`ledger.services.search.store_rows`
@@ -38,6 +39,13 @@ from ledger.views.operators import role_required
 
 #: The ``intent`` of the picker's search (the scripts-off form and its fallback link).
 NEW_INVOICE = "new_invoice"
+#: The ``intent`` of the dashboard's "Record payment" (PLAN-015 Batch 1).
+RECORD_PAYMENT = "record_payment"
+#: Where a store of each intent's results leads.
+INTENT_ROUTES: dict[str, str] = {
+    NEW_INVOICE: "ledger:invoices:new_store",
+    RECORD_PAYMENT: "ledger:stores:record_payment",
+}
 
 
 @role_required
@@ -45,13 +53,14 @@ NEW_INVOICE = "new_invoice"
 def search_page(request: HttpRequest) -> HttpResponse:
     query = service.clean_query(request.GET.get("q"))
     can_act = meets(role_of(request.user), Role.BILLING)
-    # A viewer, who cannot open the builder, gets the plain search.
-    new_invoice = can_act and request.GET.get("intent") == NEW_INVOICE
+    # A viewer, who cannot open the builder or Add payment, gets the plain search.
+    raw_intent = request.GET.get("intent", "")
+    intent = raw_intent if can_act and raw_intent in INTENT_ROUTES else ""
     results = service.search(query)
     target = results.jump
-    if new_invoice:
+    if intent:
         if len(results.stores) == 1 and not results.more_stores:
-            return redirect("ledger:invoices:new_store", pk=results.stores[0].store.pk)
+            return redirect(INTENT_ROUTES[intent], pk=results.stores[0].store.pk)
     elif isinstance(target, Store):
         return redirect("ledger:stores:detail", pk=target.pk)
     elif target is not None:
@@ -67,7 +76,8 @@ def search_page(request: HttpRequest) -> HttpResponse:
             "query": query,
             "results": results,
             "operators": operators,
-            "new_invoice": new_invoice,
+            "new_invoice": intent == NEW_INVOICE,
+            "record_payment": intent == RECORD_PAYMENT,
             "can_act": can_act,
         },
     )

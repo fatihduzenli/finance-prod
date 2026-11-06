@@ -1,143 +1,39 @@
 {% extends "finance/base.html" %}
-{% load components icons money responsive dates static %}
-{% load tz %}
+{% load charts components icons money responsive dates static %}
 {% block title %}Dashboard{% endblock %}
-{% comment %}The dashboard (docs/qa/PLAN-012f-approved-design.md D7; docs/design/DESIGN-SPEC.md §4 and
-dashboard-laptop.png). The header: the title with the long date, the search box and "+ New
-invoice" (billing: it opens the "Which store?" picker, ledger/_store_picker.html, PLAN-012f-b
-D7; without the script the link leads to the search page for a new invoice; no store-less
-builder route exists). The rows of DESIGN-SPEC §7.5 (PLAN-012g C1): the four figures as KPI
-cards (ledger.views.dashboard._kpis); the Cashflow card, full width (dashboard/_cashflow.html);
-then two .dashboard-row-thirds (two thirds | one third): what needs attention (PLAN-011b D6;
-ledger/_attention.html) beside the mini calendar (dashboard/_mini_calendar.html; its column ends after
-the card, .dashboard-side-fit); the recent
-payments beside the Payment status card (dashboard/_payment_status.html). Then today's run,
-the failed payment attempts, the waived charges with a live invoice, the invoices not sent and
-the last nightly check, each a card. Phones: one column in that order (§7.5's phone order).{% endcomment %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Dashboard</h1><span class="page-date" id="dashboard-date">{{ data.today|day_long }}</span></div><div class="page-actions">{% include "finance/_header_search.html" %}{% if can_act %}<a class="btn btn-primary" id="new-invoice" href="{% url 'ledger:search' %}?intent=new_invoice" data-dialog-open="store-picker">{% icon "plus" 16 %}New invoice</a>{% endif %}</div></div>{% endblock %}
+{% comment %}The dashboard as Design v2 (docs/qa/PLAN-015-design-v2.md §4.2; the owner's mockup
+docs/design/dashboard-v2-dark-laptop.png; DESIGN-SPEC §4 Dashboard, §7.5). The header: "Dashboard" with
+"Collections and balances for <Month YYYY>"; at the right the period control ({% period_control %}, ?period=,
+the four KPIs only), and for billing and above "Download spreadsheet" (ledger:dashboard_export with the page's
+query), "New invoice" (the "Which store?" picker; without the script the search page for a new invoice) and
+the primary "Record payment" (the search page's "Record payment — which store?", each store's Add payment).
+Row 1: the four {% kpi2 %} cards (ledger.services.dashboard_v2.kpis). Row 2: the Collections card
+(dashboard/_collections.html) beside the Operators card (dashboard/_operators.html). Row 3: the Recent activity
+card (dashboard/_activity.html) beside the mini calendar (dashboard/_mini_calendar.html). A cancelled query
+(the statement timeout) shows its one sentence in place of the figures; the mini calendar stays. Phones: KPIs
+two per row, then one column in that order (app.css).{% endcomment %}
+{% block header %}<div class="page-header dashboard-header"><div class="page-title-block"><h1>Dashboard</h1><p class="page-sub" id="dashboard-sub">Collections and balances for {{ month_label }}</p></div><div class="page-actions" id="dashboard-actions">{% period_control period %}{% if can_act %}<a class="btn" id="download-spreadsheet" href="{% url 'ledger:dashboard_export' %}{% if export_query %}?{{ export_query }}{% endif %}">{% icon "file" 16 %}Download spreadsheet</a><a class="btn" id="new-invoice" href="{% url 'ledger:search' %}?intent=new_invoice" data-dialog-open="store-picker">{% icon "plus" 16 %}New invoice</a><a class="btn btn-primary" id="record-payment" href="{% url 'ledger:search' %}?intent=record_payment">{% icon "plus" 16 %}Record payment</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
   {% if can_act %}{% include "ledger/_store_picker.html" %}{% endif %}
-  <section class="kpi-row" id="figures-card" aria-label="Figures">
-    {% for item in kpis %}{% if item.url %}<a class="kpi-link" id="{{ item.element_id }}" href="{{ item.url }}">{% kpi item.label item.value item.note item.tone %}</a>{% else %}<div class="kpi-link" id="{{ item.element_id }}">{% kpi item.label item.value item.note item.tone %}</div>{% endif %}{% endfor %}
-  </section>
-
-  {% include "ledger/dashboard/_cashflow.html" %}
-
-  <div class="dashboard-row-thirds" id="dashboard-row-attention">
-    <div class="dashboard-main">
-      {% include "ledger/_attention.html" with banners=False %}
-    </div>
-    <div class="dashboard-side dashboard-side-fit">
-      {% include "ledger/dashboard/_mini_calendar.html" %}
-    </div>
-  </div>
-
-  <div class="dashboard-row-thirds" id="dashboard-row-payments">
-    <div class="dashboard-main">
-      <section class="card" id="recent-payments" aria-labelledby="recent-payments-heading">
-        <div class="card-header"><h2 id="recent-payments-heading">Recent payments</h2><a class="card-link" id="all-payments" href="{% url 'ledger:payments:list' %}">All payments →</a></div>
-        {% if recent_payments %}
-          {% responsive_table %}
-          <table class="table" id="recent-payments-table">
-            <thead><tr><th>When</th><th>Store</th><th>For</th><th>Method</th><th class="money">Amount</th></tr></thead>
-            <tbody>
-              {% for row in recent_payments %}
-                <tr class="recent-payment">
-                  <td class="recent-on" data-role="meta"><a class="recent-when" href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.when }}</a></td>
-                  <td class="recent-store" data-role="title">{{ row.store|default:"—" }}</td>
-                  <td class="recent-for" data-role="meta">{{ row.paid_for|default:"—" }}</td>
-                  <td class="recent-method" data-role="meta">{{ row.method }}</td>
-                  <td class="money"><strong>{{ row.amount|money }}</strong></td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          {% endresponsive_table %}
-        {% else %}
-          {% include "finance/_empty_state.html" with id="recent-payments-none" icon="banknote" title="No settled payments yet." text="A payment shows here once it settles." only %}
-        {% endif %}
-      </section>
-    </div>
-    <div class="dashboard-side">
-      {% include "ledger/dashboard/_payment_status.html" %}
-    </div>
-  </div>
-
-  <section class="card" id="today-run" aria-label="Today's run">
-  <h2>Today's run</h2>
-  <p id="run-line"><a href="{% url 'ledger:run:today' %}">Daily charges today: {% if run_line %}{{ run_line.created }} created, {{ run_line.skipped }} skipped{% else %}not created yet{% endif %}</a></p>
-  <ul id="run-summary">
-    <li><a href="{% url 'ledger:run:today' %}">Debits due today: <strong id="run-due">{{ data.run.due }}</strong></a></li>
-    <li><a href="{% url 'ledger:run:today' %}">Pending: <strong id="run-pending">{{ data.run.pending }}</strong></a></li>
-    <li><a href="{% url 'ledger:returns:list' %}">Returned, not resolved: <strong id="run-returned">{{ data.run.returned }}</strong></a></li>
-  </ul>
-  </section>
-  <section aria-labelledby="failed-heading" class="card" id="failed-attempts">
-    <h2 id="failed-heading">Failed payment attempts: {{ data.failed_attempts_count }}</h2>
-    {% if failed_attempts %}
-      {% responsive_table %}
-      <table>
-        <thead><tr><th>Invoice</th><th>Operator</th><th>Store</th><th class="money">Amount</th><th>Date</th></tr></thead>
-        <tbody>
-          {% for invoice, store in failed_attempts %}
-            <tr class="failed-attempt">
-              <td>{% if invoice.rent_charge_id %}<a href="{% url 'ledger:charges:detail' pk=invoice.rent_charge_id %}">{{ invoice.invoice_number }}</a>{% elif invoice.one_off_charge_id %}<a href="{% url 'ledger:one_off_charges:detail' pk=invoice.one_off_charge_id %}">{{ invoice.invoice_number }}</a>{% else %}{{ invoice.invoice_number }}{% endif %}</td>
-              <td><a href="{% url 'ledger:operators:detail' pk=invoice.operator_id %}">{{ invoice.operator.display_name }}</a></td>
-              <td>{{ store|default:"—" }}</td>
-              <td class="money">{{ invoice.total|money }}</td>
-              <td>{{ invoice.updated_at|day }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% endresponsive_table %}
-      {% if data.failed_attempts_count > failed_attempts|length %}<p class="muted">The {{ failed_attempts|length }} most recent are shown.</p>{% endif %}
-    {% else %}
-      {% include "finance/_empty_state.html" with id="failed-attempts-none" icon="check" title="No failed attempts." text="Invoices "|add:company.provider_name|add:" could not collect are listed here." only %}
-    {% endif %}
-  </section>
-  {% if data.waived_live %}
-    <section class="card" id="waived-live">
-      <h2>{{ waived_live_heading }}: {{ data.waived_live|length }}</h2>
-      <p class="muted">An admin clears each with "Cancel in {{ company.provider_name }}" on the charge page.</p>
-      <ul>
-        {% for charge in data.waived_live %}
-          <li><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a>{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}, {{ charge.price|money }}, waived {{ charge.waived_at|day }}</li>
-        {% endfor %}
-      </ul>
+  {% if figures %}
+    {% with kpis=figures.kpis %}
+    <section class="kpi-row kpi2-row" id="figures-card" aria-label="Figures">
+      <div id="figure-due">{% url 'ledger:grid:page' as grid_url %}{% kpi2 "calendar" kpis.due.title kpis.due.sub kpis.due.amount|money link=grid_url link_text="Open monthly rent" %}</div>
+      <div id="figure-collected">{% url 'ledger:payments:list' as payments_url %}{% kpi2 "banknote" "Collected" kpis.collected.sub kpis.collected.amount|money kpis.collected.badge kpis.collected.badge_tone payments_url|add:"?"|add:payments_query "See payments" %}</div>
+      <div id="figure-overdue">{% url 'ledger:reports:aging' as aging_url %}{% kpi2 "alert" "Overdue" kpis.overdue.sub kpis.overdue.amount|money link=aging_url link_text="Open aging report" value_tone="unpaid" %}</div>
+      <div id="figure-bank">{% if can_act %}{% url 'banking:page' as bank_url %}{% endif %}{% kpi2 "inbox" "Bank deposits" kpis.bank.sub kpis.bank.amount|money kpis.bank.badge "pending" bank_url "Match deposits" %}</div>
     </section>
-  {% endif %}
-  <section class="card" id="not-sent-card" aria-labelledby="not-sent">
-  <h2 id="not-sent">Invoices created but not sent: {{ data.not_sent_count }}</h2>
-  {% if not_sent %}
-    {% responsive_table %}
-    <table>
-      <thead><tr><th>Invoice</th><th>Operator</th><th>Store</th><th class="money">Amount</th><th>Issued</th><th>Status</th></tr></thead>
-      <tbody>
-        {% for invoice, store in not_sent %}
-          <tr class="not-sent">
-            <td>{% if invoice.rent_charge_id %}<a href="{% url 'ledger:charges:detail' pk=invoice.rent_charge_id %}">{{ invoice.invoice_number }}</a>{% elif invoice.one_off_charge_id %}<a href="{% url 'ledger:one_off_charges:detail' pk=invoice.one_off_charge_id %}">{{ invoice.invoice_number }}</a>{% else %}{{ invoice.invoice_number }}{% endif %}</td>
-            <td><a href="{% url 'ledger:operators:detail' pk=invoice.operator_id %}">{{ invoice.operator.display_name }}</a></td>
-            <td>{{ store|default:"—" }}</td>
-            <td class="money">{{ invoice.total|money }}</td>
-            <td>{{ invoice.issue_date|day }}</td>
-            <td>{{ invoice.get_internal_status_display }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endresponsive_table %}
+    {% endwith %}
+    <div class="dashboard-row-v2" id="dashboard-row-collections">
+      {% include "ledger/dashboard/_collections.html" with collections=figures.collections %}
+      {% include "ledger/dashboard/_operators.html" with tiles=figures.tiles %}
+    </div>
   {% else %}
-    {% include "finance/_empty_state.html" with id="not-sent-none" icon="file" title="Nothing waiting to be sent." text="An invoice created but not sent shows here." only %}
+    <p class="warning" id="dashboard-too-slow" role="status">{{ too_slow }}</p>
   {% endif %}
-  </section>
-  <section class="card" id="last-reconciliation-card" aria-label="Last nightly check">
-  <h2>Last nightly check</h2>
-  {% if data.last_reconciliation %}
-    <p id="last-reconciliation"><a href="{% url 'ledger:reconciliation:page' %}">{{ data.last_reconciliation.get_status_display }}, started {{ data.last_reconciliation.started_at|moment }}</a></p>
-  {% else %}
-    <p id="last-reconciliation" class="muted">No nightly check has run yet.</p>
-  {% endif %}
-  </section>
+  <div class="dashboard-row-activity" id="dashboard-row-activity">
+    <div class="dashboard-main">{% if figures %}{% include "ledger/dashboard/_activity.html" with activity=figures.activity %}{% endif %}</div>
+    <div class="dashboard-side dashboard-side-fit">{% include "ledger/dashboard/_mini_calendar.html" %}</div>
+  </div>
 {% endblock %}
 {% block scripts %}{% if can_act %}<script src="{% static 'ledger/store_picker.js' %}" defer></script>{% endif %}<script src="{% static 'ledger/dashboard.js' %}" defer></script>{% endblock %}

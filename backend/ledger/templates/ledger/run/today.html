@@ -4,7 +4,7 @@
 {% block title %}Daily charges, {{ run.day|day }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><span>Admin</span> <span aria-hidden="true">›</span></nav><h1>Daily charges</h1><span class="page-date" id="run-date">{{ run.day|day_long }}</span></div>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form><form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
-  {% comment %}The page's frame (DESIGN-SPEC §4 Daily charges, daily-charges-laptop.png; PLAN-012f-b E-2): the result strip of the latest run (green; yellow when it skipped a lease; red when the latest "Update from …" failed), the four figures, the "Due today" card with its read-only filter (?due=), "Skipped today" beside "Recent runs", then the latest run's created charges, the repeating debits and the insurance due. No per-row Confirm and no row actions (the owner's exclusion, plan D17).{% endcomment %}
+  {% comment %}The page's frame (DESIGN-SPEC §4 Daily charges, daily-charges-laptop.png; PLAN-012f-b E-2): the result strip of the latest run (green; yellow when it skipped a lease; red when the latest "Update from …" failed), the four figures, the "Due today" card with its read-only filter (?due=), "Skipped today" beside "Recent runs", then the latest run's created charges, the repeating debits and the insurance due; then the cards that left the dashboard (PLAN-015 Batch 1, ledger/run/_operations.html). No per-row Confirm and no row actions (the owner's exclusion, plan D17).{% endcomment %}
   {% if not health.ok %}
     <ul class="messages" id="provider-banner">
       {% for text in health.messages %}<li class="error" role="alert">{{ text }}</li>{% endfor %}
@@ -152,6 +152,8 @@
   {% endresponsive_table %}
   <p class="muted">Insurance charges are created by the yearly insurance charges run on or after each anniversary. Insurance autopay is a later step.</p>
   </section>
+
+  {% include "ledger/run/_operations.html" %}
 
   <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. {{ company.provider_name }}'s autopay makes the invoices; "Update from {{ company.provider_name }}" links them to these charges. Nothing here debits anyone. Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
 {% endblock %}

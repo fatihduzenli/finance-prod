@@ -175,7 +175,8 @@ def test_a_run_row_with_unreadable_values_is_read_safely() -> None:
 
 def test_the_dashboard_line_sums_todays_runs_and_links_the_run_page() -> None:
     viewer, _ = client_for(Role.VIEWER)
-    html = body(viewer, "/")
+    # PLAN-015 Batch 1 re-pin: the Today's run card moved from the dashboard to Daily charges.
+    html = body(viewer, reverse("ledger:run:today"))
     assert 'id="run-line"' in html and "Daily charges today: not created yet<" in html
     line = html.split('id="run-line"')[1].split("</p>")[0]
     assert f'href="{reverse("ledger:run:today")}"' in line
@@ -187,7 +188,7 @@ def test_the_dashboard_line_sums_todays_runs_and_links_the_run_page() -> None:
     tick()  # creates 2 (catch-up), skips the paused lease due today
     billing, _ = client_for(Role.BILLING)
     billing.post(reverse("ledger:run:create_charges"), {})  # creates nothing more
-    html = body(viewer, "/")
+    html = body(viewer, reverse("ledger:run:today"))
     assert "Daily charges today: 2 created, 1 skipped" in html
 
 

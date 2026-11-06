@@ -1,0 +1,14 @@
+{% load components money %}{% comment %}The Operators card (PLAN-015 Batch 1; ledger.services.dashboard_v2.operator_tiles): the head
+"OPERATORS" with "All operators ›"; a 2 × 2 grid of tiles (one column on a phone), each a link to its operator page:
+the {% avatar_tile %} and the name (one line, an ellipsis), the open balance 20/700 (red above zero), "<n> stores"
+and the {% chip %} (✓ Paid up, Overdue <d> days, Partial, Promise · <day>, Due · <day>). Context: tiles.{% endcomment %}
+<section class="card operators-card" id="operators-card" aria-labelledby="operators-heading">
+  {% url 'ledger:operators:list' as operators_url %}<div class="card-head"><p class="section-label" id="operators-heading">Operators</p><a class="card-link" id="all-operators" href="{{ operators_url }}">All operators ›</a></div>
+  {% if tiles %}
+    <ul class="operator-tiles" id="operator-tiles">
+      {% for tile in tiles %}<li><a class="operator-tile" href="{{ tile.url }}"><span class="operator-tile-head">{% avatar_tile tile.name %}<span class="operator-tile-name">{{ tile.name }}</span></span><span class="operator-tile-balance{% if tile.balance > 0 %} tone-unpaid{% endif %}">{{ tile.balance|money }}</span><span class="operator-tile-stores">{{ tile.stores }} store{{ tile.stores|pluralize }}</span>{% chip tile.tone tile.chip %}</a></li>{% endfor %}
+    </ul>
+  {% else %}
+    {% include "finance/_empty_state.html" with id="operators-none" icon="operators" title="No operator has a lease today." text="An operator with a lease in effect shows here." only %}
+  {% endif %}
+</section>

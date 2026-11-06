@@ -234,13 +234,13 @@ def test_the_dashboard_figures_are_kpi_cards() -> None:
     a_rent_charge(lease, date(2026, 9, 1), RentChargeStatus.UNPAID)
     html = page(client_for(Role.VIEWER)[0], "/")
     figures = section(html, 'id="figures-card"', "</section>")
-    assert figures.count('<div class="kpi">') == 4
-    # PLAN-012f D7: Unpaid balances (red), with its stores and those overdue.
-    assert (
-        '<span class="kpi-label">Unpaid balances</span><span class="kpi-value tone-unpaid">'
-    ) in figures
-    assert '<span class="kpi-note">1 store · 1 overdue</span>' in figures
-    assert '<a class="kpi-link" id="figure-outstanding" href="/arrears/">' in figures
+    # PLAN-015 Batch 1 re-pin: Design v2's four {% kpi2 %} cards; Overdue (red) with its
+    # stores and the oldest days, linked to the Aging report.
+    assert figures.count('<div class="kpi2">') == 4
+    overdue = section(figures, 'id="figure-overdue"', "</a>")
+    assert '<p class="kpi2-title">Overdue</p><p class="kpi2-sub">1 store · oldest' in overdue
+    assert '<span class="kpi2-value tone-unpaid">$3,500.00</span>' in overdue
+    assert '<a class="kpi2-link" href="/reports/aging/">' in overdue
 
 
 # --- The progress bar -------------------------------------------------------------------------

@@ -829,35 +829,28 @@ def test_with_done_marks_the_steps_before_the_current_one() -> None:
 
 def test_the_dashboard_is_cards_with_the_figures_then_the_attention_list() -> None:
     html = body(client_for(Role.VIEWER)[0].get("/"))
-    content = html[html.index('<div class="page-header"><div class="page-title"><h1>Dashboard') :]
+    content = html[html.index('<div class="page-header dashboard-header">') :]
     cards = re.findall(
         r'<section class="([^"]*\bcard\b[^"]*)"[^>]*?(?:id="([^"]+)")?[^>]*>', content
     )
-    assert len(cards) >= 5
-    first = content.index('class="card')
-    # PLAN-012f D7, re-pinned by PLAN-012f-b A-3 and PLAN-012g C1 (DESIGN-SPEC §7.5): the four
-    # figures, the Cashflow card, the attention card beside the mini calendar, the recent payments
-    # beside Payment status (PLAN-014 A2: the coming-up and collection cards are gone), then the
-    # run and the other lists.
-    assert content.index('id="figures-card"') < content.index('id="attention-none"')
-    assert content.index('id="attention-none"') >= first  # the first card is the attention card
-    assert content.index('id="attention-none"') < content.index('id="today-run"')
+    assert len(cards) >= 4
+    # PLAN-015 Batch 1 re-pin (the owner's mockup; DESIGN-SPEC §7.5): the four figures, the
+    # Collections card beside the Operators card, the Recent activity card beside the mini
+    # calendar; the Needs attention card, Recent payments, Payment status and the run's cards
+    # are gone from the page (the last ones live on Admin › Daily charges).
     order = [
         content.index(f'id="{name}"')
         for name in (
             "figures-card",
-            "cashflow-card",
-            "attention",
+            "collections-card",
+            "operators-card",
+            "activity-card",
             "mini-calendar",
-            "recent-payments",
-            "payment-status",
-            "today-run",
-            "failed-attempts",
-            "not-sent-card",
-            "last-reconciliation-card",
         )
     ]
     assert order == sorted(order)
+    for gone in ("attention", "recent-payments", "payment-status", "today-run", "cashflow-card"):
+        assert f'id="{gone}"' not in content
     assert "<style>" not in content  # the cards' styles are app.css's
 
 
@@ -1056,7 +1049,8 @@ def test_kpi2_without_its_optional_parts_and_with_the_red_figure() -> None:
     assert "kpi2-sub" not in html and "kpi2-pill" not in html and "<a " not in html
 
 
-@pytest.mark.parametrize("tone", ["paid", "pending", "neutral"])
+# PLAN-015 Batch 1 re-pin: the unpaid tone joins for the Collected card's "↓ x%".
+@pytest.mark.parametrize("tone", ["paid", "unpaid", "pending", "neutral"])
 def test_kpi2_badge_tones(tone: str) -> None:
     html = rendered("{% kpi2 'banknote' 'Deposits' badge='3 unmatched' badge_tone=t %}", t=tone)
     assert f'<span class="kpi2-pill kpi2-pill-{tone}">3 unmatched</span>' in html
@@ -1067,7 +1061,7 @@ def test_kpi2_badge_tones(tone: str) -> None:
     [
         "value_tone='paid'",
         "value_tone='red'",
-        "badge='x' badge_tone='unpaid'",
+        "badge='x' badge_tone='overdue'",
         "badge='x' badge_tone=''",
     ],
 )
@@ -1224,7 +1218,7 @@ def test_the_new_components_take_their_colours_from_documented_pairs() -> None:
         assert f"background: var(--{tone}-bg); color: var(--{tone}-text);" in rule(
             f".status-chip-{tone}"
         ), tone
-    for tone in ("paid", "pending", "neutral"):
+    for tone in ("paid", "unpaid", "pending", "neutral"):
         assert f"background: var(--{tone}-bg); color: var(--{tone}-text);" in rule(
             f".kpi2-pill-{tone}"
         ), tone

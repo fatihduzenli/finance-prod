@@ -1,8 +1,8 @@
 """PLAN-014 Batch A in a browser (Fable): the search + Filters component on the stores list
 (results as you type without a navigation, the panel with Apply and Clear, the count and the
-chips, the bottom sheet on the phone, Escape), the Payment status card's Weekly | Monthly pill
-(the choice saved and remembered, the step links), and the payments tiles' tooltip on focus. The
-QA shots (``QA_SHOTS_DIR``) come from here, in both themes."""
+chips, the bottom sheet on the phone, Escape) and the payments tiles' tooltip on focus (PLAN-015
+Batch 1 removed the Payment status card and its pill test). The QA shots (``QA_SHOTS_DIR``) come
+from here, in both themes."""
 
 from __future__ import annotations
 
@@ -151,35 +151,6 @@ def test_the_phone_panel_is_a_bottom_sheet_with_clear_and_apply(
     clear.tap()
     page.wait_for_url(lambda url: "state=" not in url)
     assert "Filters · " not in page.locator("#filters .filters-toggle").inner_text()
-
-
-@pytest.mark.parametrize("theme", ["light", "dark"])
-def test_the_payment_status_pill_saves_the_choice_and_steps(
-    live_server: LiveServer, laptop: BrowserContext, theme: str
-) -> None:
-    a_world()
-    page = signed_in(laptop, live_server, f"e2e-14a-period-{theme}", theme, Role.VIEWER)
-    card = page.locator("#payment-status")
-    weekly = card.locator("button[aria-pressed]", has_text="Weekly")
-    monthly = card.locator("button[aria-pressed]", has_text="Monthly")
-    assert weekly.get_attribute("aria-pressed") == "true"
-    monthly.click()
-    page.wait_for_url(re.compile(r"ps=monthly"))
-    assert (
-        card.locator("button[aria-pressed]", has_text="Monthly").get_attribute("aria-pressed")
-        == "true"
-    )
-    label = card.locator("#payment-status-label").inner_text()
-    assert label.endswith(str(date.today().year)) or label  # "October 2026"
-    shot(page, f"dashboard-period-monthly-{theme}-laptop")
-    page.goto(f"{live_server.url}/")  # remembered without the query
-    assert (
-        card.locator("button[aria-pressed]", has_text="Monthly").get_attribute("aria-pressed")
-        == "true"
-    )
-    card.locator("#payment-status-next").click()
-    page.wait_for_url(re.compile(r"ps_at="))
-    assert card.locator("#payment-status-label").inner_text() != label
 
 
 def test_the_tiles_tooltip_opens_on_focus(live_server: LiveServer, laptop: BrowserContext) -> None:

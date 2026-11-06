@@ -305,9 +305,10 @@ def test_the_route_is_read_only_and_the_box_is_in_the_nav(viewer: Client) -> Non
     assert reverse("ledger:search") == "/search/"
     assert "ledger:search" in registry.READ_ONLY_ROUTE_NAMES
     assert registry.rule_for("ledger:search") is None
-    page = text(viewer.get("/"))
-    # PLAN-012f D3: the box sits in the dashboard's page header (and the stores list's and
-    # the grid's); the phone bar's search opens the same GET form on every page.
+    # PLAN-012f D3: the box sits in the stores list's page header (and the grid's; PLAN-015
+    # Batch 1 re-pin: no longer the dashboard's); the phone bar's search opens the same GET
+    # form on every page.
+    page = text(viewer.get("/stores/"))
     start = page.index('<header class="page-header-bar" id="page-header">')
     nav = page[start : page.index("</header>", start)]
     assert (

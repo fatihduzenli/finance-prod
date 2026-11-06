@@ -201,7 +201,8 @@ def test_the_remedy_deletes_the_invoice_through_the_worker_and_keeps_the_waive(
     client, admin = client_for(Role.ADMIN)
     page = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
     assert 'id="delete-invoice"' in page
-    home = client.get("/").content.decode()
+    # PLAN-015 Batch 1 re-pin: the card moved from the dashboard to Daily charges.
+    home = client.get("/run/").content.decode()
     assert (
         "Waived with an invoice still open in Stax: 1" in home
         and f"/one-off-charges/{charge.pk}/" in home
@@ -233,7 +234,7 @@ def test_the_remedy_deletes_the_invoice_through_the_worker_and_keeps_the_waive(
     assert deleted.after["invoice_number"] == invoice.invoice_number
     assert ref not in str(deleted.after)  # masked
     assert service.waived_with_live_invoice() == []
-    assert "Waived with an invoice still open" not in client.get("/").content.decode()
+    assert "Waived with an invoice still open" not in client.get("/run/").content.decode()
     assert (
         'id="delete-invoice"' not in client.get(f"/one-off-charges/{charge.pk}/").content.decode()
     )

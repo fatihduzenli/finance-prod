@@ -487,6 +487,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # The home page (dashboard), the month grid and the arrears list, with their CSV
         # exports: any verified role (PLAN-011 D1 to D3, D10).
         "ledger:home",
+        # The dashboard's spreadsheet (PLAN-015 Batch 1): GET only; the view requires billing.
+        "ledger:dashboard_export",
         "ledger:grid:page",
         "ledger:grid:export",
         "ledger:arrears:page",

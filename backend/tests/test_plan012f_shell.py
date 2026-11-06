@@ -471,7 +471,8 @@ def test_every_page_fills_the_header_with_its_title_and_the_search_box_where_it_
         html = body(client.get(path))
         header = element(html, "page-header", "</header>")
         assert f"<h1>{title}</h1>" in header, path
-        assert ('id="nav-search"' in header) is (path in ("/", "/stores/", "/grid/")), path
+        # PLAN-015 Batch 1 re-pin: the dashboard's header has no search box (the mockup).
+        assert ('id="nav-search"' in header) is (path in ("/stores/", "/grid/")), path
         main = html[html.index("<main") : html.index("</main>")]
         assert "<h1>" not in main, path  # the title is in the header only
 

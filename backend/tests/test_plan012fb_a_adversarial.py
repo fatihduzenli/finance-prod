@@ -153,19 +153,11 @@ def test_a_hostile_range_or_calendar_month_never_breaks_the_dashboard_or_writes(
     assert response.status_code == 200
     body = response.content.decode()
     assert MARKUP not in body
-    assert 'id="cashflow-card"' in body and 'id="payment-status"' in body
+    # PLAN-015 Batch 1 re-pin: ?range= is no longer read (the Cashflow and Payment status cards
+    # are gone); the page draws its cards whatever it carries.
+    assert 'id="collections-card"' in body and 'id="figures-card"' in body
     assert 'id="mini-calendar"' in body
     assert row_counts() == before
-
-
-def test_a_swapped_custom_range_shows_one_message_and_no_figures() -> None:
-    from ledger.services import dashboard
-
-    a_world()
-    billing, _ = client_for(Role.BILLING)
-    body = billing.get("/?range=custom&from=2026-12&to=2026-01").content.decode()
-    assert body.count(dashboard.RANGE_MESSAGE) >= 1
-    assert 'id="cashflow-totals"' not in body
 
 
 def test_a_viewer_reads_the_cards_and_the_range_is_read_only() -> None:
@@ -173,7 +165,8 @@ def test_a_viewer_reads_the_cards_and_the_range_is_read_only() -> None:
     viewer, _ = client_for(Role.VIEWER)
     before = row_counts()
     body = viewer.get("/?range=3m").content.decode()
-    for element in ("cashflow-card", "payment-status", "mini-calendar"):
+    # PLAN-015 Batch 1 re-pin: Design v2's cards.
+    for element in ("figures-card", "collections-card", "activity-card", "mini-calendar"):
         assert f'id="{element}"' in body, element
     assert viewer.post("/?range=3m", {"range": "12m"}).status_code in (403, 405)
     assert row_counts() == before
@@ -197,27 +190,6 @@ def test_markup_in_a_calendar_note_is_escaped_in_the_mini_calendar() -> None:
     assert "Visit &lt;script&gt;" in body
 
 
-def test_the_cashflow_card_never_counts_a_missing_cost_as_zero() -> None:
-    from datetime import date
-    from decimal import Decimal
-
-    from ledger.services import dashboard
-    from tests.receivables_helpers import a_payment, a_rent_charge
-
-    store = a_world()  # the store has no cost row
-    lease = store.leases.get()
-    charge = a_rent_charge(lease, date(2026, 10, 1))
-    a_payment(charge, "100.00", date(2026, 10, 6))
-    found = dashboard.cashflow(
-        dashboard.Range("custom", "Oct 2026", date(2026, 10, 1), date(2026, 10, 1))
-    )
-    [month] = [row for row in found.months if row.month == date(2026, 10, 1)]
-    assert month.income == Decimal("100.00")
-    assert month.expenses is None  # unknown, never 0.00
-    assert found.stores_without_cost >= 1
-    assert found.expenses is None  # the one store has no cost row: unknown, not zero
-
-
 def test_the_dashboard_query_count_stays_within_its_budget(
     django_assert_max_num_queries: Any,
 ) -> None:
@@ -228,6 +200,10 @@ def test_the_dashboard_query_count_stays_within_its_budget(
     # Owner 2026-11-01, the mini calendar's "Next 7 days": +3 when the lease's debit day is in
     # the next seven days (the stores, the rent charges, the rent in effect; 81 -> 84 measured
     # on SQLite), so 83 -> 86; then +3, its promises, one-off charges and insurance charges
-    # (Fable's review; 84 -> 87 measured on SQLite), so 86 -> 89.
-    with django_assert_max_num_queries(89):
+    # (Fable's review; 84 -> 87 measured on SQLite), so 86 -> 89. PLAN-015 Batch 1 re-pin: the
+    # four KPIs, the Collections bars, the operator tiles and the activity feed replace the
+    # Cashflow, Payment status, Needs attention and Recent payments cards (101 measured on
+    # SQLite), so 89 -> 103; Fable's gate: the reports' rows and the open balances read once a
+    # request, 79 measured, so 103 -> 81.
+    with django_assert_max_num_queries(81):
         assert billing.get("/?range=12m").status_code == 200

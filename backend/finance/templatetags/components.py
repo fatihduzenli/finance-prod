@@ -302,7 +302,7 @@ def avatar(letter: object, family: str = NEUTRAL) -> SafeString:
 #: Design v2's components (docs/qa/PLAN-015-design-v2.md §4.1; DESIGN-SPEC §3).
 #: ``{% kpi2 %}``'s figure tones and its badge's tones.
 KPI2_VALUE_TONES: tuple[str, ...] = (UNPAID,)
-KPI2_BADGE_TONES: tuple[str, ...] = (PAID, PENDING, NEUTRAL)
+KPI2_BADGE_TONES: tuple[str, ...] = (PAID, UNPAID, PENDING, NEUTRAL)
 #: ``{% period_control %}``'s periods, in order, with their labels; the first is the default.
 PERIODS: tuple[tuple[str, str], ...] = (
     ("month", "This month"),
@@ -359,9 +359,9 @@ def kpi2(
     value_tone: str = "",
 ) -> dict[str, Any]:
     """Design v2's KPI card: the icon in a tinted square, the title and its sub-line, the
-    figure (``value_tone="unpaid"``: red), an optional pill badge after it (paid, pending or
-    neutral) and a footer link with an arrow (a path of this site only; anything else draws
-    no link). An unknown tone is a template mistake (``ValueError``)."""
+    figure (``value_tone="unpaid"``: red), an optional pill badge after it (paid, unpaid,
+    pending or neutral) and a footer link with an arrow (a path of this site only; anything
+    else draws no link). An unknown tone is a template mistake (``ValueError``)."""
     if value_tone and value_tone not in KPI2_VALUE_TONES:
         raise ValueError(f"unknown kpi2 value tone {value_tone!r}")
     if badge_tone not in KPI2_BADGE_TONES:

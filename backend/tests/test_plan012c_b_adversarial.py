@@ -141,7 +141,8 @@ def test_the_attention_list_never_shows_two_promises_for_one_bucket_even_when_fo
     items = [i for i in attention.attention(TODAY).items if i.kind == attention.BROKEN_PROMISE]
     assert len(items) == 1
     viewer, _ = client_for(Role.VIEWER)
-    assert viewer.get("/").content.decode().count("not kept") == 1
+    # PLAN-015 Batch 1 re-pin: the feed's Needs attention kind lists the items.
+    assert viewer.get("/?kind=attention").content.decode().count("not kept") == 1
 
 
 # --- the data migration is safe to run twice ------------------------------------------------------

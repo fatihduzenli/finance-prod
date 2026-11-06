@@ -1,0 +1,77 @@
+{% load components money responsive dates %}{% comment %}The operational cards moved from the dashboard (PLAN-015 Batch 1, the owner's decision 1), under the Daily charges page's own content: Today's run (the run line, the debits due today, the pending ones and the returns not resolved), the failed payment attempts, the waived charges whose invoice is still live (only when there are any), the invoices created but not sent and the last nightly check, each a card as on the dashboard before (same ids). Context: ops (ledger.services.receivables.dashboard), run_line, failed_attempts, not_sent, waived_live_heading, company.{% endcomment %}
+  <section class="card" id="today-run" aria-label="Today's run">
+  <h2>Today's run</h2>
+  <p id="run-line"><a href="{% url 'ledger:run:today' %}">Daily charges today: {% if run_line %}{{ run_line.created }} created, {{ run_line.skipped }} skipped{% else %}not created yet{% endif %}</a></p>
+  <ul id="run-summary">
+    <li><a href="{% url 'ledger:run:today' %}">Debits due today: <strong id="run-due">{{ ops.run.due }}</strong></a></li>
+    <li><a href="{% url 'ledger:run:today' %}">Pending: <strong id="run-pending">{{ ops.run.pending }}</strong></a></li>
+    <li><a href="{% url 'ledger:returns:list' %}">Returned, not resolved: <strong id="run-returned">{{ ops.run.returned }}</strong></a></li>
+  </ul>
+  </section>
+  <section aria-labelledby="failed-heading" class="card" id="failed-attempts">
+    <h2 id="failed-heading">Failed payment attempts: {{ ops.failed_attempts_count }}</h2>
+    {% if failed_attempts %}
+      {% responsive_table %}
+      <table>
+        <thead><tr><th>Invoice</th><th>Operator</th><th>Store</th><th class="money">Amount</th><th>Date</th></tr></thead>
+        <tbody>
+          {% for invoice, store in failed_attempts %}
+            <tr class="failed-attempt">
+              <td>{% if invoice.rent_charge_id %}<a href="{% url 'ledger:charges:detail' pk=invoice.rent_charge_id %}">{{ invoice.invoice_number }}</a>{% elif invoice.one_off_charge_id %}<a href="{% url 'ledger:one_off_charges:detail' pk=invoice.one_off_charge_id %}">{{ invoice.invoice_number }}</a>{% else %}{{ invoice.invoice_number }}{% endif %}</td>
+              <td><a href="{% url 'ledger:operators:detail' pk=invoice.operator_id %}">{{ invoice.operator.display_name }}</a></td>
+              <td>{{ store|default:"—" }}</td>
+              <td class="money">{{ invoice.total|money }}</td>
+              <td>{{ invoice.updated_at|day }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endresponsive_table %}
+      {% if ops.failed_attempts_count > failed_attempts|length %}<p class="muted">The {{ failed_attempts|length }} most recent are shown.</p>{% endif %}
+    {% else %}
+      {% include "finance/_empty_state.html" with id="failed-attempts-none" icon="check" title="No failed attempts." text="Invoices "|add:company.provider_name|add:" could not collect are listed here." only %}
+    {% endif %}
+  </section>
+  {% if ops.waived_live %}
+    <section class="card" id="waived-live">
+      <h2>{{ waived_live_heading }}: {{ ops.waived_live|length }}</h2>
+      <p class="muted">An admin clears each with "Cancel in {{ company.provider_name }}" on the charge page.</p>
+      <ul>
+        {% for charge in ops.waived_live %}
+          <li><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a>{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}, {{ charge.price|money }}, waived {{ charge.waived_at|day }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+  <section class="card" id="not-sent-card" aria-labelledby="not-sent">
+  <h2 id="not-sent">Invoices created but not sent: {{ ops.not_sent_count }}</h2>
+  {% if not_sent %}
+    {% responsive_table %}
+    <table>
+      <thead><tr><th>Invoice</th><th>Operator</th><th>Store</th><th class="money">Amount</th><th>Issued</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for invoice, store in not_sent %}
+          <tr class="not-sent">
+            <td>{% if invoice.rent_charge_id %}<a href="{% url 'ledger:charges:detail' pk=invoice.rent_charge_id %}">{{ invoice.invoice_number }}</a>{% elif invoice.one_off_charge_id %}<a href="{% url 'ledger:one_off_charges:detail' pk=invoice.one_off_charge_id %}">{{ invoice.invoice_number }}</a>{% else %}{{ invoice.invoice_number }}{% endif %}</td>
+            <td><a href="{% url 'ledger:operators:detail' pk=invoice.operator_id %}">{{ invoice.operator.display_name }}</a></td>
+            <td>{{ store|default:"—" }}</td>
+            <td class="money">{{ invoice.total|money }}</td>
+            <td>{{ invoice.issue_date|day }}</td>
+            <td>{{ invoice.get_internal_status_display }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endresponsive_table %}
+  {% else %}
+    {% include "finance/_empty_state.html" with id="not-sent-none" icon="file" title="Nothing waiting to be sent." text="An invoice created but not sent shows here." only %}
+  {% endif %}
+  </section>
+  <section class="card" id="last-reconciliation-card" aria-label="Last nightly check">
+  <h2>Last nightly check</h2>
+  {% if ops.last_reconciliation %}
+    <p id="last-reconciliation"><a href="{% url 'ledger:reconciliation:page' %}">{{ ops.last_reconciliation.get_status_display }}, started {{ ops.last_reconciliation.started_at|moment }}</a></p>
+  {% else %}
+    <p id="last-reconciliation" class="muted">No nightly check has run yet.</p>
+  {% endif %}
+  </section>

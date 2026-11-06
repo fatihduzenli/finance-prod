@@ -52,7 +52,7 @@ def test_a_dashboard_with_no_data_renders_every_card_and_no_broken_number(role: 
     for word in ("nan", "inf", "NaN", "Infinity"):
         assert word not in words, word
     assert "ZeroDivision" not in text and "Decimal(" not in text
-    assert body.count('class="kpi"') >= 4
+    assert body.count('class="kpi2"') >= 4  # PLAN-015 Batch 1 re-pin: Design v2's cards
     assert "%" not in body.split('class="progress')[0][-200:] or "—" in text
     # No bar when nothing is billed; no percentage above 100 anywhere.
     for match in re.findall(r"(\d+(?:\.\d+)?)\s*%", text):
@@ -112,21 +112,21 @@ def test_a_viewer_sees_the_attention_rows_but_no_action_button() -> None:
     )
     a_rent_charge(lease, date(2026, 7, 1), status=RentChargeStatus.UNPAID, due="2000.00")
     viewer, _ = client_for(Role.VIEWER)
-    body = viewer.get("/").content.decode()
+    # PLAN-015 Batch 1 re-pin: the items are the feed's Needs attention kind, whose rows carry
+    # no action button for any role: each row links to the item's page.
+    body = viewer.get("/?kind=attention").content.decode()
     assert "Overdue Co" in body
-    section = body[body.index("Overdue Co") - 2000 : body.index("Overdue Co") + 2000]
-    assert "<form" not in section
+    start = body.rindex("<tr", 0, body.index("Overdue Co", body.index('id="activity-table"')))
+    section = body[start : body.index("</tr>", start)]
+    assert "<form" not in section and 'class="btn' not in section
     assert not re.search(
         r'class="btn[^"]*"[^>]*href="[^"]*(payments/new|contacts/new|lease|end)', section
     )
     billing, _ = client_for(Role.BILLING)
-    body = billing.get("/").content.decode()
-    row = (
-        body[body.index("Overdue Co") : body.index("</tr>", body.index("Overdue Co"))]
-        if "</tr>" in body
-        else body
-    )
-    assert 'class="btn' in row or "btn-sm" in row
+    body = billing.get("/?kind=attention").content.decode()
+    start = body.rindex("<tr", 0, body.index("Overdue Co", body.index('id="activity-table"')))
+    row = body[start : body.index("</tr>", start)]
+    assert 'class="btn' not in row and '<a href="' in row
 
 
 # --- a store with nothing to show in its header --------------------------------------------------

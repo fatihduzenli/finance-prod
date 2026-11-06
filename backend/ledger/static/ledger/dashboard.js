@@ -1,26 +1,60 @@
-// The dashboard's small behaviours (docs/qa/PLAN-012f-b-staging-review.md D3, D6; PLAN-012g
-// C2, C3). The root gets the class "js" first, so that the style sheet hides the mini
-// calendar's script-free list. Each Cashflow card's range select (the wide card's and,
-// without ?range=, the phone's) submits its GET form on change, except Custom, which shows the
-// From and To selects and their Show button. A tap on a mini calendar day toggles its popover
+// The dashboard's small behaviours (docs/qa/PLAN-015-design-v2.md §4.2; PLAN-012f-b D6;
+// PLAN-012g C3). The root gets the class "js" first, so that the style sheet hides the mini
+// calendar's script-free list. The Collections chart: hovering a bar (.collection-bar) shows
+// #collections-tooltip over it with the bar's data-label, data-collected and data-due, the other
+// bars dimmed (.is-hovering, .is-hover); leaving the chart hides it (each bar's <title> is the
+// tooltip without the script). The Recent activity kind select submits its GET form on change
+// (a Show button without the script). A tap on a mini calendar day toggles its popover
 // and rings the day (is-selected; hover and focus show the popover through the style sheet);
 // one is open at a time. The tapped day's list is moved (not copied) into #mini-panel in the
 // place of the "Next 7 days" list (#mini-upcoming-body, hidden meanwhile; owner 2026-11-01),
 // headed "Wed, Oct 28 · tapped" with "Back to next 7 days", and moved back when another day
 // or the same one is tapped, or Back is pressed; at 768 px and under the popover is not shown.
-// Without the script the form has its Show button, the popover opens on hover and focus, and
-// a phone lists the days in details.
+// Without the script the popover opens on hover and focus, and a phone lists the days in
+// details.
 document.documentElement.classList.add("js");
 (function () {
   "use strict";
-  Array.prototype.slice.call(document.querySelectorAll("form.range-form")).forEach(function (form) {
-    var select = form.querySelector('select[name="range"]');
-    if (!select) { return; }
-    select.addEventListener("change", function () {
-      if (select.value === "custom") { form.classList.add("is-custom"); return; }
-      form.submit();
+  var chart = document.getElementById("collections-chart");
+  var tooltip = document.getElementById("collections-tooltip");
+  function line(word, value) {
+    var row = document.createElement("span");
+    row.appendChild(document.createTextNode(word));
+    var figure = document.createElement("b");
+    figure.textContent = value;
+    row.appendChild(figure);
+    return row;
+  }
+  if (chart && tooltip) {
+    Array.prototype.slice.call(chart.querySelectorAll(".collection-bar")).forEach(function (bar) {
+      bar.addEventListener("mouseenter", function () {
+        while (tooltip.firstChild) { tooltip.removeChild(tooltip.firstChild); }
+        var head = document.createElement("strong");
+        head.textContent = bar.getAttribute("data-label") || "";
+        tooltip.appendChild(head);
+        tooltip.appendChild(line("Collected", bar.getAttribute("data-collected") || ""));
+        tooltip.appendChild(line("Due", bar.getAttribute("data-due") || ""));
+        tooltip.hidden = false;
+        var frame = chart.getBoundingClientRect();
+        var box = bar.getBoundingClientRect();
+        var left = box.left - frame.left + chart.scrollLeft + box.width / 2 - tooltip.offsetWidth / 2;
+        var widest = chart.scrollWidth - tooltip.offsetWidth;
+        tooltip.style.left = Math.max(0, Math.min(left, widest)) + "px";
+        tooltip.style.top = Math.max(0, box.top - frame.top - tooltip.offsetHeight - 6) + "px";
+        chart.classList.add("is-hovering");
+        bar.classList.add("is-hover");
+      });
+      bar.addEventListener("mouseleave", function () { bar.classList.remove("is-hover"); });
     });
-  });
+    chart.addEventListener("mouseleave", function () {
+      tooltip.hidden = true;
+      chart.classList.remove("is-hovering");
+    });
+  }
+  var kind = document.getElementById("activity-kind");
+  if (kind && kind.form) {
+    kind.addEventListener("change", function () { kind.form.submit(); });
+  }
   var panel = document.getElementById("mini-panel");
   var upcoming = document.getElementById("mini-upcoming-body");
   var phone = window.matchMedia ? window.matchMedia("(max-width: 768px)") : null;

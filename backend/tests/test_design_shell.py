@@ -146,7 +146,8 @@ def test_every_main_page_renders_in_the_shell(
     header = html[
         html.index('id="page-header"') : html.index("</header>", html.index('id="page-header"'))
     ]
-    assert ('id="nav-search"' in header) is (path in ("/", "/stores/", "/grid/")), path
+    # PLAN-015 Batch 1 re-pin: the dashboard's header has no search box (the mockup).
+    assert ('id="nav-search"' in header) is (path in ("/stores/", "/grid/")), path
     nav = nav_of(html)
     for label in NAV_ITEMS:
         assert f">{label}<" in nav, label
