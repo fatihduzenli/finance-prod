@@ -976,6 +976,8 @@ class LeaseEditForm(_LeaseFormBase):
             widget=forms.RadioSelect,
             error_messages={"invalid_choice": CHANNEL_REFUSED},
         )
+        #: Whether the page shows "Prorate the first month" (not once the month is billed).
+        self.offers_prorate = not first_month_billed
         if first_month_billed:
             del self.fields["prorate_first_month"]
         else:

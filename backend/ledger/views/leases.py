@@ -67,6 +67,7 @@ from ledger.models import (
     NoteEntityType,
     Operator,
     PaymentChannel,
+    RentCharge,
     ScheduleState,
     Store,
     SyncStatus,
@@ -667,8 +668,40 @@ def lease_edit(request: HttpRequest, pk: str) -> HttpResponse:
     return render(
         request,
         "ledger/leases/form.html",
-        {"form": form, "lease": lease, "store_context": context},
+        {
+            "form": form,
+            "lease": lease,
+            "store_context": context,
+            **_edit_context(lease, today, first_charge),
+        },
     )
+
+
+def _edit_context(lease: Lease, today: date, first_charge: RentCharge | None) -> dict[str, Any]:
+    """The Edit lease page's read-only parts (PLAN-015a §3): the rent in effect (or the latest
+    row) and the next one, the history newest first, the rent change's default date, the
+    billing summary (the cached last four only, Rule 1), whether a schedule with a provider
+    reference would be marked Needs review (the rows ``update_lease`` flags), and the day the
+    first month was billed."""
+    now = service.current_rent(lease, today) or service.open_rent(lease)
+    upcoming = service.upcoming_rent(lease, today)
+    account = detail_cards.lease_account(lease)
+    return {
+        "rent_now": now,
+        "rent_next": upcoming if upcoming is not None and upcoming != now else None,
+        "rent_history": list(lease.rent_history.order_by("-effective_from")),
+        "rent_default_date": service.next_rent_due(lease, today),
+        "billing_summary": [part for part in (account.company, account.email) if part]
+        + [account.bank],
+        "has_live_schedule": any(
+            not row.needs_review and service.schedule_ref(row)
+            for row in service.live_schedules(lease)
+        ),
+        "first_month_billed": first_charge is not None,
+        "first_month_billed_on": first_charge.created_at if first_charge else None,
+        "can_change_holder": lease.ended_on is None
+        and lease.collection_status != CollectionStatus.ENDED,
+    }
 
 
 @role_required

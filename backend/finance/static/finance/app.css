@@ -1916,7 +1916,7 @@ p.detail-more-notes { padding-left: 0; }
 .step-link { display: inline-flex; align-items: center; min-height: 0; margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: var(--fs-base); font-weight: 500; text-decoration: none; cursor: pointer; }
 .step-link:hover { text-decoration: underline; }
 .step-link[hidden] { display: none; }
-.new-lease-step .step-head { display: flex; align-items: flex-start; gap: var(--space-3); margin: 0 0 var(--space-4); }
+.new-lease-step .step-head, .edit-lease-card .step-head { display: flex; align-items: flex-start; gap: var(--space-3); margin: 0 0 var(--space-4); }
 .step-number { display: inline-flex; flex: 0 0 22px; align-items: center; justify-content: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: var(--month-current); color: var(--link); font-size: var(--fs-sm); font-weight: 700; }
 .step-title { flex: 1 1 auto; min-width: 0; }
 .step-title h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
@@ -1938,7 +1938,7 @@ p.detail-more-notes { padding-left: 0; }
 .terms-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 var(--space-3); }
 .terms-row .field input { width: 100%; }
 .new-lease-step .terms-row .field > label, .new-lease-step .billing-grid .field > label, .new-lease-step .debit-row .field > label { margin-top: var(--space-3); }
-.new-lease-step .step-head + .terms-row .field > label, .new-lease-step .step-head + .debit-row .field > label { margin-top: 0; }
+.new-lease-step .step-head + .terms-row .field > label, .new-lease-step .step-head + .debit-row .field > label, .edit-lease-card .step-head + .debit-row .field > label { margin-top: 0; }
 .terms-row #id_rent, .terms-row input.js-total { text-align: right; font-variant-numeric: tabular-nums; }
 .prorate-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
 .prorate-row .field { margin: 0; }
@@ -1994,7 +1994,40 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
 .account-detail { flex-basis: 100%; margin: 0; }
 .account-detail[hidden] { display: none; }
 .summary-after { margin: var(--space-3) 0 0; font-size: var(--fs-sm); text-align: center; }
+/* --- Edit lease (docs/qa/15/PLAN-015a-edit-lease.md; New lease's family) ------------------------
+   Four cards (.edit-lease-card) with New lease's .step-head without its number. Lease: .lease-facts
+   two columns of label over value, the wizards' teal .step-link pair (.lease-wizards). Rent: the
+   amount in effect large (.rent-amount), the upcoming change in teal (.rent-next), the change's
+   two fields (.rent-change-fields, New lease's .terms-row), the switch row, the history as rows
+   of amount and dates. Billing details: one line. The Changes card (.changes-card): one row per
+   change (its label muted), the empty line, the warning in the unpaid tone. Phone: one column. */
+.lease-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3) var(--space-4); margin: 0; }
+.lease-facts dt { margin: 0 0 2px; color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
+.lease-facts dd { margin: 0; color: var(--text); font-size: var(--fs-md); overflow-wrap: anywhere; }
+.lease-wizards { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); margin: var(--space-4) 0 0; }
+.rent-now { margin: 0; }
+.rent-amount { color: var(--text); font-size: var(--fs-lg); font-weight: 700; font-variant-numeric: tabular-nums; }
+.rent-next { margin: var(--space-1) 0 0; color: var(--link); font-size: var(--fs-base); }
+.rent-change-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: var(--space-2) 0 0; }
+.rent-change-fields[hidden] { display: none; }
+.rent-change-fields .field > label { margin-top: var(--space-2); }
+.rent-change-fields #id_rent { text-align: right; font-variant-numeric: tabular-nums; }
+.prorate-billed { margin: var(--space-3) 0 0; font-size: var(--fs-base); }
+.rent-history-title { margin: var(--space-4) 0 var(--space-1); color: var(--muted); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.rent-history { margin: 0; padding: 0; border-top: 1px solid var(--border-soft); list-style: none; font-size: var(--fs-base); }
+.rent-history li { display: flex; justify-content: space-between; gap: var(--space-3); padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
+.rent-history-amount { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.billing-summary { margin: 0; color: var(--text); font-size: var(--fs-base); overflow-wrap: anywhere; }
+.changes-list { margin: 0; padding: 0; list-style: none; font-size: var(--fs-base); }
+.changes-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px var(--space-3); padding: 4px 0; }
+.changes-list .change-label { color: var(--muted); }
+.changes-list .change-text { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.changes-empty { margin: 0; font-size: var(--fs-base); }
+.changes-empty[hidden] { display: none; }
+.autopay-warning { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text); font-size: var(--fs-sm); }
+.autopay-warning[hidden] { display: none; }
 @media (max-width: 768px) {
+  .lease-facts, .rent-change-fields { grid-template-columns: minmax(0, 1fr); }
   .terms-row, .billing-grid, .channel-tiles, .movein-more-fields { grid-template-columns: minmax(0, 1fr); }
   .operator-pick { flex-wrap: wrap; }
   form button.step-link { width: auto; }

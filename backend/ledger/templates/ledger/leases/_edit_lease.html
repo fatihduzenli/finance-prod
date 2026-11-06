@@ -1,0 +1,69 @@
+{% comment %}The Edit lease page (docs/qa/15/PLAN-015a-edit-lease.md; the New lease family, the owner's reference docs/design/new-lease-dark-laptop.png). Four cards in the form's main column, each with the New lease head without its number (_step_head.html): (1) Lease: the store, operator, start date and status as text (they are not fields; a posted value is ignored), with the transfer and lease-end wizards' links; (2) Rent: the rent in effect and an upcoming one, "Change rent" (button#change-rent, shown with the script) revealing #rent-change-fields (the new rent and its date, the next rent due date by default; without the script the fields are visible), the proration switch until the first month is billed (then a note), and the history newest first; (3) Collection: the debit day (1st to 28th; a current 29th to 31st kept), "Twice a month" and the second day, and the channel cards (a current channel outside the three kept); (4) Billing details: a read-only line (company · e-mail · bank and the cached last four only, Rule 1) with "Edit billing details" (the billing dialog). The right column: the sticky Changes card (aside#lease-changes): one li per pending change ("Debit day 1st → 5th", ledger/edit_lease.js, from each control's data-initial and data-label), the one-line autopay warning (only on a lease with a live provider schedule), "Save changes" (disabled by the script while nothing changed) and Cancel. Phone: one column, the Changes card after the cards.{% endcomment %}{% load components dates money %}
+<form method="post" id="lease-form" class="js-single-submit edit-lease-form">
+  {% csrf_token %}
+  {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+  <div class="form-layout">
+  <div class="form-main">
+  {% if form.non_field_errors %}<div class="card form-card" id="lease-errors">{{ form.non_field_errors }}</div>{% endif %}
+  <section class="card form-card edit-lease-card" id="lease-card" aria-labelledby="lease-title">
+    {% include "ledger/leases/_step_head.html" with heading_id="lease-title" title="Lease" note="Who holds the store, and since when. A new operator or an end goes through its wizard." action="" %}
+    <dl class="lease-facts" id="lease-facts">
+      <div><dt>Store</dt><dd id="lease-store"><a href="{% url 'ledger:stores:detail' pk=lease.store_id %}">{% if lease.store.store_number is not None %}#{{ lease.store.store_number }} {% endif %}{{ lease.store.external_label }}</a></dd></div>
+      <div><dt>Operator</dt><dd id="lease-operator">{% if lease.operator %}{{ lease.operator.display_name }}{% else %}No operator{% endif %}</dd></div>
+      <div><dt>Start date</dt><dd id="lease-start">{% if lease.started_on %}{{ lease.started_on|day }}{% else %}—{% endif %}</dd></div>
+      <div><dt>Status</dt><dd id="lease-status">{% if lease.collection_status == "active" %}{% status_badge lease.get_collection_status_display "paid" %}{% elif lease.collection_status == "paused" %}{% status_badge lease.get_collection_status_display "pending" %}{% else %}{% status_badge lease.get_collection_status_display "neutral" %}{% endif %}</dd></div>
+    </dl>
+    {% if can_change_holder %}<p class="lease-wizards"><a class="step-link" id="transfer-lease" href="{% url 'ledger:stores:transfer' pk=lease.store_id %}">Transfer to a new operator</a><a class="step-link" id="end-lease" href="{% url 'ledger:stores:end_lease' pk=lease.store_id %}">End lease</a></p>{% endif %}
+  </section>
+  <section class="card form-card edit-lease-card" id="rent-card" aria-labelledby="rent-title">
+    <div class="step-head"><div class="step-title"><h2 id="rent-title">Rent</h2><p class="muted step-note">A rent change is never overwritten: the current rent ends the day before the new one takes effect.</p></div><div class="step-action"><button type="button" class="step-link" id="change-rent" aria-controls="rent-change-fields" aria-expanded="true" hidden>Change rent</button></div></div>
+    <p class="rent-now" id="rent-now">{% if rent_now %}<span class="rent-amount">{{ rent_now.amount|money }}</span> <span class="muted">a month since {{ rent_now.effective_from|day }}</span>{% else %}<span class="muted">No rent yet.</span>{% endif %}</p>
+    {% if rent_next %}<p class="rent-next" id="rent-next">Changes to {{ rent_next.amount|money }} on {{ rent_next.effective_from|day }}</p>{% endif %}
+    <div class="terms-row rent-change-fields" id="rent-change-fields">
+      {% include "ledger/stores/_form_field.html" with field=form.rent %}
+      {% include "ledger/stores/_form_field.html" with field=form.rent_effective_from %}
+    </div>
+    {% if form.offers_prorate %}
+    <div class="prorate-row">
+      <div class="field switch-field{% if form.prorate_first_month.errors %} has-error{% endif %}"><label class="inline" for="{{ form.prorate_first_month.id_for_label }}">{{ form.prorate_first_month }} {{ form.prorate_first_month.label }}</label>{{ form.prorate_first_month.errors }}</div>
+    </div>
+    {% elif first_month_billed %}
+    <p class="muted prorate-billed" id="prorate-billed">The first month was billed on {{ first_month_billed_on|day }}{% if lease.prorate_first_month %}, prorated{% endif %}; its proration no longer changes.</p>
+    {% endif %}
+    <h3 class="rent-history-title" id="rent-history-title">History</h3>
+    <ul class="rent-history" id="rent-history" aria-labelledby="rent-history-title">
+      {% for row in rent_history %}<li><span class="rent-history-amount">{{ row.amount|money }}</span> <span class="muted">{% if row.effective_to %}{{ row.effective_from|day }} – {{ row.effective_to|day }}{% else %}from {{ row.effective_from|day }}{% endif %}</span></li>{% empty %}<li class="muted">No rent recorded.</li>{% endfor %}
+    </ul>
+  </section>
+  <section class="card form-card edit-lease-card" id="collection-card" aria-labelledby="collection-title">
+    {% include "ledger/leases/_step_head.html" with heading_id="collection-title" title="Collection" note="When and how rent is collected." action="" %}
+    <div class="debit-row">
+      {% include "ledger/stores/_form_field.html" with field=form.debit_day no_mark=True %}
+      {% include "ledger/leases/_twice_monthly.html" with twice_label="Twice a month" %}
+      {% include "ledger/stores/_form_field.html" with field=form.second_debit_day hide_help=True %}
+    </div>
+    <div class="field channel-field{% if form.payment_channel.errors %} has-error{% endif %}" id="channel-field">
+      <span class="label visually-hidden" id="channel-label">Payment channel</span>
+      <div class="channel-tiles" role="radiogroup" aria-labelledby="channel-label" id="id_payment_channel">
+        {% for card in form.channel_cards %}<div class="collect-tile channel-tile"><label class="collect-option" for="{{ card.id }}"><input type="radio" name="payment_channel" value="{{ card.value }}" id="{{ card.id }}" data-short="{{ card.short }}" data-initial="{{ card.initial }}" data-label="Payment channel"{% if card.checked %} checked{% endif %}><span class="collect-text"><span class="collect-name">{{ card.title }}</span><span class="collect-note">{{ card.note }}</span></span></label></div>{% endfor %}
+      </div>
+      {{ form.payment_channel.errors }}
+    </div>
+  </section>
+  <section class="card form-card edit-lease-card" id="billing-card" aria-labelledby="billing-title">
+    <div class="step-head"><div class="step-title"><h2 id="billing-title">Billing details</h2><p class="muted step-note">Who this store is billed to. Changed in Edit billing details.</p></div><div class="step-action"><a class="step-link" id="edit-billing" href="{% url 'ledger:leases:billing' pk=lease.pk %}">Edit billing details</a></div></div>
+    <p class="billing-summary" id="billing-summary">{{ billing_summary|join:" · " }}</p>
+  </section>
+  </div>
+  <aside class="form-summary" aria-label="Changes" id="lease-changes">
+    <section class="card summary-card lease-summary-card changes-card">
+      <h2 class="summary-label">Changes</h2>
+      <ul class="changes-list" id="changes-list" aria-live="polite"></ul>
+      <p class="muted changes-empty" id="changes-empty">Change a field above to see it here.</p>
+      {% if has_live_schedule %}<p class="autopay-warning" id="autopay-warning" hidden>Autopay will be marked Needs review: its debit no longer matches the lease.</p>{% endif %}
+      <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-lease">Save changes</button></div>
+      <p class="summary-cancel"><a class="btn btn-quiet" id="cancel-lease" href="{% url 'ledger:leases:detail' pk=lease.pk %}">Cancel</a></p>
+    </section>
+  </aside>
+  </div>
+</form>
