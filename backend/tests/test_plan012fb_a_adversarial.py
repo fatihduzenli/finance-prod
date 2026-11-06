@@ -203,6 +203,7 @@ def test_the_dashboard_query_count_stays_within_its_budget(
     # (Fable's review; 84 -> 87 measured on SQLite), so 86 -> 89. PLAN-015 Batch 1 re-pin: the
     # four KPIs, the Collections bars, the operator tiles and the activity feed replace the
     # Cashflow, Payment status, Needs attention and Recent payments cards (101 measured on
-    # SQLite), so 89 -> 103.
-    with django_assert_max_num_queries(103):
+    # SQLite), so 89 -> 103; Fable's gate: the reports' rows and the open balances read once a
+    # request, 79 measured, so 103 -> 81.
+    with django_assert_max_num_queries(81):
         assert billing.get("/?range=12m").status_code == 200

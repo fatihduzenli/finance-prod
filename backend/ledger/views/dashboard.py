@@ -91,20 +91,24 @@ class Figures:
 
 
 def _figures(state: DashboardState, today: date) -> Figures:
-    """Every figure of the page, the open balances and Needs attention read once."""
+    """Every figure of the page: the open balances, Needs attention, the P&L's rows and
+    Payments by method each read once (Fable's gate on PLAN-015 Batch 1)."""
+    yearly = state.chart == CHART_YEARLY
     balances = receivables.open_balances(today)
-    needs = dashboard_v2.needs_attention(today)
+    needs = dashboard_v2.needs_attention(today, balances)
+    read = dashboard_v2.page_reads(state.period, today, yearly)
     return Figures(
         kpis=dashboard_v2.kpis(
             state.period,
             today,
             balances=balances,
             attention_count=dashboard_v2.attention_total(needs),
+            read=read,
         ),
         collections=(
-            dashboard_v2.collections_by_year(today)
-            if state.chart == CHART_YEARLY
-            else dashboard_v2.collections(today.year, today)
+            dashboard_v2.collections_by_year(today, read=read)
+            if yearly
+            else dashboard_v2.collections(today.year, today, read=read)
         ),
         tiles=dashboard_v2.operator_tiles(today, balances=balances),
         activity=dashboard_v2.activity(today, state.query, state.kind, state.page, found=needs),
@@ -212,7 +216,7 @@ def home_export(request: HttpRequest) -> HttpResponseBase:
 
     def compute() -> list[list[object]]:
         balances = receivables.open_balances(today)
-        needs = dashboard_v2.needs_attention(today)
+        needs = dashboard_v2.needs_attention(today, balances)
         found = dashboard_v2.kpis(
             state.period,
             today,

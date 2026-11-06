@@ -1173,13 +1173,17 @@ def attention(
     operator: uuid.UUID | None = None,
     limit: int | None = KIND_LIMIT,
     leases: list[Lease] | None = None,
+    balances: list[receivables.OpenBalance] | None = None,
 ) -> Attention:
     """Every item for ``today`` (see the module docstring), by severity, then kind, then
     the order within the kind; with ``operator``, only that operator's items. ``leases``
-    is :func:`dashboard_leases` when the caller read it already (without ``operator``)."""
+    is :func:`dashboard_leases` and ``balances`` :func:`ledger.services.receivables.open_balances`
+    of ``today`` when the caller read them already (without ``operator``; PLAN-015 Batch 1:
+    the dashboard reads each once)."""
     if leases is None or operator is not None:
         leases = _leases(operator)
-    balances = receivables.open_balances(today, operator=operator)
+    if balances is None or operator is not None:
+        balances = receivables.open_balances(today, operator=operator)
     sources: list[Callable[[], list[Item]]] = [
         lambda: _overdue(today, balances),
         lambda: _returned(today, operator),

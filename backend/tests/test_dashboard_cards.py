@@ -38,8 +38,9 @@ AUG = date(2026, 8, 1)
 JUN = date(2026, 6, 1)
 JAN = date(2026, 1, 1)
 #: The dashboard GET's queries plus a margin. PLAN-015 Batch 1 re-pin: 98 measured on
-#: SQLite with the seeded cards' data (was 86 for the PLAN-014 page).
-MAX_DASHBOARD_QUERIES = 100
+#: SQLite with the seeded cards' data (was 86 for the PLAN-014 page); after Fable's gate (the
+#: P&L's rows, Payments by method and the open balances read once a request) 76 measured.
+MAX_DASHBOARD_QUERIES = 78
 
 
 @pytest.fixture

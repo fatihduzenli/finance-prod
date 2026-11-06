@@ -47,7 +47,7 @@ Money is ``Decimal``; dates are the project's ``TIME_ZONE`` days.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
@@ -253,15 +253,67 @@ class Kpis:
     bank: BankDeposits
 
 
-def _billed(rows: Iterable[pnl.PnlRow]) -> tuple[Decimal, int]:
-    """Revenue by month's total billed over ``rows`` and the stores billed."""
-    total = reports.RevenueMonth(None)
-    billed_stores: set[uuid.UUID] = set()
-    for row in rows:
-        total.add(row)
-        if row.store_id is not None and row.rent_billed + row.fees_billed > 0:
-            billed_stores.add(row.store_id)
-    return total.total_billed, len(billed_stores)
+@dataclass(frozen=True, slots=True)
+class Reads:
+    """The P&L's rows and Payments by method over one range of whole months, read once for the
+    KPIs and the Collections bars (PLAN-015 Batch 1, Fable's gate: never twice a request)."""
+
+    rows: list[pnl.PnlRow]
+    by_method: reports.PaymentsByMethod
+
+    def billed(self, from_month: date, to_month: date) -> tuple[Decimal, int]:
+        """Revenue by month's total billed from ``from_month`` to ``to_month`` and the stores
+        billed."""
+        total = reports.RevenueMonth(None)
+        billed_stores: set[uuid.UUID] = set()
+        for row in self.rows:
+            if not from_month <= row.month <= to_month:
+                continue
+            total.add(row)
+            if row.store_id is not None and row.rent_billed + row.fees_billed > 0:
+                billed_stores.add(row.store_id)
+        return total.total_billed, len(billed_stores)
+
+    def billed_by_month(self) -> dict[date, Decimal]:
+        """Revenue by month's billed per month (as
+        :func:`ledger.services.reports.revenue_by_month` sums them)."""
+        months: dict[date, reports.RevenueMonth] = {}
+        for row in self.rows:
+            months.setdefault(row.month, reports.RevenueMonth(row.month)).add(row)
+        return {month: item.total_billed for month, item in months.items()}
+
+    def collected(self, from_month: date, to_month: date) -> Decimal:
+        """Payments by method's total from ``from_month`` to ``to_month``."""
+        return sum(
+            (
+                item.total
+                for item in self.by_method.months
+                if item.month is not None and from_month <= item.month <= to_month
+            ),
+            ZERO,
+        )
+
+
+def reads(from_month: date, to_month: date) -> Reads:
+    """:class:`Reads` from ``from_month`` to ``to_month`` (the P&L's fixed queries and one)."""
+    return Reads(
+        rows=pnl.rows(pnl.PnlQuery(from_month, to_month)),
+        by_method=reports.payments_by_method(reports.ReportRange(from_month, to_month)),
+    )
+
+
+def chart_range(today: date, yearly: bool) -> tuple[date, date]:
+    """The Collections bars' months: January to today's month, or the last :data:`YEARS`
+    years to today's month."""
+    first = date(today.year - YEARS + 1, 1, 1) if yearly else date(today.year, 1, 1)
+    return first, today.replace(day=1)
+
+
+def page_reads(period: str, today: date, yearly: bool) -> Reads:
+    """One :class:`Reads` covering the period, the period before it and the bars."""
+    selected = window(period, today)
+    first, last = chart_range(today, yearly)
+    return reads(min(selected.previous().from_month, first), max(selected.to_month, last))
 
 
 def _next_due(selected: Window, today: date) -> date | None:
@@ -291,24 +343,27 @@ def change_of(current: Decimal, previous: Decimal) -> Decimal | None:
     return ((current - previous) * 100 / previous).quantize(Decimal("0.1"), ROUND_HALF_UP)
 
 
-def collected_by_window(selected: Window) -> tuple[Decimal, Decimal]:
-    """Payments by method's total for ``selected`` and for the period before it (one query)."""
+def collected_by_window(selected: Window, read: Reads | None = None) -> tuple[Decimal, Decimal]:
+    """Payments by method's total for ``selected`` and for the period before it (one query,
+    none with ``read``)."""
     before = selected.previous()
-    found = reports.payments_by_method(reports.ReportRange(before.from_month, selected.to_month))
-    current = previous = ZERO
-    for month in found.months:
-        if month.month is None:
-            continue
-        if month.month >= selected.from_month:
-            current += month.total
-        else:
-            previous += month.total
-    return current, previous
+    found = read if read is not None else reads(before.from_month, selected.to_month)
+    return (
+        found.collected(selected.from_month, selected.to_month),
+        found.collected(before.from_month, before.to_month),
+    )
 
 
-def needs_attention(today: date) -> attention.Attention:
-    """Today's Needs attention items, their stores titled (one more query)."""
-    found = attention.attention(today, leases=attention.dashboard_leases())
+def needs_attention(
+    today: date, balances: Sequence[receivables.OpenBalance] | None = None
+) -> attention.Attention:
+    """Today's Needs attention items, their stores titled (one more query); ``balances`` the
+    open balances of ``today`` when the caller read them already."""
+    found = attention.attention(
+        today,
+        leases=attention.dashboard_leases(),
+        balances=list(balances) if balances is not None else None,
+    )
     ids = {item.store_id for item in found.items if item.store_id is not None}
     titles = {store.pk: stores.title(store) for store in Store.objects.filter(pk__in=ids)}
     found.items = [
@@ -328,17 +383,23 @@ def kpis(
     *,
     balances: Sequence[receivables.OpenBalance] | None = None,
     attention_count: int | None = None,
+    read: Reads | None = None,
 ) -> Kpis:
-    """The four KPIs for ``period`` (see the module docstring). ``balances`` and
-    ``attention_count`` are the open balances and the Needs attention count when the caller
-    read them already."""
+    """The four KPIs for ``period`` (see the module docstring). ``balances``,
+    ``attention_count`` and ``read`` (covering the period and the one before it) are the open
+    balances, the Needs attention count and the reports' rows when the caller read them
+    already."""
     selected = window(period, today)
-    due_amount, due_stores = _billed(pnl.rows(pnl.PnlQuery(selected.from_month, selected.to_month)))
-    current, previous = collected_by_window(selected)
+    if read is None:
+        read = reads(selected.previous().from_month, selected.to_month)
+    due_amount, due_stores = read.billed(selected.from_month, selected.to_month)
+    current, previous = collected_by_window(selected, read)
     rows = list(balances) if balances is not None else receivables.open_balances(today)
     overdue_rows = [row for row in rows if row.overdue(today)]
     count = (
-        attention_count if attention_count is not None else attention_total(needs_attention(today))
+        attention_count
+        if attention_count is not None
+        else attention_total(needs_attention(today, rows))
     )
     bank = banking.summary(selected.start, selected.end)
     return Kpis(
@@ -383,26 +444,22 @@ class Collections:
     yearly: bool = False
 
 
-def _collections(
-    selected: reports.ReportRange,
-) -> tuple[list[tuple[date, Decimal, Decimal]], Decimal]:
-    """(month, collected, due) per month of ``selected``, and the total collected."""
-    collected = reports.payments_by_method(selected)
-    billed = reports.revenue_by_month(selected)
-    due = {item.month: item.total_billed for item in billed.months}
-    months = [
-        (item.month, item.total, due.get(item.month, ZERO))
-        for item in collected.months
-        if item.month is not None
-    ]
-    return months, collected.total.total
+def _bars(read: Reads, first: date, last: date) -> list[tuple[date, Decimal, Decimal]]:
+    """(month, collected, due) per month from ``first`` to ``last``."""
+    due = read.billed_by_month()
+    month, found = first, []
+    while month <= last:
+        found.append((month, read.collected(month, month), due.get(month, ZERO)))
+        month = pnl.add_months(month, 1)
+    return found
 
 
-def collections(year: int, today: date) -> Collections:
-    """The months of ``year`` up to today's month (every month of a past year)."""
+def collections(year: int, today: date, read: Reads | None = None) -> Collections:
+    """The months of ``year`` up to today's month (every month of a past year); ``read``
+    covers them when the caller read it already."""
     first = date(year, 1, 1)
     last = today.replace(day=1) if year == today.year else date(year, 12, 1)
-    months, total = _collections(reports.ReportRange(first, last))
+    months = _bars(read if read is not None else reads(first, last), first, last)
     this_month = today.replace(day=1)
     return Collections(
         bars=[
@@ -411,15 +468,16 @@ def collections(year: int, today: date) -> Collections:
             )
             for month, paid, due in months
         ],
-        total=total,
+        total=sum((paid for _, paid, _ in months), ZERO),
         since=f"collected from {month_name_text(first)} to {month_long_text(last)}",
     )
 
 
-def collections_by_year(today: date, years: int = YEARS) -> Collections:
+def collections_by_year(today: date, years: int = YEARS, read: Reads | None = None) -> Collections:
     """One bar per year of the last ``years`` years, the current one to today's month."""
     first = date(today.year - years + 1, 1, 1)
-    months, total = _collections(reports.ReportRange(first, today.replace(day=1)))
+    last = today.replace(day=1)
+    months = _bars(read if read is not None else reads(first, last), first, last)
     by_year: dict[int, tuple[Decimal, Decimal]] = {
         year: (ZERO, ZERO) for year in range(first.year, today.year + 1)
     }
@@ -431,7 +489,7 @@ def collections_by_year(today: date, years: int = YEARS) -> Collections:
             CollectionBar(str(year), str(year), paid, due, year == today.year)
             for year, (paid, due) in by_year.items()
         ],
-        total=total,
+        total=sum((paid for _, paid, _ in months), ZERO),
         since=f"collected from {first.year} to {month_long_text(today)}",
         yearly=True,
     )
