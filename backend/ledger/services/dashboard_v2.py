@@ -693,7 +693,7 @@ def _invoices(today: date) -> list[ActivityRow]:
         sent_at = invoice.sent_at
         if sent_at is None:
             continue
-        on = timezone.localdate(sent_at)
+        on = timezone.localtime(sent_at).date()
         if on > today:
             continue
         paid = invoice.total > 0 and invoice.amount_paid >= invoice.total
@@ -787,7 +787,7 @@ def _returns(today: date) -> list[ActivityRow]:
         returned_at = payment.returned_at
         if returned_at is None:
             continue
-        on = timezone.localdate(returned_at)
+        on = timezone.localtime(returned_at).date()
         if on > today:
             continue
         lease = charge_lease(payment)
