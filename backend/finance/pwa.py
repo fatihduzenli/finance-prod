@@ -26,9 +26,10 @@ page (``accounts.registry`` lists it as read-only).
 The manifest names the app, "Monvera" (owner, 2026-11-05: the home-screen identity is the
 app's, so PLAN-012c D2's company name gives way here; the company's name stays inside the
 pages). The operator portal has its own, ``/portal/manifest.webmanifest`` (``portal:manifest``,
-public too): the same name, colours and icons, its start URL and scope ``/portal/``. Its icons are the brand's, the M mark on the navy-to-teal gradient square,
-opaque (``scripts/make_brand_icons.py``): 192 and 512 px PNGs, a 512 px maskable one with
-more padding, and the SVG. Its colours are the dark theme's ``--bg`` (tokens.css), so the
+public too): the same name, colours and icons, its start URL and scope ``/portal/``. Its
+icons are the brand's, the M mark on the navy-to-teal gradient square, opaque
+(``scripts/make_brand_icons.py``): 192 and 512 px PNGs, a 512 px maskable one with more
+padding, and the SVG. Its colours are the dark theme's ``--bg`` (tokens.css), so the
 splash and the standalone window's bar match the icon's dark ground.
 """
 
