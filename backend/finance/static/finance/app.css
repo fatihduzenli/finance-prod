@@ -2000,7 +2000,8 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
    amount in effect large (.rent-amount), the upcoming change in teal (.rent-next), the change's
    two fields (.rent-change-fields, New lease's .terms-row), the switch row, the history as rows
    of amount and dates. Billing details: one line. The Changes card (.changes-card): one row per
-   change (its label muted), the empty line, the warning in the unpaid tone. Phone: one column. */
+   change (its label muted), the empty line, the warning on --surface-2. Phone: one column of
+   cards, the facts still two a row, the rent change's fields stacked. */
 .lease-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3) var(--space-4); margin: 0; }
 .lease-facts dt { margin: 0 0 2px; color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
 .lease-facts dd { margin: 0; color: var(--text); font-size: var(--fs-md); overflow-wrap: anywhere; }
@@ -2027,7 +2028,7 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
 .autopay-warning { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text); font-size: var(--fs-sm); }
 .autopay-warning[hidden] { display: none; }
 @media (max-width: 768px) {
-  .lease-facts, .rent-change-fields { grid-template-columns: minmax(0, 1fr); }
+  .rent-change-fields { grid-template-columns: minmax(0, 1fr); }
   .terms-row, .billing-grid, .channel-tiles, .movein-more-fields { grid-template-columns: minmax(0, 1fr); }
   .operator-pick { flex-wrap: wrap; }
   form button.step-link { width: auto; }
