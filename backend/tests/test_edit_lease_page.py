@@ -229,6 +229,22 @@ def test_a_lease_without_a_debit_day_defaults_to_the_first_of_next_month(admin: 
     assert '<option value="" selected>—</option>' in card(body, "collection-card")
 
 
+def test_a_paused_lease_without_a_debit_day_saves_a_channel_change(admin: Client) -> None:
+    """QA-015a finding: a save of such a lease answered 500 (planned_debits raised)."""
+    lease = a_world(status=CollectionStatus.PAUSED)
+    Lease.objects.filter(pk=lease.pk).update(debit_day=None)
+    lease.refresh_from_db()
+    response = admin.post(
+        path(lease), data(lease, debit_day="", payment_channel=PaymentChannel.INVOICE)
+    )
+    assert (response.status_code, response["Location"]) == (302, f"/leases/{lease.pk}/")
+    saved = Lease.objects.get(pk=lease.pk)
+    assert (saved.debit_day, saved.payment_channel) == (None, PaymentChannel.INVOICE)
+    # Clearing the day of a paused lease that had one saves too.
+    other = a_lease(a_store("Paused day", 1993), an_operator("Paused Co"), status="paused")
+    assert save(admin, other, debit_day="").debit_day is None
+
+
 def test_an_empty_or_unchanged_rent_writes_no_history(admin: Client) -> None:
     lease = a_world()
     save(admin, lease, debit_day="6")

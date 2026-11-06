@@ -460,8 +460,11 @@ def first_month_billed(lease: Lease) -> bool:
 
 
 def planned_debits(lease: Lease, rent: Decimal) -> list[PlannedDebit]:
-    """One debit per debit day of the lease, in seq order."""
+    """One debit per debit day of the lease, in seq order; none for a lease without a debit
+    day (QA-015a finding: its every live provider schedule then no longer matches)."""
     days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+    if not days:
+        return []
     amounts = debit_amounts(rent, twice_monthly=len(days) == 2)
     return [
         PlannedDebit(seq, day, amount)

@@ -987,6 +987,40 @@ def test_a_day_or_operator_change_flags_the_schedule(fake: FakeProvider, change:
     assert row.needs_review
 
 
+def test_a_lease_without_a_debit_day_plans_no_debit() -> None:
+    """QA-015a finding: no days, no debits (it raised ValueError before)."""
+    assert service.planned_debits(Lease(debit_day=None, second_debit_day=None), RENT) == []
+
+
+def test_a_paused_lease_without_a_debit_day_saves_and_is_audited() -> None:
+    lease = make_lease(collection_status=CollectionStatus.PAUSED)
+    Lease.objects.filter(pk=lease.pk).update(debit_day=None)
+    lease.refresh_from_db()
+    saved = edit(lease, RENT, payment_channel=PaymentChannel.WIRE)
+    assert (saved.debit_day, saved.payment_channel) == (None, PaymentChannel.WIRE)
+    entry = AuditLog.objects.filter(action="lease.updated").latest("id")
+    assert entry.before is not None and entry.after is not None
+    assert (entry.before["payment_channel"], entry.after["payment_channel"]) == (
+        PaymentChannel.PROVIDER_ACH,
+        PaymentChannel.WIRE,
+    )
+    assert entry.after["debit_day"] is None
+
+
+def test_clearing_the_debit_day_flags_the_live_provider_schedule(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    [row] = service.live_schedules(lease)
+    assert service.schedule_ref(row) and not row.needs_review
+    Lease.objects.filter(pk=lease.pk).update(collection_status=CollectionStatus.PAUSED)
+    lease.refresh_from_db()
+    edit(lease, RENT, debit_day=None)
+    [row] = service.live_schedules(lease)
+    assert row.needs_review
+    assert Lease.objects.get(pk=lease.pk).debit_day is None
+
+
 def test_an_unrelated_edit_does_not_flag_the_schedule(fake: FakeProvider) -> None:
     fake.add_payment_method(CUSTOMER, method())
     lease = make_lease()
