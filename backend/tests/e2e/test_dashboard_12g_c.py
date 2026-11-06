@@ -1,7 +1,8 @@
-"""PLAN-012g Batch C in a browser (Fable): the dashboard at both widths and in both themes — the
-laptop's hover popover on the mini calendar, the phone's tap panel under the grid (no popover),
-the phone's six-month Cashflow card and the laptop's twelve, the range select, the attention card's
-three rows and "All n ›" on the phone. The QA shots (``QA_SHOTS_DIR``) come from here."""
+"""PLAN-012g Batch C in a browser (Fable): the dashboard's mini calendar at both widths and in
+both themes — the laptop's hover popover, the phone's tap panel under the grid (no popover).
+PLAN-015 Batch 1 removed the Cashflow cards, the range select and the attention card these tests
+also drove (tests/e2e/test_dashboard_v2.py drives the new cards). The QA shots
+(``QA_SHOTS_DIR``) come from here."""
 
 from __future__ import annotations
 
@@ -71,18 +72,11 @@ def signed_in(context: BrowserContext, live_server: LiveServer, username: str, t
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_the_laptop_dashboard_hover_opens_a_popover_and_the_wide_card_shows(
+def test_the_laptop_dashboard_hover_opens_a_popover(
     live_server: LiveServer, laptop: BrowserContext, theme: str
 ) -> None:
     a_world()
     page = signed_in(laptop, live_server, f"e2e-12g-c-laptop-{theme}", theme)
-    assert page.locator("#cashflow-card").is_visible()
-    assert (
-        page.locator("#cashflow-card-narrow").count() == 0
-        or not page.locator("#cashflow-card-narrow").is_visible()
-    )
-    assert page.locator("#cashflow-card .bar-pair").count() == 12
-    assert page.locator("#range-select").input_value() == "12m"
     panel = page.locator("#mini-calendar .mini-panel")
     upcoming = page.locator("#mini-upcoming-body")
     assert upcoming.is_visible() and not panel.is_visible()
@@ -101,29 +95,14 @@ def test_the_laptop_dashboard_hover_opens_a_popover_and_the_wide_card_shows(
         assert panel.locator("li.calendar-item").count() >= 1 and not upcoming.is_visible()
         page.get_by_role("button", name="Back to next 7 days").click()
         assert upcoming.is_visible() and not panel.is_visible()
-    page.select_option("#range-select", "6m")
-    page.wait_for_load_state("networkidle")
-    assert page.locator("#cashflow-card .bar-pair").count() == 6
-    assert "range=6m" in page.url
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_the_phone_dashboard_tap_panel_under_the_grid_and_the_six_month_card(
+def test_the_phone_dashboard_tap_panel_under_the_grid(
     live_server: LiveServer, phone: BrowserContext, theme: str
 ) -> None:
     a_world()
     page = signed_in(phone, live_server, f"e2e-12g-c-phone-{theme}", theme)
-    assert not page.locator("#cashflow-card").is_visible()
-    narrow = page.locator("#cashflow-card-narrow")
-    assert narrow.is_visible() and narrow.locator(".bar-pair").count() == 6
-    assert page.locator("#range-select-narrow").input_value() == "6m"
-    # Needs attention: three rows and "All n ›".
-    rows = page.locator(
-        "#attention .attention-list tbody tr:visible, #attention .attention-list > li:visible"
-    )
-    assert rows.count() <= 3
-    all_link = page.locator("#all-unpaid")
-    assert all_link.is_visible() and all_link.inner_text().startswith("All ")
     # The mini calendar: a tap opens the day's items in the panel under the grid, no popover.
     day = page.locator("#mini-grid .mini-day.has-items").first
     assert day.count() == 1, "the world has a rent day this month"
