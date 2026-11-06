@@ -13,7 +13,7 @@ written.
 reads "New invoice — which store?", each store links to its Create invoice page, the one
 store matched jumps there (never to an operator) and the box keeps the intent; for a viewer
 the intent is ignored. ``intent=record_payment`` (PLAN-015 Batch 1, the dashboard's "Record
-payment") is the same with each store's Add payment page ("Record payment — which store?").
+payment") is the same with each store's Add payment page ("Add payment — which store?").
 
 ``ledger:search_stores`` (GET, billing and above; read-only in ``accounts.registry``): the
 picker's type-ahead, ``{"stores": [...]}`` from :func:`ledger.services.search.store_rows`

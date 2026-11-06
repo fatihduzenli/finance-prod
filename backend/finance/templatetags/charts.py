@@ -88,8 +88,8 @@ def tick_label(value: Decimal, step: Decimal) -> str:
     """``$120k`` once ``step`` reaches $1,000, else ``$250``."""
     if step >= _THOUSAND:
         thousands = (value / _THOUSAND).normalize()
-        return f"${thousands:f}k"
-    return f"${value.normalize():f}"
+        return "$" + f"{thousands:f}k"
+    return "$" + f"{value.normalize():f}"
 
 
 @register.simple_tag
