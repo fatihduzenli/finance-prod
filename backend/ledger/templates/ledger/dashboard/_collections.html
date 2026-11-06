@@ -1,0 +1,14 @@
+{% load charts money %}{% comment %}The Collections card (PLAN-015 Batch 1; ledger.services.dashboard_v2.collections and collections_by_year):
+the head row (finance/components/card_head.html's classes: the section label, and at the right the Monthly · Yearly
+segmented control, two links keeping the page's other choices, ?chart=yearly); the total in 28/700 over "collected
+from January to <Month YYYY>"; the bars ({% collection_bars %}: lavender, the current month in green, the y axis
+in $k, the labels under them) in .collections-chart, where ledger/static/ledger/dashboard.js shows the hover
+tooltip (#collections-tooltip: the month, Collected and Due) from each bar's data-* attributes (each bar's
+<title> without the script); the legend under them. Context: collections, chart_links, state.{% endcomment %}
+<section class="card collections-card" id="collections-card" aria-labelledby="collections-heading">
+  <div class="card-head"><p class="section-label" id="collections-heading">Collections</p><div class="segmented collections-switch" id="collections-switch" role="group" aria-label="Bars"><a href="?{{ chart_links.monthly }}" id="chart-monthly"{% if not collections.yearly %} aria-current="page"{% endif %}>Monthly</a><a href="?{{ chart_links.yearly }}" id="chart-yearly"{% if collections.yearly %} aria-current="page"{% endif %}>Yearly</a></div></div>
+  <p class="collections-total" id="collections-total">{{ collections.total|money }}</p>
+  <p class="muted collections-since" id="collections-since">{{ collections.since }}</p>
+  <div class="collections-chart" id="collections-chart">{% collection_bars collections.bars %}<div class="chart-tooltip" id="collections-tooltip" hidden></div></div>
+  <ul class="collections-legend" id="collections-legend" aria-hidden="true"><li>{% chart_key "collected" %}Collected</li><li>{% chart_key "current" %}Current {% if collections.yearly %}year{% else %}month{% endif %}</li></ul>
+</section>

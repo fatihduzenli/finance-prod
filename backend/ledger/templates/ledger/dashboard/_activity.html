@@ -1,0 +1,38 @@
+{% load components money responsive dates %}{% comment %}The Recent activity card (PLAN-015 Batch 1; ledger.services.dashboard_v2.activity): the
+head row with the search field ("Store, operator or amount", ?q=) and the kind select (?kind=; the script submits it
+on change, a Show button without it) as one GET form keeping the period and the bars; the table Activity · Store ·
+Operator · Date · Amount · Status (a card per row on a phone, the lists' pattern), each status a {% chip %}; five
+rows a page and the list footer ("1–5 of 24", ‹ Previous · 1 2 3 · Next ›, ledger/_list_footer.html); one sentence
+when nothing matches. Context: activity, kinds, state, pager_query.{% endcomment %}
+<section class="card activity-card" id="activity-card" aria-labelledby="activity-heading">
+  <div class="card-head"><p class="section-label" id="activity-heading">Recent activity</p>
+    <form method="get" action="" class="activity-filters" id="activity-filters" role="search">
+      {% if state.period %}<input type="hidden" name="period" value="{{ state.period }}">{% endif %}{% if state.chart %}<input type="hidden" name="chart" value="{{ state.chart }}">{% endif %}
+      <input type="search" name="q" id="activity-q" value="{{ activity.query }}" maxlength="100" placeholder="Store, operator or amount" aria-label="Search activity by store, operator or amount">
+      <select name="kind" id="activity-kind" aria-label="Activity kind">{% for value, label in kinds %}<option value="{{ value }}"{% if value == activity.kind %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <noscript><button class="btn btn-sm" type="submit">Show</button></noscript>
+    </form>
+  </div>
+  {% if activity.rows %}
+    {% responsive_table %}
+    <table class="table activity-table" id="activity-table">
+      <thead><tr><th>Activity</th><th>Store</th><th>Operator</th><th>Date</th><th class="money">Amount</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for row in activity.rows %}
+          <tr class="activity-row" data-kind="{{ row.kind }}">
+            <td class="activity-what" data-role="title">{% if row.url %}<a href="{{ row.url }}"><strong>{{ row.activity }}</strong></a>{% else %}<strong>{{ row.activity }}</strong>{% endif %}</td>
+            <td class="activity-store" data-role="meta">{{ row.store|default:"—" }}</td>
+            <td class="activity-operator" data-role="meta">{{ row.operator|default:"—" }}</td>
+            <td class="activity-date" data-role="meta">{{ row.on|day }}</td>
+            <td class="money">{% if row.amount is not None %}<strong>{{ row.amount|money }}</strong>{% else %}—{% endif %}</td>
+            <td class="activity-status" data-role="status">{% chip row.tone row.chip %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endresponsive_table %}
+  {% else %}
+    <p class="muted activity-empty" id="activity-empty">{{ activity.empty_text }}</p>
+  {% endif %}
+  {% include "ledger/_list_footer.html" with page=activity.page pager_query=pager_query %}
+</section>

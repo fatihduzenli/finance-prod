@@ -16,6 +16,11 @@ charges after the buttons (PLAN-012d D11).
 worker (PLAN-010 D3); the page shows the latest one and its report lines.
 
 ``run:export`` (PLAN-011 D5) is the debits due today as CSV, any role.
+
+Under the page's own content (PLAN-015 Batch 1, the owner's decision 1) the cards that left
+the dashboard: Today's run, Failed payment attempts, the waived charges with a live invoice,
+Invoices created but not sent and Last nightly check
+(:func:`ledger.services.receivables.dashboard`, ``ledger/run/_operations.html``).
 """
 
 from __future__ import annotations
@@ -37,7 +42,7 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from finance.dates import NEW_YORK
 from ledger.models import Lease, PaymentChannel, RentCharge, RentChargeStatus
-from ledger.services import autopay_plans, insurance, rent_run, stores
+from ledger.services import autopay_plans, insurance, one_off_charges, receivables, rent_run, stores
 from ledger.services.csv_export import CsvWriter
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import _actor, _role, csv_response, export_name, role_required
@@ -251,6 +256,8 @@ def run_today(request: HttpRequest) -> HttpResponse:
     rows = _due_rows(run, caught_up)
     chosen = _due_filter(request)
     next_word, next_clock = _next_run(timezone.now())
+    # PLAN-015 Batch 1: the dashboard's operational cards, under the page's own content.
+    ops = receivables.dashboard(today)
     return render(
         request,
         "ledger/run/today.html",
@@ -278,6 +285,16 @@ def run_today(request: HttpRequest) -> HttpResponse:
             "due_count": len(rows),
             "skipped_rows": [row for row in rows if row.status == SKIPPED],
             "recent_runs": [(record, _clock(record.at)) for record in rent_run.recent_runs()],
+            "ops": ops,
+            "run_line": rent_run.run_line(today),
+            "waived_live_heading": one_off_charges.WAIVED_LIVE_HEADING,
+            "not_sent": [
+                (invoice, receivables.invoice_store_label(invoice)) for invoice in ops.not_sent
+            ],
+            "failed_attempts": [
+                (invoice, receivables.invoice_store_label(invoice))
+                for invoice in ops.failed_attempts
+            ],
         },
     )
 

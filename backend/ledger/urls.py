@@ -497,6 +497,8 @@ outbox_patterns = (
 
 urlpatterns = [
     path("", dashboard.home, name="home"),
+    # The dashboard's "Download spreadsheet" (PLAN-015 Batch 1): CSV, billing, read only.
+    path("dashboard.csv", dashboard.home_export, name="dashboard_export"),
     # The top-bar search (PLAN-012d D17): any verified role, read only.
     path("search/", search.search_page, name="search"),
     # The "Which store?" picker's type-ahead (PLAN-012f-b D7): JSON, billing, read only.

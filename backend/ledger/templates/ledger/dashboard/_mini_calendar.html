@@ -1,6 +1,6 @@
 {% load dates money %}
 {% comment %}The mini calendar (PLAN-012f-b D6; PLAN-012g C3; DESIGN-SPEC §4a, §7.5): the month's name links to Reports ›
-Calendar for that month; ‹ › step the month (?cal=YYYY-MM beside an explicit range); a 7-column grid, Sunday
+Calendar for that month; ‹ › step the month (?cal=YYYY-MM beside the page's other choices); a 7-column grid, Sunday
 first, today in a teal circle, under a day with items one dot per kind present (up to three, .mini-dot
 kind-…, coloured by app.css). Each such day is a button over a hidden popover listing its items as links,
 each with a bar in its kind's colour, shown on hover and focus (CSS) and toggled by a tap
@@ -18,7 +18,7 @@ The card ends after its content (app.css). Built from the Calendar page's own re
 <section class="card mini-calendar" id="mini-calendar" aria-labelledby="mini-calendar-heading">
   <div class="card-header mini-head">
     <h2 id="mini-calendar-heading"><a id="mini-month" href="{% url 'ledger:calendar:page' %}?month={{ mini_calendar.month|date:'Y-m' }}">{{ mini_calendar.month|month }}</a></h2>
-    <div class="mini-nav"><a class="btn btn-sm mini-step" id="mini-previous" href="?cal={{ mini_calendar.previous|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Previous month">‹</a><a class="btn btn-sm mini-step" id="mini-next" href="?cal={{ mini_calendar.next|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Next month">›</a></div>
+    <div class="mini-nav"><a class="btn btn-sm mini-step" id="mini-previous" href="?cal={{ mini_calendar.previous|date:'Y-m' }}{% if state_query %}&amp;{{ state_query }}{% endif %}" aria-label="Previous month">‹</a><a class="btn btn-sm mini-step" id="mini-next" href="?cal={{ mini_calendar.next|date:'Y-m' }}{% if state_query %}&amp;{{ state_query }}{% endif %}" aria-label="Next month">›</a></div>
   </div>
   <div class="mini-grid" id="mini-grid">
     <span class="mini-weekday">Su</span><span class="mini-weekday">Mo</span><span class="mini-weekday">Tu</span><span class="mini-weekday">We</span><span class="mini-weekday">Th</span><span class="mini-weekday">Fr</span><span class="mini-weekday">Sa</span>
