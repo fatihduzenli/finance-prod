@@ -242,7 +242,8 @@ def test_the_lease_end_balance_stays_on_the_attention_list_until_paid(pinned: No
     assert f"/one-off-charges/{charge.pk}/" == found[0].url
     assert "allowed by" in found[0].text and "500.00" in found[0].text
     viewer, _ = client_for(Role.VIEWER)
-    page = viewer.get("/").content.decode()
+    # PLAN-015 Batch 1 re-pin: the feed's Needs attention kind lists the item.
+    page = viewer.get("/?kind=attention").content.decode()
     assert "Lease-end balance" in page and "allowed by" in page
     # Partly paid: still listed; paid in full: gone.
     assert one_off_charges.record_payment(
@@ -265,9 +266,9 @@ def test_the_lease_end_balance_stays_on_the_attention_list_until_paid(pinned: No
         today=TODAY,
     ).ok
     assert items() == []
-    # PLAN-012f: the dashboard's Recent payments card may name the paid charge; the attention
-    # card must not. The item itself is gone (asserted above).
-    home = viewer.get("/").content.decode()
-    start = home.index('id="attention')
+    # The feed's payments may name the paid charge; its Needs attention kind must not. The item
+    # itself is gone (asserted above).
+    home = viewer.get("/?kind=attention").content.decode()
+    start = home.index('id="activity-card"')
     attention_card = home[start : home.index("</section>", start)]
     assert "Lease-end balance" not in attention_card

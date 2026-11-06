@@ -1,35 +1,28 @@
 """PLAN-012f Batch C (docs/qa/PLAN-012f-approved-design.md D7 to D9, D11, §6 C): the dashboard,
 the store and operator workspaces and the monthly rent overview on the approved layouts.
 
-The dashboard's four KPI cards with their numbers from seeded data (and the "—" and empty
-states), the Needs attention rows with one action each (none for a viewer), the month's
-collection percentage and progress segments, the Coming up items in date order with their date
-chips, the five recent payments with "Today" and "Yesterday", and each new block's one query;
-the store page's header line, Charges card and totals row, the four side cards and the phone
-summary strip; the operator page's store selector and the same cards; the grid's header, filter
-card, legend, cell blocks, tinted month and totals counts.
+The dashboard's header (PLAN-015 Batch 1 removed the KPI, Needs attention, collection and
+Recent payments cards these tests pinned; tests/test_dashboard_v2.py covers the new page) and
+the Needs attention rows' store titles; the store page's header line, Charges card and totals
+row, the four side cards and the phone summary strip; the operator page's store selector and
+the same cards; the grid's header, filter card, legend, cell blocks, tinted month and totals
+counts.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import UTC, date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
-from django.db import connection
 from django.test import Client
-from django.test.utils import CaptureQueriesContext
 
 from accounts.roles import Role
 from ledger.models import (
     FeeType,
     Lease,
     OneOffCategory,
-    Payment,
-    PaymentKind,
-    PaymentMethod,
-    PaymentStatus,
     RentChargeStatus,
     StoreStatus,
 )
@@ -38,7 +31,6 @@ from ledger.services import workspace
 from tests.receivables_helpers import (
     a_lease,
     a_one_off_charge,
-    a_payment,
     a_rent_charge,
     a_store,
     an_operator,
@@ -69,115 +61,28 @@ def section(html: str, start: str, end: str) -> str:
     return html[at : html.index(end, at)]
 
 
-def kpi(html: str, element_id: str) -> str:
-    return section(html, f'id="{element_id}"', "</div></")
-
-
 # --- D7: the dashboard ---------------------------------------------------------------------------
-
-
-def seeded() -> dict[str, object]:
-    """October: 1,000 paid, 500 pending, 400 of 800 partly paid, 700 unpaid (billed 3,000,
-    collected 1,400); an overdue September charge; one pending ACH debit of 500 started on the
-    2nd; a waived October charge left out."""
-    first = a_lease(a_store("2301", 2301), an_operator("First Co"), debit_day=5)
-    second = a_lease(a_store("2302", 2302), an_operator("Second Co"), debit_day=20)
-    paid = a_rent_charge(first, OCTOBER, RentChargeStatus.PAID, "1000.00", "1000.00")
-    a_payment(paid, "1000.00", date(2026, 10, 5))
-    pending = a_rent_charge(second, OCTOBER, RentChargeStatus.PENDING, "500.00", day=2)
-    a_payment(pending, "500.00", None, PaymentStatus.PENDING, initiated_on=date(2026, 10, 2))
-    third = a_lease(a_store("2303", 2303), an_operator("Third Co"), debit_day=1)
-    a_rent_charge(third, OCTOBER, RentChargeStatus.PARTIAL, "800.00", "400.00", day=1)
-    fourth = a_lease(a_store("2304", 2304), an_operator("Fourth Co"), debit_day=1)
-    a_rent_charge(fourth, OCTOBER, RentChargeStatus.UNPAID, "700.00", day=1)
-    a_rent_charge(fourth, date(2026, 9, 1), RentChargeStatus.UNPAID, "700.00", day=1)
-    a_rent_charge(a_lease(debit_day=9), OCTOBER, RentChargeStatus.WAIVED, "999.00", day=9)
-    return {"first": first, "second": second, "fourth": fourth}
-
-
-def test_the_four_kpis_read_the_seeded_figures() -> None:
-    seeded()
-    html = page(client_for(Role.VIEWER)[0], "/")
-    figures = section(html, 'id="figures-card"', "</section>")
-    labels = re.findall(r'<span class="kpi-label">([^<]+)</span>', figures)
-    assert labels == [
-        "Unpaid balances",
-        "Collected this month",
-        "Pending bank debits",
-        "Today&#x27;s daily charges",
-    ]
-    # Open: 500 pending + 400 partial + 700 + 700 (the 999 waived left out); three stores
-    # owe, each with a charge due before today (a pending charge is owed until it settles).
-    unpaid = kpi(html, "figure-outstanding")
-    assert '<span class="kpi-value tone-unpaid">$2,300.00</span>' in unpaid
-    assert '<span class="kpi-note">3 stores · 3 overdue</span>' in unpaid
-    # Collected this month: 1,000 settled; the month's rent: 1,400 of 3,000 collected (46 %).
-    collected = kpi(html, "figure-paid")
-    assert '<span class="kpi-value">$1,000.00</span>' in collected
-    assert '<span class="kpi-note">46% of Oct 2026 rent</span>' in collected
-    # One pending debit of 500 started on Friday the 2nd: five business days, Friday the 9th.
-    pending = kpi(html, "figure-pending")
-    assert '<span class="kpi-value">$500.00</span>' in pending
-    assert '<span class="kpi-note">1 debit · settle by Oct 9, 2026</span>' in pending
-    assert 'href="/payments/?status=pending&amp;method=ach"' in html
-    run = kpi(html, "figure-run")
-    assert '<span class="kpi-value">—</span>' in run
-    assert 'not created yet · <a href="/run/">details</a>' in run
-
-
-def empty_title(html: str, block_id: str) -> str:
-    """The line of the empty state whose block has ``block_id``."""
-    block = html[html.index(f'<div class="empty-state" id="{block_id}">') :]
-    return block.split('<p class="empty-state-title">', 1)[1].split("</p>", 1)[0]
-
-
-def test_an_empty_dashboard_has_its_dashes_and_sentences() -> None:
-    html = page(client_for(Role.BILLING)[0], "/")
-    assert '<span class="kpi-note">0 stores · 0 overdue</span>' in html
-    assert '<span class="kpi-note">—</span>' in html  # nothing billed this month
-    assert '<span class="kpi-note">0 debits</span>' in html
-    # PLAN-012f-b E-4: the empty cards are the empty state (finance/_empty_state.html).
-    # PLAN-014 A2: the Collection and Coming up cards are gone.
-    assert 'id="collection-none"' not in html and 'class="progress' not in html
-    assert 'id="coming-up-none"' not in html
-    assert empty_title(html, "recent-payments-none") == "No settled payments yet."
-    assert 'id="attention-none"' in html
 
 
 def test_the_header_has_the_long_date_and_new_invoice_for_billing_only() -> None:
     billing = page(client_for(Role.BILLING)[0], "/")
     header = section(billing, 'id="page-header"', "</header>")
-    assert '<span class="page-date" id="dashboard-date">Tuesday, Oct 6, 2026</span>' in header
-    assert 'id="nav-search"' in header
+    # PLAN-015 Batch 1 re-pin: the mockup's sub-line in place of the long date, no search box;
+    # New invoice is a secondary button beside the primary Record payment.
+    assert (
+        '<p class="page-sub" id="dashboard-sub">Collections and balances for October 2026</p>'
+        in (header)
+    )
+    assert 'id="nav-search"' not in header
     # PLAN-012f-b D7: the button opens the "Which store?" picker; the search page for a new
     # invoice is its link without the script (re-pinned from the Stores list).
     assert re.search(
-        r'<a class="btn btn-primary" id="new-invoice" href="/search/\?intent=new_invoice" '
+        r'<a class="btn" id="new-invoice" href="/search/\?intent=new_invoice" '
         r'data-dialog-open="store-picker">.*New invoice</a>',
         header,
     )
     viewer = page(client_for(Role.VIEWER)[0], "/")
     assert 'id="new-invoice"' not in viewer
-
-
-def test_the_month_s_collection_has_the_share() -> None:
-    # PLAN-014 A2: the card is gone; the share still feeds the "Collected this month" figure.
-    seeded()
-    collection = blocks.collection_progress(TODAY)
-    assert (collection.billed, collection.collected, collection.percent) == (
-        D("3000.00"),
-        D("1400.00"),
-        46,
-    )
-    html = page(client_for(Role.VIEWER)[0], "/")
-    assert "46% of Oct 2026 rent" in kpi(html, "figure-paid")
-    assert 'id="collection-card"' not in html
-
-
-def test_more_collected_than_billed_is_capped_at_one_hundred() -> None:
-    lease = a_lease(debit_day=1)
-    a_rent_charge(lease, OCTOBER, RentChargeStatus.PAID, "1000.00", "1500.00", day=1)
-    assert blocks.collection_progress(TODAY).percent == 100
 
 
 def test_the_progress_fills_are_decorative_tokens() -> None:
@@ -194,78 +99,6 @@ def test_the_progress_fills_are_decorative_tokens() -> None:
     assert rule(".badge.promise-open").strip() == (
         "background: var(--pending-bg); color: var(--pending-text);"
     )
-
-
-def test_the_attention_rows_have_one_button_each_for_billing_and_none_for_a_viewer() -> None:
-    seeded()
-    billing = page(client_for(Role.BILLING)[0], "/")
-    table = section(billing, 'id="attention-rows"', "</table>")
-    rows = re.findall(r"<tr class=\"attention-item.*?</tr>", table, re.S)
-    assert rows
-    for row in rows:
-        assert row.count('class="btn btn-sm"') == 1, row
-        assert row.count('class="btn') == 1, row
-    overdue = next(row for row in rows if 'data-kind="overdue"' in row)
-    assert '<span class="badge badge-overdue">' in overdue and "Overdue 35 days</span>" in overdue
-    assert '<a class="cell-title" href="/stores/' in overdue and "Fourth Co</span>" in overdue
-    assert '<td class="money" data-role="amount" data-label="Amount">$700.00</td>' in overdue
-    assert 'id="attention-count">' in billing and 'id="all-unpaid" href="/arrears/"' in billing
-    viewer = page(client_for(Role.VIEWER)[0], "/")
-    table = section(viewer, 'id="attention-rows"', "</table>")
-    assert 'class="btn' not in table and "<form" not in table
-    # The viewer follows the item's page from the line under the badge.
-    assert re.search(r'<span class="cell-subline attention-details"><a href="/charges/', table)
-
-
-def test_the_five_recent_payments_say_today_and_yesterday() -> None:
-    lease = a_lease(a_store("2310", 2310), an_operator("Pay Co"))
-    days = [TODAY, date(2026, 10, 5), date(2026, 10, 1), date(2026, 9, 30), date(2026, 9, 2)]
-    for n, day in enumerate([*days, date(2026, 8, 1)]):
-        charge = a_rent_charge(
-            lease, date(2026, 3 + n, 1), RentChargeStatus.PAID, "100.00", "100.00"
-        )
-        a_payment(charge, f"{100 + n}.00", day)
-    Payment.objects.filter(settled_on=TODAY).update(
-        updated_at=datetime(2026, 10, 6, 18, 2, tzinfo=UTC)  # 14:02 in New York
-    )
-    Payment.objects.create(  # a refund is not a payment received
-        rent_charge=lease.rent_charges.first(),
-        parent_payment=Payment.objects.filter(settled_on=TODAY).first(),
-        kind=PaymentKind.RENT,
-        method=PaymentMethod.ACH,
-        amount=D("5.00"),
-        status=PaymentStatus.SETTLED,
-        settled_on=TODAY,
-        is_refund=True,
-    )
-    rows = blocks.recent_payments(TODAY)
-    assert [row.when for row in rows] == [
-        "Today 14:02",
-        "Yesterday",
-        "Oct 1, 2026",
-        "Sep 30, 2026",
-        "Sep 2, 2026",
-    ]
-    # The store as its page and the grid title it (Fable's review of Batch C).
-    assert rows[0].store == "#2310" and rows[0].paid_for == "Rent Mar 2026"
-    assert rows[0].method == "Bank debit (ACH)" and rows[0].amount == D("100.00")
-    html = page(client_for(Role.VIEWER)[0], "/")
-    card = section(html, 'id="recent-payments"', "</section>")
-    assert card.count('<tr class="recent-payment">') == 5
-    assert ">Today 14:02</a>" in card and ">Yesterday</a>" in card
-    assert 'id="all-payments" href="/payments/">All payments →</a>' in card
-
-
-def test_each_new_block_is_one_query() -> None:
-    seeded()
-    for build in (
-        blocks.pending_debits,
-        lambda: blocks.collection_progress(TODAY),
-        lambda: blocks.recent_payments(TODAY),
-    ):
-        with CaptureQueriesContext(connection) as captured:
-            build()
-        assert len(captured.captured_queries) == 1
 
 
 def test_business_days_skip_the_weekend() -> None:
@@ -488,9 +321,14 @@ def test_every_grid_filter_label_wraps_with_its_control() -> None:
 def test_the_attention_rows_title_their_store_as_the_store_page_does() -> None:
     lease = a_lease(a_store("0101 MAPLE AVENUE", 101), an_operator("Maple Co"))
     a_rent_charge(lease, date(2026, 8, 1), RentChargeStatus.UNPAID)
-    html = page(client_for(Role.BILLING)[0], "/")
-    row = section(html, 'data-kind="overdue"', "</tr>")
+    # PLAN-015 Batch 1 re-pin: the item is a row of the feed's Needs attention kind, its store
+    # titled as the store page titles it, its operator beside it.
+    html = page(client_for(Role.BILLING)[0], "/?kind=attention")
+    row = section(html, 'data-kind="attention"', "</tr>")
     assert (
-        f'<a class="cell-title" href="/stores/{lease.store_id}/">#101 0101 MAPLE AVENUE</a>' in row
+        '<td class="activity-store" data-role="meta" data-label="Store">#101 0101 MAPLE AVENUE</td>'
+        in (row)
     )
-    assert '<span class="cell-subline">Maple Co</span>' in row
+    assert '<td class="activity-operator" data-role="meta" data-label="Operator">Maple Co</td>' in (
+        row
+    )

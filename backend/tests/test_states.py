@@ -144,10 +144,18 @@ def test_the_empty_state_styles_are_the_spec_s() -> None:
 
 
 def test_the_dashboard_s_empty_cards_use_the_empty_state_and_keep_their_ids() -> None:
-    html = client_for(Role.ADMIN)[0].get("/").content.decode()
+    # PLAN-015 Batch 1 re-pin: the dashboard's empty Operators card; the failed attempts and the
+    # invoices not sent moved to Daily charges with their empty states and ids.
+    client = client_for(Role.ADMIN)[0]
+    home = client.get("/").content.decode()
+    operators = home[home.index('<div class="empty-state" id="operators-none">') :]
+    assert (
+        '<p class="empty-state-title">No operator has a lease today.</p>'
+        in (operators.split("</div>", 1)[0])
+    )
+    assert "empty-state-action btn-primary" not in home
+    html = client.get("/run/").content.decode()
     for block_id, title in (
-        ("attention-none", "Nothing needs attention."),
-        ("recent-payments-none", "No settled payments yet."),
         ("failed-attempts-none", "No failed attempts."),
         ("not-sent-none", "Nothing waiting to be sent."),
     ):
@@ -155,7 +163,7 @@ def test_the_dashboard_s_empty_cards_use_the_empty_state_and_keep_their_ids() ->
         assert f'<p class="empty-state-title">{title}</p>' in block.split("</div>", 1)[0]
     failed = html[html.index('<div class="empty-state" id="failed-attempts-none">') :]
     assert "could not collect are listed here.</p>" in failed.split("</div>", 1)[0]
-    # The dashboard's one primary is not an empty state's.
+    # The page's primaries are not an empty state's.
     assert "empty-state-action btn-primary" not in html
 
 

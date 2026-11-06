@@ -197,18 +197,18 @@ def test_paid_this_month_counts_the_last_day_and_not_the_next(today: date) -> No
 
 
 def test_the_page_shows_every_figure_with_its_link(today: date) -> None:
+    """PLAN-015 Batch 1 re-pin: the four KPIs of Design v2 link to their reports
+    (tests/test_dashboard_v2.py reconciles each figure); the run and reconciliation lines moved
+    to Admin › Daily charges with their links."""
     build_mix()
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
-    assert "$10,890.00" in page  # outstanding
-    # PLAN-012f D7: the overdue charges are counted by store under Unpaid balances (2204 has
-    # overdue charges; 3409's are due today or later).
-    assert '<span class="kpi-note">2 stores · 1 overdue</span>' in page
-    assert "$4,100.00" in page  # paid this month
-    assert 'href="/arrears/"' in page
+    assert "$4,100.00" in page  # collected this month (Payments by method)
+    assert 'href="/grid/"' in page and 'href="/reports/aging/"' in page
     assert "/payments/?date_from=2026-10-01&amp;date_to=2026-10-31&amp;status=settled" in page
-    assert 'href="/run/"' in page and 'href="/returns/"' in page
-    assert '<p id="last-reconciliation" class="muted">No nightly check has run yet.</p>' in page
+    run = client.get("/run/").content.decode()
+    assert 'href="/run/"' in run and 'href="/returns/"' in run
+    assert '<p id="last-reconciliation" class="muted">No nightly check has run yet.</p>' in run
 
 
 def test_invoices_not_sent_need_a_provider_reference(today: date) -> None:
@@ -240,13 +240,14 @@ def test_failed_attempts_list_attempted_invoices_with_operator_and_store(today: 
     assert data.failed_attempts_count == 1
     assert [invoice.pk for invoice in data.failed_attempts] == [failed.pk]
     client, _ = client_for(Role.VIEWER)
-    page = client.get("/").content.decode()
+    # PLAN-015 Batch 1 re-pin: the card moved to Admin › Daily charges, under its content.
+    page = client.get("/run/").content.decode()
     assert "Failed payment attempts: 1" in page
     assert "INV-2026-0007" in page and "Delta Retail" in page and "1444 RIVERTON" in page
     assert "$3,740.00" in page
     assert f'href="/charges/{charge.pk}/"' in page
-    # PLAN-012f D7: the failed attempts are a card below the figures.
-    assert page.index("Unpaid balances") < page.index("Failed payment attempts")
+    assert page.index('id="insurance-due"') < page.index("Failed payment attempts")
+    assert "Failed payment attempts" not in client.get("/").content.decode()
 
 
 def test_the_run_summary_uses_the_run_and_returns_functions(today: date) -> None:
@@ -260,7 +261,7 @@ def test_the_run_summary_uses_the_run_and_returns_functions(today: date) -> None
     summary = receivables.dashboard(today).run
     assert (summary.due, summary.pending, summary.returned) == (2, 1, 1)
     client, _ = client_for(Role.VIEWER)
-    page = client.get("/").content.decode()
+    page = client.get("/run/").content.decode()  # PLAN-015 Batch 1 re-pin: the card moved
     assert '<strong id="run-due">2</strong>' in page
     assert '<strong id="run-pending">1</strong>' in page
     assert '<strong id="run-returned">1</strong>' in page
@@ -281,7 +282,7 @@ def test_the_last_reconciliation_is_the_latest_run_that_was_not_skipped(today: d
     assert data.last_reconciliation is not None
     assert data.last_reconciliation.status == ReconciliationStatus.DONE
     client, _ = client_for(Role.VIEWER)
-    page = client.get("/").content.decode()
+    page = client.get("/run/").content.decode()  # PLAN-015 Batch 1 re-pin: the card moved
     assert "Done, started Oct 5, 2026 · 02:00" in page and 'href="/reconciliation/"' in page
 
 

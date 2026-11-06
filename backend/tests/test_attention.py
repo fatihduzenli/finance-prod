@@ -698,27 +698,30 @@ def test_a_returned_installment_is_one_item_per_plan_linking_to_it(today: date) 
 # --- The pages -----------------------------------------------------------------------------
 
 
-def test_the_dashboard_shows_the_list_under_the_figures(today: date) -> None:
+def test_the_dashboard_lists_the_items_as_the_needs_attention_kind(today: date) -> None:
+    """PLAN-015 Batch 1 re-pin: the Needs attention card left the dashboard; its items are the
+    Recent activity feed's Needs attention kind, each with its why as the chip and the rest of
+    its text, linked, as the activity."""
     lease = a_lease(a_store("2204 ELM PARK", 2204), an_operator("Acme"))
     returned_payment(lease)
     client, _ = client_for(Role.VIEWER)
-    page = client.get("/").content.decode()
-    # PLAN-012f D7: the four figures first, then the Needs attention card; each row's why
-    # badge is the text before its first ": ", the rest under it, linked for a viewer.
-    assert page.index('class="kpi-row"') < page.index('id="attention"')
-    row = page[page.index('data-kind="returned_debit"') :].split("</tr>", 1)[0]
-    assert "</span> Returned debit not rescheduled</span>" in row
+    page = client.get("/?kind=attention").content.decode()
+    assert page.index('class="kpi-row') < page.index('id="activity-card"')
+    assert 'id="attention"' not in page
+    row = page[page.index('data-kind="attention"') :].split("</tr>", 1)[0]
+    assert "<span>Returned debit not rescheduled</span>" in row
     assert re.search(
-        r'<a href="/returns/#return-[^"]+">2204 ELM PARK, \$3,500\.00, returned Oct 3, 2026</a>',
+        r'<a href="/returns/#return-[^"]+"><strong>2204 ELM PARK, \$3,500\.00, returned Oct 3, '
+        r"2026</strong></a>",
         row,
     )
-    assert "Acme" in row and "$3,500.00" in row
+    assert "Acme" in row and "$3,500.00" in row and "#2204 ELM PARK" in row
 
 
 def test_the_dashboard_says_when_nothing_needs_attention(today: date) -> None:
     client, _ = client_for(Role.VIEWER)
-    page = client.get("/").content.decode()
-    assert 'id="attention-none"' in page
+    page = client.get("/?kind=attention").content.decode()
+    assert 'id="activity-empty">Nothing needs attention.<' in page  # PLAN-015 Batch 1 re-pin
 
 
 def test_the_operator_page_shows_its_own_items_as_banners(today: date) -> None:
@@ -836,9 +839,13 @@ def test_a_viewer_sees_the_balance_on_the_dashboard(monkeypatch: pytest.MonkeyPa
     end = a_plain_balance()
     monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: le.TODAY)
     client, _ = client_for(Role.VIEWER)
-    page = client.get("/").content.decode()
-    assert f'data-kind="{attention.LEASE_END_BALANCE}"' in page
-    # PLAN-012f D7: the why badge, then the rest of the text, linked for a viewer.
+    # PLAN-015 Batch 1 re-pin: the item is a row of the feed's Needs attention kind, its why
+    # the chip, the rest of its text linked (searched by its amount: the overdue rents of the
+    # seed come first, five a page).
+    page = client.get("/?kind=attention&q=300.00").content.decode()
     why, details = expected(end, "$300.00").split(": ", 1)
-    assert f"</span> {escape(why)}</span>" in page
-    assert f'href="/one-off-charges/{end.debt_charge_id}/">{escape(details)}</a>' in page
+    assert f"<span>{escape(why)}</span>" in page
+    assert (
+        f'href="/one-off-charges/{end.debt_charge_id}/"><strong>{escape(details)}</strong></a>'
+        in page
+    )

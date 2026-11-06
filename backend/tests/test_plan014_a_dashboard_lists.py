@@ -1,10 +1,10 @@
-"""PLAN-014 Batch A (Fable): the dashboard without its fifth row, the Payment status card's own
-Weekly | Monthly period (Sunday–Saturday weeks, stepping, the period under the title, remembered
-per user, a GET never writes), the vacant rows of the stores list, the search + Filters component
-on every list page (count, chips, Clear and Apply, the parameter names unchanged), the five
-payments tiles, and the rule that every numeric column header is aligned like its cells — with
-the adversarial cases of plan §5 A (a hostile ``ps``, ``ps_at=2026-02-30``, a date far in the
-past, a 500-character search, a chip for an unknown value)."""
+"""PLAN-014 Batch A (Fable): the dashboard without its fifth row, the Payment status period's
+preference (remembered per user, a GET never writes; the card itself left with PLAN-015 Batch
+1), the vacant rows of the stores list, the search + Filters component on every list page
+(count, chips, Clear and Apply, the parameter names unchanged), the five payments tiles, and the
+rule that every numeric column header is aligned like its cells — with the adversarial cases of
+plan §5 A (a hostile ``ps``, ``ps_at=2026-02-30``, a date far in the past, a 500-character
+search, a chip for an unknown value)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import pytest
 from django.test import Client
 
 from accounts.roles import Role
+from accounts.themes import payment_status_period_for
 from ledger.models import CollectionStatus, PaymentStatus
 from ledger.services import dashboard as blocks
 from tests.receivables_helpers import a_lease, a_payment, a_rent_charge, a_store, an_operator
@@ -51,105 +52,34 @@ def section(html: str, element_id: str, end: str = "</section>") -> str:
 # --- A2: the fifth row is gone ------------------------------------------------------------------
 
 
-def test_the_dashboard_has_no_coming_up_or_collection_card_and_two_thirds_rows() -> None:
+def test_the_dashboard_has_no_coming_up_or_collection_card() -> None:
+    # PLAN-015 Batch 1 re-pin: Design v2's rows; the Cashflow, Payment status, Needs attention and
+    # Recent payments cards went too (tests/test_dashboard_v2.py pins the new order).
     html = page(client_for(Role.BILLING)[0])
     assert 'id="coming-up"' not in html and 'id="collection-card"' not in html
-    assert "Coming up" not in html and "collection" not in section(html, "payment-status")
-    assert html.count('class="dashboard-row-thirds"') == 2
-    order = [
-        'id="figures-card"',
-        'id="cashflow-card"',
-        'id="attention"',
-        'id="mini-calendar"',
-        'id="recent-payments"',
-        'id="payment-status"',
-        'id="today-run"',
-        'id="failed-attempts"',
-        'id="not-sent-card"',
-        'id="last-reconciliation-card"',
-    ]
-    positions = [html.index(marker) for marker in order]
-    assert positions == sorted(positions)
+    assert "Coming up" not in html
+    for gone in ("cashflow-card", "payment-status", "attention", "recent-payments"):
+        assert f'id="{gone}"' not in html, gone
 
 
 def test_the_service_no_longer_exports_the_removed_blocks() -> None:
-    # collection_progress stays: the "Collected this month" figure reads its share.
     assert not hasattr(blocks, "coming_up") and not hasattr(blocks, "ComingItem")
+    # PLAN-015 Batch 1: the figures and cards of the PLAN-014 page went with them.
+    for gone in (
+        "collection_progress",
+        "pending_debits",
+        "recent_payments",
+        "cashflow",
+        "payment_status",
+        "period_for",
+    ):
+        assert not hasattr(blocks, gone), gone
 
 
 # --- A3: the period ------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("kind", "at", "start", "end", "label"),
-    [
-        ("weekly", date(2026, 10, 6), date(2026, 10, 4), date(2026, 10, 10), "Oct 4 – 10"),
-        ("weekly", date(2026, 10, 29), date(2026, 10, 25), date(2026, 10, 31), "Oct 25 – 31"),
-        ("weekly", date(2026, 10, 4), date(2026, 10, 4), date(2026, 10, 10), "Oct 4 – 10"),
-        ("weekly", date(2026, 10, 10), date(2026, 10, 4), date(2026, 10, 10), "Oct 4 – 10"),
-        ("weekly", date(2026, 9, 30), date(2026, 9, 27), date(2026, 10, 3), "Sep 27 – Oct 3"),
-        ("weekly", date(2026, 12, 30), date(2026, 12, 27), date(2027, 1, 2), "Dec 27 – Jan 2"),
-        ("weekly", date(2026, 3, 8), date(2026, 3, 8), date(2026, 3, 14), "Mar 8 – 14"),
-        ("weekly", date(2026, 11, 1), date(2026, 11, 1), date(2026, 11, 7), "Nov 1 – 7"),
-        ("monthly", date(2026, 10, 6), date(2026, 10, 1), date(2026, 10, 31), "October 2026"),
-        ("monthly", date(2026, 2, 28), date(2026, 2, 1), date(2026, 2, 28), "February 2026"),
-        ("monthly", date(2027, 1, 15), date(2027, 1, 1), date(2027, 1, 31), "January 2027"),
-    ],
-)
-def test_the_period_runs_sunday_to_saturday_or_over_the_month(
-    kind: str, at: date, start: date, end: date, label: str
-) -> None:
-    period = blocks.period_for(kind, at, TODAY)
-    assert (period.kind, period.start, period.end) == (kind, start, end)
-    assert period.label == label
-    if kind == "weekly":
-        assert (period.end - period.start).days == 6 and period.start.weekday() == 6
-
-
-def test_stepping_moves_exactly_one_period_each_way() -> None:
-    for kind in ("weekly", "monthly"):
-        period = blocks.period_for(kind, TODAY, TODAY)
-        before = blocks.period_for(kind, period.prev_at, TODAY)
-        after = blocks.period_for(kind, period.next_at, TODAY)
-        assert before.end == period.start - timedelta(days=1), kind
-        assert after.start == period.end + timedelta(days=1), kind
-    december = blocks.period_for("monthly", date(2027, 1, 15), TODAY)
-    assert blocks.period_for("monthly", december.prev_at, TODAY).label == "December 2026"
-
-
-@pytest.mark.parametrize("kind", ["yearly", "", "WEEKLY", "<script>", "monthly\x00"])
-def test_an_unknown_kind_is_weekly(kind: str) -> None:
-    assert blocks.period_for(kind, TODAY, TODAY).kind == "weekly"
-
-
-@pytest.mark.parametrize("at", [date(2000, 1, 1), date(2099, 12, 31), None])
-def test_a_date_out_of_bounds_or_missing_is_today(at: date | None) -> None:
-    assert blocks.period_for("weekly", at, TODAY).start == date(2026, 10, 4)
-
-
-def test_the_card_follows_the_query_and_the_week_is_the_default() -> None:
-    lease = a_lease(a_store("1401"), an_operator("Week Co"))
-    a_rent_charge(lease, date(2026, 10, 1), due="900.00", day=8)  # due Oct 8: this week
-    a_rent_charge(lease, date(2026, 9, 1), due="800.00", day=20)  # Sep 20: not this week
-    client, _ = client_for(Role.BILLING)
-    card = section(page(client), "payment-status")
-    assert "Oct 4 – 10" in card and "Last 12 months" not in card
-    for key in ("overdue", "paid", "upcoming"):
-        assert f'id="status-{key}"' in card, key
-    month = section(page(client, "/?ps=monthly"), "payment-status")
-    assert "October 2026" in month
-    september = section(page(client, "/?ps=monthly&ps_at=2026-09-15"), "payment-status")
-    assert "September 2026" in september
-    assert 'aria-pressed="true"' in card and card.count('aria-pressed="true"') == 1
-
-
-def test_the_segments_and_steps_keep_the_other_query_parameters() -> None:
-    client, _ = client_for(Role.VIEWER)
-    card = section(page(client, "/?range=6m&cal=2026-11"), "payment-status")
-    links = re.findall(r'href="([^"]*ps_at=[^"]*)"', card)
-    assert len(links) >= 2
-    for link in links:
-        assert "range=6m" in link and "cal=2026-11" in link, link
+# PLAN-015 Batch 1: the Payment status card and its Weekly | Monthly period are gone (the owner's
+# decision 1); their tests went with them. The preference route stays and still saves only on a
+# POST; ?ps= on the dashboard is ignored and never echoed.
 
 
 @pytest.mark.parametrize(
@@ -164,20 +94,19 @@ def test_the_segments_and_steps_keep_the_other_query_parameters() -> None:
 )
 def test_a_hostile_period_never_breaks_the_page_or_echoes(query: str) -> None:
     html = page(client_for(Role.VIEWER)[0], query)
-    card = section(html, "payment-status")
-    assert "<script>" not in card
-    assert "Oct 4 – 10" in card or "October 2026" in card
+    assert "<script>" not in section(html, "figures-card")
+    assert 'name="period" value="month" aria-pressed="true"' in html
 
 
 def test_the_choice_is_saved_by_post_only_and_remembered() -> None:
-    client, _ = client_for(Role.VIEWER)  # a viewer may save a preference
+    client, user = client_for(Role.VIEWER)  # a viewer may save a preference
     page(client, "/?ps=monthly")
-    assert "Oct 4 – 10" in section(page(client), "payment-status")  # a GET never writes
+    assert payment_status_period_for(user) == "weekly"  # a GET never writes
     response = client.post(
         "/settings/payment-status/", {"period": "monthly", "next": "/?ps=monthly"}
     )
     assert response.status_code == 302 and response["Location"] == "/?ps=monthly"
-    assert "October 2026" in section(page(client), "payment-status")
+    assert payment_status_period_for(user) == "monthly"
     response = client.post(
         "/settings/payment-status/", {"period": "monthly", "next": "https://evil.example/"}
     )
@@ -185,7 +114,7 @@ def test_the_choice_is_saved_by_post_only_and_remembered() -> None:
     assert client.post("/settings/payment-status/", {"period": "yearly"}).status_code == 400
     assert client.post("/settings/payment-status/", {}).status_code == 400
     assert client.get("/settings/payment-status/").status_code == 405
-    assert "October 2026" in section(page(client), "payment-status")  # the bad posts saved nothing
+    assert payment_status_period_for(user) == "monthly"  # the bad posts saved nothing
 
 
 def test_an_anonymous_post_does_not_save() -> None:

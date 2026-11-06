@@ -292,20 +292,21 @@ def test_the_owners_scenario_lists_both_past_promises_oldest_first_without_a_bal
 def test_the_dashboard_shows_the_owners_two_broken_promises(today: date, role: Role) -> None:
     operator, _ = owners_scenario()
     client, _ = client_for(role)
-    page = client.get("/").content.decode()
-    assert 'id="attention-none"' not in page
-    # PLAN-012f D7: the why badge (the text before its first ": "), then the rest, linked.
-    first = page.index("</span> Promise to pay $1,500.00 by Oct 1, 2026</span>")
-    fifth = page.index("</span> Promise to pay $1,500.00 by Oct 5, 2026</span>")
+    # PLAN-015 Batch 1 re-pin: the items are the feed's Needs attention kind; the why (the text
+    # before its first ": ") is the chip, the rest the activity, linked.
+    page = client.get("/?kind=attention").content.decode()
+    assert 'id="activity-empty"' not in page
+    first = page.index("<span>Promise to pay $1,500.00 by Oct 1, 2026</span>")
+    fifth = page.index("<span>Promise to pay $1,500.00 by Oct 5, 2026</span>")
     assert first < fifth
-    assert page.index(">Sena on store S1: owes $0.00, not kept</a>") < fifth
-    assert ">Sena on store S5: owes $0.00, not kept</a>" in page
+    assert page.index(">Sena on store S1: owes $0.00, not kept</strong></a>") < fifth
+    assert ">Sena on store S5: owes $0.00, not kept</strong></a>" in page
     assert "by Oct 7, 2026" not in page
-    # The two broken promises link to the operator's notes from Needs attention; the mini
-    # calendar's promise rows link there too, so count inside the attention section only.
-    start = page.index('id="attention"')
-    attention = page[start : page.index("</section>", start)]
-    assert attention.count(f'href="/operators/{operator.pk}/#contacts"') == 2
+    # The two broken promises link to the operator's notes; the mini calendar's promise rows
+    # link there too, so count inside the feed's table only.
+    start = page.index('id="activity-table"')
+    feed = page[start : page.index("</table>", start)]
+    assert feed.count(f'href="/operators/{operator.pk}/#contacts"') == 2
 
 
 def test_the_operator_page_shows_the_owners_broken_promises_as_banners(today: date) -> None:

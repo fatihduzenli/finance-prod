@@ -107,7 +107,9 @@ def test_the_bottom_bar_marks_the_page_it_is_on_and_only_that_one(path: str, act
 
 def test_the_header_search_is_a_bounded_get_form_and_a_hostile_query_echoes_nothing() -> None:
     billing, _ = client_for(Role.BILLING)
-    body = billing.get("/").content.decode()
+    # PLAN-015 Batch 1 re-pin: the dashboard's header has no search box (the owner's mockup);
+    # the stores list's has.
+    body = billing.get(reverse("ledger:stores:list")).content.decode()
     form = re.search(r'<form [^>]*id="nav-search"[^>]*>(.*?)</form>', body, re.S)
     assert form is not None
     assert 'method="get"' in form.group(0)

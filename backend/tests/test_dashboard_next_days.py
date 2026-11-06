@@ -594,8 +594,8 @@ def test_the_mini_calendar_s_column_ends_after_its_card() -> None:
     assert ".dashboard-side-fit { align-self: start; }" in css
     html = page(client_for(Role.VIEWER)[0])
     column = html.index('<div class="dashboard-side dashboard-side-fit">')
-    assert column < html.index('id="mini-calendar"') < html.index('id="dashboard-row-payments"')
-    # Only the mini calendar's column: Payment status keeps the row's height.
+    # PLAN-015 Batch 1 re-pin: the column beside the Recent activity card, the page's last row.
+    assert html.index('id="activity-card"') < column < html.index('id="mini-calendar"')
     assert html.count("dashboard-side-fit") == 1
     rules = css[css.index(".mini-upcoming {") : css.index(".mini-days-list {")]
     assert "#" not in rules.replace("#mini", "")  # tokens only: no literal colour

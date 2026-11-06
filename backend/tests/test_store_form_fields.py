@@ -25,7 +25,7 @@ from accounts.roles import Role
 from finance.us_states import US_STATES, state_name
 from ledger.forms import STATE_REFUSED, StoreCreateForm, StoreForm
 from ledger.models import AuditLog, Brand, Store, StoreCost, StoreStatus
-from ledger.services import attention, dashboard, pnl
+from ledger.services import attention, pnl
 from ledger.services import stores as service
 from tests.receivables_helpers import a_lease, a_store, an_operator
 from tests.test_operator_views import client_for
@@ -378,6 +378,4 @@ def test_the_pnl_and_the_cashflow_read_an_empty_landlord_rent_as_unknown() -> No
     assert row.landlord_rent is None and pnl.LANDLORD_RENT in row.unknown
     page = admin.get("/reports/pnl/", {"from": "2026-07", "to": "2026-07"}).content.decode()
     assert "Unknown: landlord rent" in page
-    chosen = dashboard.Range("custom", "Jul 2026", JULY, JULY)
-    flow = dashboard.cashflow(chosen)
-    assert flow.expenses is None and flow.stores_without_cost == 1
+    # PLAN-015 Batch 1: the dashboard's Cashflow card (which read the P&L's rows) is gone.
