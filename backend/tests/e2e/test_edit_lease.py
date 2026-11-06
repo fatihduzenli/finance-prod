@@ -35,6 +35,8 @@ def signed_in(context: BrowserContext, live_server: LiveServer, username: str) -
     page.locator("#id_token-otp_token").fill(current_code(device))
     page.get_by_role("button", name="Next").click()
     page.wait_for_url(f"{live_server.url}/")
+    # The dashboard's own requests finish before the test opens the next page.
+    page.wait_for_load_state("networkidle")
     return page
 
 
