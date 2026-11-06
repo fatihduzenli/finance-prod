@@ -410,14 +410,14 @@ def test_the_help_index_and_every_topic_answer_every_role(role: Role) -> None:
     index = client.get("/help/")
     assert index.status_code == 200
     html = index.content.decode()
-    assert "Monvera · Help</title>" in html
+    assert "Help · Monvera</title>" in html
     for topic in help_pages.TOPICS:
         assert f'href="/help/{topic.slug}/"' in html and topic.title in html
     for path in TOPIC_PATHS:
         response = client.get(path)
         assert response.status_code == 200, path
         text = response.content.decode()
-        assert "Monvera · Help</title>" in text, path
+        assert "Help · Monvera</title>" in text, path
         # The topic itself has no form (the shell's Sign out, after the page since PLAN-012f
         # D4's bottom bar, is not the topic's).
         article = text.split('id="help-topic"', 1)[1].split("</article>", 1)[0]

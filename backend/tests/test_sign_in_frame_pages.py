@@ -59,7 +59,7 @@ def test_the_401_page_takes_the_sign_in_composition_and_keeps_its_next_link() ->
         f'<a class="btn btn-primary" id="sign-in-link" href="{LOGIN_PATH}?next=%2Fstores%2F">'
         "Sign in</a>"
     )
-    assert "<title>[SANDBOX] Monvera · Sign in required</title>" in page
+    assert "<title>[SANDBOX] Sign in required · Monvera</title>" in page
 
 
 def test_the_mfa_page_for_a_user_without_a_device_offers_the_setup_over_sign_out() -> None:

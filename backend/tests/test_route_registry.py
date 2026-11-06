@@ -89,14 +89,17 @@ def test_public_set_is_exactly_login_healthz_webhook_receiver_and_static() -> No
         "webhooks:receive",
         "ledger:calendar:feed",
         "ledger:statement_link",
+        # Owner, 2026-11-05: the web app manifest, GET and HEAD only; it carries no data.
+        "finance:manifest",
     }
     assert registry.PUBLIC_UNSAFE_ROUTE_NAMES == {"two_factor:login", "webhooks:receive"}
     assert registry.PUBLIC_PATH_PREFIXES == (f"/{settings.STATIC_URL.lstrip('/')}",)
 
 
 def test_the_portal_sets_are_pinned_and_apart_from_the_staff_ones() -> None:
-    # PLAN-014 H1: the portal's routes, its public six (the catch-all 404 is one), and the
-    # portal namespace holds exactly them; none is a staff public, read-only or ruled route.
+    # PLAN-014 H1: the portal's routes, its public seven (the catch-all 404 is one; the
+    # portal's manifest since 2026-11-05), and the portal namespace holds exactly them; none
+    # is a staff public, read-only or ruled route.
     assert registry.PORTAL_PUBLIC_ROUTE_NAMES == {
         "portal:login",
         "portal:invite",
@@ -104,6 +107,7 @@ def test_the_portal_sets_are_pinned_and_apart_from_the_staff_ones() -> None:
         "portal:reset_confirm",
         "portal:logout",
         "portal:not_found",
+        "portal:manifest",
     }
     assert registry.PORTAL_ROUTE_NAMES == registry.PORTAL_PUBLIC_ROUTE_NAMES | {
         "portal:home",

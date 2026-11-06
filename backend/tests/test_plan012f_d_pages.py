@@ -559,6 +559,23 @@ def test_the_routes_that_are_not_pages_answer_as_listed(world: World) -> None:
             assert response.status_code != 200 or 'id="page-header"' not in body, name
 
 
+#: The portal's routes are outside the two URL files above (portal/urls.py, PLAN-014 H1); the
+#: one that is not a page is listed here with its reason (owner, 2026-11-05).
+PORTAL_NOT_PAGES: dict[str, str] = {
+    "portal:manifest": "the portal's PWA manifest (JSON), opening on /portal/",
+}
+
+
+def test_the_portal_routes_that_are_not_pages_answer_as_listed() -> None:
+    names = {name for name, _, _ in iter_routes() if name}
+    for name in PORTAL_NOT_PAGES:
+        assert name in names and name in registry.PORTAL_PUBLIC_ROUTE_NAMES, name
+        response = Client().get(reverse(name))
+        assert response.status_code == 200, name
+        assert response["Content-Type"] == "application/manifest+json", name
+        assert "<html" not in response.content.decode(), name
+
+
 # --- Every page in the shell ------------------------------------------------------------------
 
 
@@ -930,8 +947,8 @@ def test_the_login_page_has_the_two_panels_of_the_reference(login_page: str) -> 
         '<p class="auth-note" id="auth-note">Access is by invitation. Ask an admin if you need '
         "an account.</p>"
     ) in main
-    # The tab title stays the package's word.
-    assert "<title>[SANDBOX] Monvera · Login</title>" in login_page
+    # The tab title stays the package's word, then the app's name (owner, 2026-11-05).
+    assert "<title>[SANDBOX] Login · Monvera</title>" in login_page
 
 
 def test_the_login_form_keeps_its_fields_names_and_flow(login_page: str) -> None:

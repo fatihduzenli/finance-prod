@@ -601,7 +601,7 @@ def test_the_renamed_pages_render_their_new_names(
         assert text in html, (path_name, text)
     for text in absent:
         assert text not in html, (path_name, text)
-    assert "<title>[SANDBOX] Monvera · " in html
+    assert re.search(r"<title>\[SANDBOX\] [^<]+ · Monvera</title>", html)
 
 
 def test_the_store_page_tabs_and_action_bar_render_the_new_names() -> None:

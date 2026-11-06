@@ -266,7 +266,8 @@ def test_no_literal_colour_in_app_css_or_print_css() -> None:
 def test_the_pwa_colours_follow_the_tokens() -> None:
     spec = declarations(spec_block())
     assert pwa.THEME_COLOR == spec["--navy"].lower()
-    assert pwa.BACKGROUND_COLOR == spec["--bg"].lower()
+    # The manifest's colours, the dark --bg, are checked against tokens.css in
+    # tests/test_app_identity.py (owner, 2026-11-05).
 
 
 # --- D2: Inter, self-hosted ------------------------------------------------------------------
@@ -498,7 +499,7 @@ def test_the_default_header_is_the_title_block() -> None:
     header = element(html, "page-header", "</header>")
     # The block's own text as written, its variable escaped: the same as the tab title.
     assert '<div class="page-header"><h1>Plain & &lt;b&gt;x&lt;/b&gt;</h1></div>' in header
-    assert "<title>Monvera · Plain & &lt;b&gt;x&lt;/b&gt;</title>" in html
+    assert "<title>Plain & &lt;b&gt;x&lt;/b&gt; · Monvera</title>" in html
 
 
 def test_the_page_title_tag_renders_nothing_outside_a_page() -> None:

@@ -48,12 +48,14 @@ def test_a_company_or_provider_name_with_markup_is_escaped_everywhere() -> None:
     assert login.status_code == 200 and MARKUP not in login.content.decode()
 
 
-def test_the_manifest_carries_the_name_as_data_and_the_brand_icons_exist() -> None:
-    """The manifest stays behind the sign-in (PLAN-011 D9); the icons are the brand files."""
+def test_the_manifest_carries_no_company_name_and_the_brand_icons_exist() -> None:
+    """The manifest is public and the app's (owner, 2026-11-05): a company name with markup
+    never reaches it; the icons are the brand files."""
     from django.contrib.staticfiles import finders
 
     _settings(name=NAME, short_name=NAME)
-    assert Client().get("/manifest.webmanifest").status_code in (401, 404)
+    signed_out = Client().get("/manifest.webmanifest")
+    assert signed_out.status_code == 200 and MARKUP not in signed_out.content.decode()
     viewer, _ = client_for(Role.VIEWER)
     manifest = None
     for path in ("/manifest.webmanifest", "/manifest.json"):
@@ -63,7 +65,8 @@ def test_the_manifest_carries_the_name_as_data_and_the_brand_icons_exist() -> No
             break
     assert manifest is not None, "no manifest route answered a signed-in viewer"
     data = json.loads(manifest.content)
-    assert isinstance(data["name"], str) and MARKUP in data["name"]  # data, not markup
+    assert (data["name"], data["short_name"]) == ("Monvera", "Monvera")
+    assert MARKUP not in manifest.content.decode()
     icons = data.get("icons", [])
     assert icons and all("brand" in icon["src"] for icon in icons)
     for icon in icons:
