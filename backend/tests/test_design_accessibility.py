@@ -40,6 +40,7 @@ from documents_storage.memory import MemoryDocumentStorage
 from finance.templatetags.components import FAMILIES, GLYPHS, status_badge
 from payments.fake import FakeProvider
 from tests.auth_helpers import make_user, verified_client
+from tests.receivables_helpers import a_store
 from tests.visual import world as visual_world
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -751,6 +752,35 @@ def test_every_status_badge_in_a_template_carries_its_glyph_and_its_words() -> N
         assert f'class="badge badge-{family}"' in badge and GLYPHS[family] in badge, value
         assert badge.endswith(" Words</span>")
     assert set(FAMILIES) == set(GLYPHS)
+
+
+@pytest.mark.django_db
+def test_the_calendar_entry_link_chip_carries_its_glyph_its_words_and_a_named_remove() -> None:
+    """The New calendar entry dialog's link (owner, 2026-11-06): the chosen record as a neutral
+    chip led by its glyph (hidden from screen readers), then the kind and name in words, then
+    the × button named for screen readers; the search field has its label."""
+    store = a_store("Elm Park", 2204)
+    client = client_as(Role.BILLING)
+    response = client.post(
+        "/calendar/new/",
+        {
+            "kind": "note",
+            "on": "2026-10-20",
+            "title": "",
+            "link_kind": "store",
+            "link_id": store.pk,
+        },
+    )
+    assert response.status_code == 200
+    page = response.content.decode()
+    chip = re.search(
+        r'<span class="status-chip status-chip-neutral link-chip"[^>]*>(.*?)</button>', page, re.S
+    )
+    assert chip is not None
+    assert re.match(r'<svg class="icon icon-circle"[^>]*aria-hidden="true"', chip.group(1))
+    assert '<span id="entry-link-text">Store: #2204 Elm Park</span>' in chip.group(1)
+    assert chip.group(1).endswith('aria-label="Remove the link">&times;')
+    assert unlabelled_controls(page) == []
 
 
 #: The status line's first words of each cell status (PLAN-012f D6: the amount comes first,
