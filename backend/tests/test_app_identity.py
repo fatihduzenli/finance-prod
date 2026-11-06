@@ -27,6 +27,7 @@ from accounts.roles import Role
 from finance import pwa
 from ledger.models import CompanySettings
 from tests.auth_helpers import make_user, verified_client
+from tests.text_helpers import assert_absent
 
 pytestmark = pytest.mark.django_db
 
@@ -171,7 +172,8 @@ def test_a_company_name_never_reaches_the_public_manifest() -> None:
     row.name, row.short_name = "Acme <script>x</script>", "Acme"
     row.save()
     body = Client().get("/manifest.webmanifest").content.decode()
-    assert "Acme" not in body and "<script" not in body
+    assert_absent(body, "Acme")
+    assert "<script" not in body
     assert "://" not in body
     for value in (settings.SECRET_KEY, settings.STAX_API_KEY, settings.APP_BASE_URL):
         assert value not in body
