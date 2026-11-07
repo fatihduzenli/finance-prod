@@ -42,7 +42,7 @@
         <td class="money">{{ invoice.amount_paid|money }}</td>
         <td>{{ invoice.get_internal_status_display }}</td>
         <td>{{ invoice.provider_status|default:"—" }}</td>
-        <td>{% if item.cancel_url %}<a class="btn btn-sm invoice-cancel" href="{{ item.cancel_url }}">Cancel</a>{% endif %}</td>
+        <td><a class="btn btn-sm invoice-pdf" href="{% url 'ledger:invoices:pdf' pk=invoice.pk %}">Download PDF</a>{% if item.cancel_url %} <a class="btn btn-sm invoice-cancel" href="{{ item.cancel_url }}">Cancel</a>{% endif %}</td>
       </tr>
     {% endwith %}{% empty %}
       <tr><td colspan="9" class="muted empty">{% if invoice_filter == "unpaid" %}No unpaid invoice.{% else %}No invoice.{% endif %}{% with next=space.actions|action_named:"create_invoice" %}{% if next %} <a class="btn empty-next" href="{{ next.url }}">{{ next.label }}</a>{% endif %}{% endwith %}</td></tr>

@@ -163,6 +163,13 @@ class LedgerRow:
     transaction: str
     has_note: bool
 
+    @property
+    def has_receipt(self) -> bool:
+        """PLAN-015c: whether the payment has a receipt PDF (settled money received)."""
+        from ledger.services.pdf.receipt import has_receipt
+
+        return has_receipt(self.payment)
+
 
 def _date(value: str | None) -> date | None:
     try:

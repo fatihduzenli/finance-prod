@@ -412,6 +412,9 @@ NOT_PAGES: dict[str, str] = {
     "ledger:calendar:search": "the calendar entry dialog's link rows (JSON for its script)",
     "ledger:invoices:print": "the invoice document's print page (its own layout)",
     "ledger:lease_ends:pdf": "the statement PDF",
+    # PLAN-015c: rendered on request, downloaded.
+    "ledger:invoices:pdf": "the invoice PDF",
+    "ledger:payments:receipt": "the receipt PDF",
     "ledger:documents:download": "a stored file",
     "ledger:documents:preview": "a stored file in a frame",
     "ledger:stores:schedule_payment": "a redirect to the builder with its choice (PLAN-012e-2 D3)",
