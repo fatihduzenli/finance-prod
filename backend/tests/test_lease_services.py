@@ -24,6 +24,7 @@ from django.test import override_settings
 from django.utils import timezone
 
 from accounts.roles import Role
+from ledger.forms import PAYMENT_NOTE_MAX_LENGTH
 from ledger.models import (
     AuditLog,
     CollectionSchedule,
@@ -39,6 +40,7 @@ from ledger.models import (
     StoreStatus,
 )
 from ledger.services import leases as service
+from ledger.services import rent_run
 from ledger.services.leases import AutopayAction, LeaseRefused
 from ledger.wording import format_amount
 from payments.errors import CircuitOpen, ProviderError, ProviderRejected, ProviderUnavailable
@@ -2098,3 +2100,404 @@ def test_a_lease_without_a_start_date_has_no_first_month(django_assert_num_queri
     lease = a_lease(started=None)
     with django_assert_num_queries(0):
         assert service.first_month_billed(lease) is False
+
+
+# --- PLAN-015b §3 A: activation on the start date and "Activate now" -------------------------
+
+#: A card-shaped number (the published test card): the reason's validator refuses it.
+CARD = "4111 1111 1111 1111"
+
+
+def prospective(starts: date | None, **overrides: Any) -> Lease:
+    """A prospective lease starting ``starts``, debited on the 1st (a lease starting after
+    the 1st is first due on its start date), saved the day before it starts."""
+    fields: dict[str, Any] = {"debit_day": 1, **overrides}
+    lease = make_lease(collection_status=CollectionStatus.PROSPECTIVE, started_on=starts, **fields)
+    assert not RentCharge.objects.filter(lease=lease).exists()
+    return lease
+
+
+def status_rows(lease: Lease, action: str) -> list[AuditLog]:
+    return list(
+        AuditLog.objects.filter(
+            entity_type="lease", entity_id=str(lease.pk), action=action
+        ).order_by("id")
+    )
+
+
+def test_a_prospective_lease_is_activated_and_charged_on_its_start_date(actor: User) -> None:
+    lease = prospective(date(2026, 11, 7))
+    summary = service.activate_due(date(2026, 11, 7))
+    assert summary == service.ActivationSummary(activated=1, waiting=0)
+    lease.refresh_from_db()
+    assert lease.collection_status == CollectionStatus.ACTIVE
+    [row] = status_rows(lease, "lease.activated")
+    assert row.actor is None
+    assert row.before is not None and row.before["collection_status"] == "prospective"
+    assert row.after is not None and row.after["collection_status"] == "active"
+    assert row.after["trigger"] == "start_date"
+    [charge] = RentCharge.objects.filter(lease=lease)
+    assert (charge.period_month, charge.due_on) == (date(2026, 11, 1), date(2026, 11, 7))
+    # A second run the same day finds nothing to activate and charges nothing more.
+    assert service.activate_due(date(2026, 11, 7)) == service.ActivationSummary(0, 0)
+    assert RentCharge.objects.filter(lease=lease).count() == 1
+
+
+def test_a_lease_past_its_start_date_is_activated_and_caught_up() -> None:
+    lease = prospective(date(2026, 9, 20))
+    assert service.activate_due(date(2026, 11, 7)).activated == 1
+    months = sorted(RentCharge.objects.filter(lease=lease).values_list("period_month", flat=True))
+    assert months == [date(2026, 9, 1), date(2026, 10, 1), date(2026, 11, 1)]
+
+
+def test_a_lease_before_its_start_date_is_neither_activated_nor_waiting() -> None:
+    lease = prospective(date(2026, 11, 8))
+    assert service.activate_due(date(2026, 11, 7)) == service.ActivationSummary(0, 0)
+    lease.refresh_from_db()
+    assert lease.collection_status == CollectionStatus.PROSPECTIVE
+    assert status_rows(lease, "lease.activated") == []
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        {"operator": None},
+        {"debit_day": None},
+        {"payment_channel": PaymentChannel.UNKNOWN},
+    ],
+    ids=["no operator", "no debit day", "unknown channel"],
+)
+def test_a_lease_missing_a_requirement_waits_untouched(missing: dict[str, Any]) -> None:
+    lease = prospective(date(2026, 11, 1))
+    Lease.objects.filter(pk=lease.pk).update(**missing)
+    before = lease.updated_at
+    assert service.activate_due(date(2026, 11, 7)) == service.ActivationSummary(0, 1)
+    lease.refresh_from_db()
+    assert lease.collection_status == CollectionStatus.PROSPECTIVE
+    assert lease.updated_at == before and not lease.needs_review
+    assert status_rows(lease, "lease.activated") == []
+    assert not RentCharge.objects.filter(lease=lease).exists()
+
+
+def test_the_activation_step_never_touches_an_active_paused_or_ended_lease() -> None:
+    others = [
+        make_lease(
+            collection_status=status,
+            started_on=date(2026, 9, 1),
+            operator=make_operator(email=f"{status}@example.com"),
+        )
+        for status in (CollectionStatus.ACTIVE, CollectionStatus.PAUSED)
+    ]
+    ended = make_lease(
+        collection_status=CollectionStatus.ENDED,
+        started_on=date(2026, 9, 1),
+        operator=make_operator(email="ended@example.com"),
+    )
+    Lease.objects.filter(pk=ended.pk).update(ended_on=date(2026, 10, 31))
+    # A prospective lease with an end date is not activated either.
+    closed = prospective(date(2026, 9, 1), operator=make_operator(email="closed@example.com"))
+    Lease.objects.filter(pk=closed.pk).update(ended_on=date(2026, 10, 31))
+    assert service.activate_due(date(2026, 11, 7)) == service.ActivationSummary(0, 0)
+    for lease, status in (
+        (others[0], CollectionStatus.ACTIVE),
+        (others[1], CollectionStatus.PAUSED),
+        (ended, CollectionStatus.ENDED),
+        (closed, CollectionStatus.PROSPECTIVE),
+    ):
+        lease.refresh_from_db()
+        assert lease.collection_status == status
+        assert status_rows(lease, "lease.activated") == []
+
+
+def test_activate_now_moves_a_later_start_and_its_only_rent_row_to_today(actor: User) -> None:
+    lease = prospective(date(2026, 11, 20))
+    activated = service.activate(lease.pk, actor=actor, today=date(2026, 11, 7))
+    assert (activated.collection_status, activated.started_on) == (
+        CollectionStatus.ACTIVE,
+        date(2026, 11, 7),
+    )
+    [rent] = LeaseRentHistory.objects.filter(lease=lease)
+    assert (rent.effective_from, rent.effective_to) == (date(2026, 11, 7), None)
+    [row] = status_rows(lease, "lease.activated")
+    assert row.actor == actor
+    assert row.after is not None and row.after["trigger"] == "staff"
+    assert row.after["started_on"] == "2026-11-07"
+    assert row.after["started_on_was"] == "2026-11-20"
+    # The first month is billed at once, from today.
+    [charge] = RentCharge.objects.filter(lease=lease)
+    assert (charge.period_month, charge.due_on) == (date(2026, 11, 1), date(2026, 11, 7))
+
+
+def test_activate_now_on_the_start_date_keeps_the_date() -> None:
+    lease = prospective(date(2026, 11, 7))
+    service.activate(lease.pk, actor=None, today=date(2026, 11, 7))
+    lease.refresh_from_db()
+    assert lease.started_on == date(2026, 11, 7)
+    [row] = status_rows(lease, "lease.activated")
+    assert row.after is not None and "started_on_was" not in row.after
+    assert row.after["trigger"] == "staff"
+
+
+def test_activate_now_keeps_the_rows_of_a_lease_with_two_rent_rows() -> None:
+    lease = prospective(date(2026, 11, 20), rent=D("1500.00"))
+    first = LeaseRentHistory.objects.get(lease=lease)
+    first.effective_to = date(2026, 12, 31)
+    first.save(update_fields=["effective_to"])
+    LeaseRentHistory.objects.create(
+        lease=lease, amount=D("1600.00"), effective_from=date(2027, 1, 1), source="staff"
+    )
+    service.activate(lease.pk, actor=None, today=date(2026, 11, 7))
+    lease.refresh_from_db()
+    assert lease.started_on == date(2026, 11, 7)
+    rows = list(
+        LeaseRentHistory.objects.filter(lease=lease)
+        .order_by("effective_from")
+        .values_list("effective_from", "effective_to")
+    )
+    assert rows == [(date(2026, 11, 20), date(2026, 12, 31)), (date(2027, 1, 1), None)]
+    # No rent is in effect on the new start: nothing is charged for it yet.
+    assert not RentCharge.objects.filter(lease=lease).exists()
+
+
+@pytest.mark.parametrize(
+    "status",
+    [CollectionStatus.ACTIVE, CollectionStatus.PAUSED, CollectionStatus.ENDED],
+)
+def test_activate_now_is_refused_unless_prospective(status: str) -> None:
+    lease = make_lease(collection_status=status, started_on=date(2026, 9, 1))
+    before = actions(lease)
+    with pytest.raises(LeaseRefused) as refused:
+        service.activate(lease.pk, actor=None, today=date(2026, 11, 7))
+    assert str(refused.value) == service.NOT_PROSPECTIVE
+    lease.refresh_from_db()
+    assert lease.collection_status == status and actions(lease) == before
+
+
+def test_activate_now_is_refused_with_the_first_missing_requirement() -> None:
+    lease = prospective(date(2026, 11, 20))
+    Lease.objects.filter(pk=lease.pk).update(operator=None, debit_day=None)
+    with pytest.raises(LeaseRefused) as refused:
+        service.activate(lease.pk, actor=None, today=date(2026, 11, 7))
+    assert str(refused.value) == service.NO_OPERATOR
+    lease.refresh_from_db()
+    assert (lease.collection_status, lease.started_on) == (
+        CollectionStatus.PROSPECTIVE,
+        date(2026, 11, 20),
+    )
+    assert LeaseRentHistory.objects.get(lease=lease).effective_from == date(2026, 11, 20)
+    assert status_rows(lease, "lease.activated") == []
+
+
+def test_activate_now_gives_a_lease_without_a_start_date_today() -> None:
+    lease = prospective(None)
+    service.activate(lease.pk, actor=None, today=date(2026, 11, 7))
+    lease.refresh_from_db()
+    assert (lease.collection_status, lease.started_on) == (
+        CollectionStatus.ACTIVE,
+        date(2026, 11, 7),
+    )
+
+
+# --- PLAN-015b §3 B: Pause and Resume collection ---------------------------------------------
+
+
+def test_pause_collection_pauses_an_active_lease_with_its_reason(actor: User) -> None:
+    lease = make_lease()
+    outcome = service.pause_collection(
+        lease.pk, reason="  Store closed for repairs.  ", actor=actor
+    )
+    assert outcome.autopay_paused is False
+    assert outcome.lease.collection_status == CollectionStatus.PAUSED
+    lease.refresh_from_db()
+    assert lease.collection_status == CollectionStatus.PAUSED
+    [row] = status_rows(lease, "lease.collection_paused")
+    assert row.actor == actor
+    assert row.before is not None and row.before["collection_status"] == "active"
+    assert row.after is not None and row.after["collection_status"] == "paused"
+    assert row.after["reason"] == "Store closed for repairs."
+    assert row.after["autopay_paused"] is False
+
+
+def test_pause_collection_says_autopay_is_to_be_paused_and_calls_nothing(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    calls = len(fake.calls)
+    outcome = service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    assert outcome.autopay_paused is True
+    [row] = status_rows(lease, "lease.collection_paused")
+    assert row.after is not None and row.after["autopay_paused"] is True
+    # The service never reaches the provider: the schedules stay active until the job.
+    assert len(fake.calls) == calls
+    assert {row.state for row in service.live_schedules(lease)} == {ScheduleState.ACTIVE}
+
+
+def test_pause_collection_with_autopay_already_paused_by_staff(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    service.pause_autopay(lease.pk, actor=None)
+    outcome = service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    assert outcome.autopay_paused is False
+    # Resume then queues nothing: the pause did not pause autopay.
+    resumed = service.resume_collection(lease.pk, actor=None, today=date(2026, 10, 2))
+    assert resumed.autopay_resume is False
+
+
+@pytest.mark.parametrize(
+    "status",
+    [CollectionStatus.PAUSED, CollectionStatus.PROSPECTIVE, CollectionStatus.ENDED],
+)
+def test_pause_collection_is_refused_unless_active(status: str) -> None:
+    lease = make_lease(collection_status=status)
+    before = actions(lease)
+    with pytest.raises(LeaseRefused) as refused:
+        service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    assert str(refused.value) == service.PAUSE_NOT_ACTIVE and refused.value.field is None
+    lease.refresh_from_db()
+    assert lease.collection_status == status and actions(lease) == before
+
+
+@pytest.mark.parametrize(
+    ("reason", "message"),
+    [
+        ("", "A reason is required: say why collection is paused."),
+        ("   ​  ", "A reason is required: say why collection is paused."),
+        (f"Card {CARD} on file", service.PAYMENT_DATA_MESSAGE),
+    ],
+    ids=["empty", "invisible", "card number"],
+)
+def test_pause_collection_refuses_a_blank_or_payment_data_reason(reason: str, message: str) -> None:
+    lease = make_lease()
+    before = actions(lease)
+    with pytest.raises(LeaseRefused) as refused:
+        service.pause_collection(lease.pk, reason=reason, actor=None)
+    assert refused.value.field == "reason"
+    assert str(refused.value) == message
+    lease.refresh_from_db()
+    assert lease.collection_status == CollectionStatus.ACTIVE and actions(lease) == before
+
+
+def test_resume_collection_resumes_and_queues_autopay_only_when_the_pause_paused_it(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    # The worker's job paused the schedules.
+    service.pause_autopay(lease.pk, actor=None)
+    calls = len(fake.calls)
+    outcome = service.resume_collection(lease.pk, actor=None, today=date(2026, 10, 2))
+    assert outcome.autopay_resume is True
+    assert outcome.lease.collection_status == CollectionStatus.ACTIVE
+    [row] = status_rows(lease, "lease.collection_resumed")
+    assert row.before is not None and row.before["collection_status"] == "paused"
+    assert row.after is not None and row.after["collection_status"] == "active"
+    assert row.after["autopay_resume"] is True
+    assert len(fake.calls) == calls
+
+
+def test_resume_collection_does_not_resume_schedules_no_longer_paused(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    # The autopay job has not run yet: the schedules are still active.
+    outcome = service.resume_collection(lease.pk, actor=None, today=date(2026, 10, 2))
+    assert outcome.autopay_resume is False
+
+
+@pytest.mark.parametrize(
+    "status",
+    [CollectionStatus.ACTIVE, CollectionStatus.PROSPECTIVE, CollectionStatus.ENDED],
+)
+def test_resume_collection_is_refused_unless_paused(status: str) -> None:
+    lease = make_lease(collection_status=status)
+    before = actions(lease)
+    with pytest.raises(LeaseRefused) as refused:
+        service.resume_collection(lease.pk, actor=None, today=date(2026, 10, 2))
+    assert str(refused.value) == service.RESUME_NOT_PAUSED
+    lease.refresh_from_db()
+    assert lease.collection_status == status and actions(lease) == before
+
+
+def test_resume_collection_is_refused_for_a_paused_lease_without_a_debit_day() -> None:
+    lease = make_lease(collection_status=CollectionStatus.PAUSED)
+    Lease.objects.filter(pk=lease.pk).update(debit_day=None)
+    with pytest.raises(LeaseRefused) as refused:
+        service.resume_collection(lease.pk, actor=None, today=date(2026, 10, 2))
+    assert str(refused.value) == service.NO_DEBIT_DAY
+    lease.refresh_from_db()
+    assert lease.collection_status == CollectionStatus.PAUSED
+
+
+def test_resume_collection_charges_the_months_that_fell_inside_the_pause() -> None:
+    lease = make_lease(started_on=date(2026, 8, 1), debit_day=1)
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    assert not RentCharge.objects.filter(lease=lease).exists()
+    service.resume_collection(lease.pk, actor=None, today=date(2026, 10, 2))
+    months = sorted(RentCharge.objects.filter(lease=lease).values_list("period_month", flat=True))
+    assert months == [date(2026, 8, 1), date(2026, 9, 1), date(2026, 10, 1)]
+
+
+def test_pause_then_resume_the_same_day_charges_each_month_once() -> None:
+    lease = make_lease(started_on=date(2026, 8, 1), debit_day=1)
+    rent_run.catch_up_lease(lease, date(2026, 10, 2), None)
+    assert RentCharge.objects.filter(lease=lease).count() == 3
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    service.resume_collection(lease.pk, actor=None, today=date(2026, 10, 2))
+    service.pause_collection(lease.pk, reason="Again.", actor=None)
+    service.resume_collection(lease.pk, actor=None, today=date(2026, 10, 2))
+    assert RentCharge.objects.filter(lease=lease).count() == 3
+
+
+def test_a_reason_of_the_note_maximum_is_kept_whole() -> None:
+    lease = make_lease()
+    reason = "r" * PAYMENT_NOTE_MAX_LENGTH
+    service.pause_collection(lease.pk, reason=reason, actor=None)
+    [row] = status_rows(lease, "lease.collection_paused")
+    assert row.after is not None and row.after["reason"] == reason
+
+
+# --- collection_pause: the pause in force ----------------------------------------------------
+
+
+def test_collection_pause_is_none_for_a_lease_that_is_not_paused(
+    django_assert_num_queries: Any,
+) -> None:
+    lease = make_lease()
+    with django_assert_num_queries(0):
+        assert service.collection_pause(lease) is None
+
+
+def test_collection_pause_reads_the_one_pause_in_one_query(
+    actor: User, django_assert_num_queries: Any
+) -> None:
+    lease = make_lease()
+    service.pause_collection(lease.pk, reason="Store closed.", actor=actor)
+    lease.refresh_from_db()
+    with django_assert_num_queries(1):
+        pause = service.collection_pause(lease)
+        assert pause is not None and pause.actor == actor
+    [row] = status_rows(lease, "lease.collection_paused")
+    assert (pause.at, pause.reason) == (row.at, "Store closed.")
+
+
+def test_collection_pause_reads_the_latest_pause_after_a_resume() -> None:
+    lease = make_lease()
+    service.pause_collection(lease.pk, reason="First pause.", actor=None)
+    service.resume_collection(lease.pk, actor=None, today=date(2026, 10, 2))
+    lease.refresh_from_db()
+    assert service.collection_pause(lease) is None
+    service.pause_collection(lease.pk, reason="Second pause.", actor=None)
+    lease.refresh_from_db()
+    pause = service.collection_pause(lease)
+    assert pause is not None and pause.reason == "Second pause." and pause.actor is None
+
+
+def test_collection_pause_is_none_for_a_lease_paused_without_a_row() -> None:
+    lease = make_lease(collection_status=CollectionStatus.PAUSED)
+    assert service.collection_pause(lease) is None

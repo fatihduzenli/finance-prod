@@ -46,6 +46,13 @@ Rules kept here:
   run on or after its start.
 - **Ending a lease** (PLAN-010b Batch C): :func:`end_lease` sets the end date, the
   reason and the ``ended`` status; it is refused while autopay is on (pause it first).
+- **Activation and Pause / Resume collection** (PLAN-015b): :func:`activate_due` (the daily
+  job) makes a prospective lease active on its start date, :func:`activate` is staff's
+  "Activate now" (an early start moves the start date to today); :func:`pause_collection`
+  (a required reason) and :func:`resume_collection` switch an active lease to paused and
+  back. Each is audited (``lease.activated``, ``lease.collection_paused``,
+  ``lease.collection_resumed``) and charges the months owed once the lease is active; none
+  calls the provider (the views queue the autopay pause and resume as jobs).
 - **Autopay moved for installments** (PLAN-012b-b D13): when a rent charge that the
   lease's active rent autopay would debit is split, the worker's release job calls
   :func:`move_autopay`: every active rent schedule of the lease is deleted at the
@@ -231,6 +238,26 @@ END_REASON_REQUIRED = "A reason is required: say why the lease ended."
 END_AUTOPAY_ON = (
     "Autopay is on for this lease. Pause autopay first, then end the lease. Nothing was changed."
 )
+
+#: Activation and Pause / Resume collection (PLAN-015b §3 A, B): the audit actions, which the
+#: Notes & follow-ups tab lists (:mod:`ledger.services.timeline`), and the sentences.
+ACTIVATED_ACTION = "lease.activated"
+COLLECTION_PAUSED_ACTION = "lease.collection_paused"
+COLLECTION_RESUMED_ACTION = "lease.collection_resumed"
+STATUS_ACTIONS: tuple[str, ...] = (
+    COLLECTION_PAUSED_ACTION,
+    COLLECTION_RESUMED_ACTION,
+    ACTIVATED_ACTION,
+)
+#: ``after["trigger"]`` of a ``lease.activated`` row: the daily job on the start date, or
+#: staff's "Activate now".
+TRIGGER_START_DATE = "start_date"
+TRIGGER_STAFF = "staff"
+NO_KNOWN_CHANNEL = "The lease has no known payment channel."
+NOT_PROSPECTIVE = "Only a prospective lease can be activated. Nothing was changed."
+PAUSE_NOT_ACTIVE = "Only an active lease can have its collection paused. Nothing was changed."
+PAUSE_REASON_REQUIRED = "A reason is required: say why collection is paused."
+RESUME_NOT_PAUSED = "Collection is not paused. Nothing was changed."
 
 
 class AutopayAction(StrEnum):
@@ -1548,6 +1575,217 @@ def _end_snapshot(lease: Lease) -> dict[str, Any]:
         "ended_on": lease.ended_on.isoformat() if lease.ended_on else None,
         "end_reason": lease.end_reason,
     }
+
+
+# --- Activation, Pause and Resume collection (PLAN-015b §3 A, B) ------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationSummary:
+    """What :func:`activate_due` did: the leases it made active, and the prospective leases
+    past their start date that still miss an activation requirement (left as they are)."""
+
+    activated: int
+    waiting: int
+
+
+@dataclass(frozen=True, slots=True)
+class PauseOutcome:
+    """:func:`pause_collection`'s lease, and whether its autopay is to be paused (it had a
+    rent schedule active at the provider): the view then queues ``autopay_pause``."""
+
+    lease: Lease
+    autopay_paused: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeOutcome:
+    """:func:`resume_collection`'s lease, and whether its autopay is to be resumed (the
+    pause paused it and its schedules are still paused): the view then queues
+    ``autopay_resume``."""
+
+    lease: Lease
+    autopay_resume: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionPause:
+    """The pause in force on a paused lease (:func:`collection_pause`): when, why, by whom
+    (``None`` when no staff member is recorded)."""
+
+    at: datetime
+    reason: str
+    actor: User | None
+
+
+def activation_blockers(lease: Lease) -> list[str]:
+    """Why ``lease`` cannot be active, from local data only: the database's checks on an
+    active lease (an operator, a debit day, a known channel), in that order."""
+    blockers: list[str] = []
+    if lease.operator_id is None:
+        blockers.append(NO_OPERATOR)
+    if lease.debit_day is None:
+        blockers.append(NO_DEBIT_DAY)
+    if lease.payment_channel == PaymentChannel.UNKNOWN:
+        blockers.append(NO_KNOWN_CHANNEL)
+    return blockers
+
+
+def _set_active(
+    lease: Lease, actor: User | None, today: date, action: str, extra: dict[str, Any]
+) -> None:
+    """Make the locked ``lease`` active, audit ``action`` (``before``/``after`` the
+    snapshot, ``extra`` added to ``after``) and charge what it owes up to ``today`` (the
+    catch-up acts on an active lease only, so it runs after the status is set)."""
+    before = _snapshot(lease)
+    lease.collection_status = CollectionStatus.ACTIVE
+    lease.save(update_fields=["collection_status", "started_on", "updated_at"])
+    _audit(actor, action, lease, before, {**_snapshot(lease), **extra})
+    _catch_up(lease, actor, today)
+
+
+def activate_due(today: date, *, actor: User | None = None) -> ActivationSummary:
+    """The daily job's step (PLAN-015b §3 A): every prospective lease, not ended, whose start
+    date is ``today`` or earlier becomes active under its row lock, audited
+    ``lease.activated`` with ``after["trigger"]`` ``start_date``, and is charged in the
+    same transaction (:func:`ledger.services.rent_run.catch_up_lease`). One that misses an
+    activation requirement (:func:`activation_blockers`) is counted waiting and left as it
+    is. Each lease in its own transaction; nothing here calls the provider."""
+    due = list(
+        Lease.objects.filter(
+            collection_status=CollectionStatus.PROSPECTIVE,
+            started_on__lte=today,
+            ended_on__isnull=True,
+        )
+        .order_by("started_on", "id")
+        .values_list("pk", flat=True)
+    )
+    activated = waiting = 0
+    for pk in due:
+        with transaction.atomic():
+            lease = _locked(pk)
+            if (
+                lease.collection_status != CollectionStatus.PROSPECTIVE
+                or lease.ended_on is not None
+                or lease.started_on is None
+                or lease.started_on > today
+            ):
+                continue
+            if activation_blockers(lease):
+                waiting += 1
+                continue
+            _set_active(lease, actor, today, ACTIVATED_ACTION, {"trigger": TRIGGER_START_DATE})
+            activated += 1
+    return ActivationSummary(activated=activated, waiting=waiting)
+
+
+def activate(lease_id: uuid.UUID, *, actor: User | None, today: date) -> Lease:
+    """ "Activate now" (PLAN-015b §3 A): a prospective lease that meets the activation
+    requirements becomes active under its row lock, else :class:`LeaseRefused` and nothing
+    written. A start date after ``today`` (or none) becomes ``today``, and the lease's only
+    rent row, when it starts after ``today``, starts ``today`` too (a lease with more rows
+    keeps them: one starting later is then an upcoming change). Audited ``lease.activated``
+    with ``after["trigger"]`` ``staff``; the first month is charged at once."""
+    with transaction.atomic():
+        lease = _locked(lease_id)
+        if lease.collection_status != CollectionStatus.PROSPECTIVE or lease.ended_on is not None:
+            raise LeaseRefused(None, NOT_PROSPECTIVE)
+        blockers = activation_blockers(lease)
+        if blockers:
+            raise LeaseRefused(None, blockers[0])
+        before_start = lease.started_on
+        if lease.started_on is None or lease.started_on > today:
+            lease.started_on = today
+            rows = list(lease.rent_history.all()[:2])
+            if len(rows) == 1 and rows[0].effective_from > today:
+                rows[0].effective_from = today
+                rows[0].save(update_fields=["effective_from"])
+        extra: dict[str, Any] = {"trigger": TRIGGER_STAFF}
+        if lease.started_on != before_start:
+            extra["started_on_was"] = before_start.isoformat() if before_start else None
+        _set_active(lease, actor, today, ACTIVATED_ACTION, extra)
+    return lease
+
+
+def pause_collection(lease_id: uuid.UUID, *, reason: str, actor: User | None) -> PauseOutcome:
+    """ "Pause collection" (PLAN-015b §3 B): an active lease becomes paused under its row
+    lock, audited ``lease.collection_paused`` with the reason and ``autopay_paused`` (a rent
+    schedule of it was active at the provider, :func:`autopay_on`). Refused, with one
+    sentence and nothing written, unless the lease is active and not ended, or when the
+    reason is empty or holds a card or account number. Nothing here calls the provider:
+    the view queues the autopay pause."""
+    text = visible_text(reason or "")
+    with transaction.atomic():
+        lease = _locked(lease_id)
+        if lease.collection_status != CollectionStatus.ACTIVE or lease.ended_on is not None:
+            raise LeaseRefused(None, PAUSE_NOT_ACTIVE)
+        if not text:
+            raise LeaseRefused("reason", PAUSE_REASON_REQUIRED)
+        try:
+            validate_no_payment_data(text)
+        except ValidationError:
+            raise LeaseRefused("reason", PAYMENT_DATA_MESSAGE) from None
+        autopay = autopay_on(lease)
+        before = _snapshot(lease)
+        lease.collection_status = CollectionStatus.PAUSED
+        lease.save(update_fields=["collection_status", "updated_at"])
+        _audit(
+            actor,
+            COLLECTION_PAUSED_ACTION,
+            lease,
+            before,
+            {**_snapshot(lease), "reason": text, "autopay_paused": autopay},
+        )
+    return PauseOutcome(lease=lease, autopay_paused=autopay)
+
+
+def resume_collection(lease_id: uuid.UUID, *, actor: User | None, today: date) -> ResumeOutcome:
+    """ "Resume collection" (PLAN-015b §3 B): a paused lease becomes active under its row lock,
+    audited ``lease.collection_resumed``; refused, with one sentence and nothing written,
+    unless it is paused and meets the activation requirements. ``autopay_resume`` is true
+    when the latest pause paused autopay and a rent schedule of the lease is still paused
+    at the provider: the view queues ``autopay_resume``, which needs the lease active. Then
+    the months that fell inside the pause are charged (collection paused, rent still owed;
+    PLAN-015b §8 Q2)."""
+    with transaction.atomic():
+        lease = _locked(lease_id)
+        if lease.collection_status != CollectionStatus.PAUSED or lease.ended_on is not None:
+            raise LeaseRefused(None, RESUME_NOT_PAUSED)
+        blockers = activation_blockers(lease)
+        if blockers:
+            raise LeaseRefused(None, blockers[0])
+        latest = _latest_status_row(lease, (COLLECTION_PAUSED_ACTION,))
+        paused_autopay = latest is not None and bool((latest.after or {}).get("autopay_paused"))
+        resume = paused_autopay and any(
+            row.state == ScheduleState.PAUSED and schedule_ref(row) for row in live_schedules(lease)
+        )
+        _set_active(lease, actor, today, COLLECTION_RESUMED_ACTION, {"autopay_resume": resume})
+    return ResumeOutcome(lease=lease, autopay_resume=resume)
+
+
+def _latest_status_row(lease: Lease, actions: Iterable[str]) -> AuditLog | None:
+    return (
+        AuditLog.objects.filter(
+            entity_type=ENTITY_LEASE, entity_id=str(lease.pk), action__in=list(actions)
+        )
+        .select_related("actor")
+        .order_by("-at", "-id")
+        .first()
+    )
+
+
+def collection_pause(lease: Lease) -> CollectionPause | None:
+    """The pause in force on ``lease``: the latest ``lease.collection_paused`` row when no
+    ``lease.collection_resumed`` row came after it; ``None`` for a lease that is not paused
+    (no query) or whose pause left no row. One query."""
+    if lease.collection_status != CollectionStatus.PAUSED:
+        return None
+    row = _latest_status_row(lease, (COLLECTION_PAUSED_ACTION, COLLECTION_RESUMED_ACTION))
+    if row is None or row.action != COLLECTION_PAUSED_ACTION:
+        return None
+    return CollectionPause(
+        at=row.at, reason=str((row.after or {}).get("reason", "")), actor=row.actor
+    )
 
 
 # --- Autopay --------------------------------------------------------------------------
