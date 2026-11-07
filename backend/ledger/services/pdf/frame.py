@@ -107,6 +107,21 @@ class CompanyFacts:
     logo_png: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class Cell:
+    """One column of the info panel: its label, its lines (the first in ``colour``, bold
+    unless ``bold`` is false; the others regular)."""
+
+    label: str
+    lines: tuple[str, ...]
+    bold: bool = True
+    colour: str = INK
+
+
+#: Where the info panel's four columns start, from the left margin.
+CELL_OFFSETS = (16.0, 190.0, 300.0, 390.0)
+
+
 def company_facts() -> CompanyFacts:
     """The company settings row's name, address (the lines that are set, joined ", "),
     support e-mail and logo copy (``b""``: the brand logo)."""
@@ -391,6 +406,31 @@ class Frame:
             c.drawRightString(x, y, text)
         else:
             c.drawString(x, y, text)
+
+    def info_panel(self, cells: Sequence[Cell]) -> None:
+        """The grey panel under the band with up to four :class:`Cell` columns."""
+        rows = max((len(cell.lines) for cell in cells), default=1)
+        height = 44.0 + 14 * rows
+        bottom = self.top - height
+        self.panel(LEFT, bottom, RIGHT - LEFT, height, PANEL)
+        label_y = self.top - 20
+        starts = [LEFT + offset for offset in CELL_OFFSETS[: len(cells)]]
+        ends = [*(start - 10 for start in starts[1:]), RIGHT - 16]
+        for cell, start in zip(cells, starts, strict=False):
+            self.label(start, label_y, cell.label)
+        for cell, start, end in zip(cells, starts, ends, strict=True):
+            for index, line in enumerate(cell.lines):
+                first = index == 0
+                self.text(
+                    start,
+                    label_y - 16 - 14 * index,
+                    line,
+                    bold=first and cell.bold,
+                    size=10.5 if first else 10,
+                    colour=cell.colour if first else INK,
+                    width=end - start,
+                )
+        self.top = bottom - 30
 
     def rule(self, y: float, left: float = LEFT, right: float = RIGHT) -> None:
         self.canvas.setStrokeColor(HexColor(RULE))

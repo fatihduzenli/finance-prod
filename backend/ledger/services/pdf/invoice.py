@@ -48,7 +48,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services.pdf import frame
-from ledger.services.pdf.frame import LEFT, RIGHT, Frame, Stamp
+from ledger.services.pdf.frame import LEFT, RIGHT, Cell, Frame, Stamp
 from ledger.wording import format_amount
 
 ZERO = Decimal("0.00")
@@ -325,25 +325,14 @@ def _paid_on(day: date | None, issued: date) -> str:
 
 
 def _info_panel(page: Frame, found: InvoiceFacts) -> None:
-    height = 72.0 if len(found.bill_to) > 1 else 58.0
-    bottom = page.top - height
-    page.panel(LEFT, bottom, RIGHT - LEFT, height, frame.PANEL)
-    label_y = page.top - 20
-    columns = (LEFT + 16, LEFT + 190, LEFT + 300, LEFT + 390)
-    page.label(columns[0], label_y, "Bill to")
-    page.label(columns[1], label_y, "Store")
-    page.label(columns[2], label_y, "Issued")
-    page.label(columns[3], label_y, "Due")
-    first, *rest = found.bill_to or ("",)
-    page.text(columns[0], label_y - 16, first, bold=True, size=10.5, width=166)
-    for index, line in enumerate(rest, start=1):
-        page.text(columns[0], label_y - 16 - 14 * index, line, size=10, width=166)
-    page.text(columns[1], label_y - 16, found.store, bold=True, size=10.5, width=104)
-    page.text(columns[2], label_y - 16, day_text(found.issued), size=10.5)
-    page.text(
-        columns[3], label_y - 16, day_text(found.due), bold=True, size=10.5, colour=frame.TEAL
+    page.info_panel(
+        (
+            Cell("Bill to", found.bill_to),
+            Cell("Store", (found.store,)),
+            Cell("Issued", (day_text(found.issued),), bold=False),
+            Cell("Due", (day_text(found.due),), colour=frame.TEAL),
+        )
     )
-    page.top = bottom - 30
 
 
 def _table_header(page: Frame) -> None:
