@@ -30,6 +30,7 @@ from ledger.models import (
 from ledger.services import leases as service
 from ledger.services import notes as note_service
 from ledger.services import timeline, workspace
+from ledger.validators import PAYMENT_DATA_MESSAGE
 from ledger.views import leases as views
 from payments.fake import FakeProvider
 from payments.models import ExternalRef, Job, JobKind
@@ -285,7 +286,7 @@ def test_pausing_with_autopay_on_queues_its_pause_and_calls_nothing(
     [
         ("", "A reason is required: say why collection is paused."),
         ("​  ", "A reason is required: say why collection is paused."),
-        (f"Card {CARD}", service.PAYMENT_DATA_MESSAGE),
+        (f"Card {CARD}", PAYMENT_DATA_MESSAGE),
         ("x" * 2001, "Ensure this value has at most 2000 characters (it has 2001)."),
     ],
     ids=["empty", "invisible", "card number", "too long"],

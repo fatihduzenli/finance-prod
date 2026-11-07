@@ -1680,7 +1680,7 @@ def activate_due(today: date, *, actor: User | None = None) -> ActivationSummary
 
 
 def activate(lease_id: uuid.UUID, *, actor: User | None, today: date) -> Lease:
-    """ "Activate now" (PLAN-015b §3 A): a prospective lease that meets the activation
+    """Staff's "Activate now" (PLAN-015b §3 A): a prospective lease that meets the activation
     requirements becomes active under its row lock, else :class:`LeaseRefused` and nothing
     written. A start date after ``today`` (or none) becomes ``today``, and the lease's only
     rent row, when it starts after ``today``, starts ``today`` too (a lease with more rows
@@ -1708,9 +1708,10 @@ def activate(lease_id: uuid.UUID, *, actor: User | None, today: date) -> Lease:
 
 
 def pause_collection(lease_id: uuid.UUID, *, reason: str, actor: User | None) -> PauseOutcome:
-    """ "Pause collection" (PLAN-015b §3 B): an active lease becomes paused under its row
-    lock, audited ``lease.collection_paused`` with the reason and ``autopay_paused`` (a rent
-    schedule of it was active at the provider, :func:`autopay_on`). Refused, with one
+    """Staff's "Pause collection" (PLAN-015b §3 B): an active lease becomes paused under
+    its row lock, audited ``lease.collection_paused`` with the reason and
+    ``autopay_paused`` (a rent schedule of it was active at the provider,
+    :func:`autopay_on`). Refused, with one
     sentence and nothing written, unless the lease is active and not ended, or when the
     reason is empty or holds a card or account number. Nothing here calls the provider:
     the view queues the autopay pause."""
@@ -1740,8 +1741,8 @@ def pause_collection(lease_id: uuid.UUID, *, reason: str, actor: User | None) ->
 
 
 def resume_collection(lease_id: uuid.UUID, *, actor: User | None, today: date) -> ResumeOutcome:
-    """ "Resume collection" (PLAN-015b §3 B): a paused lease becomes active under its row lock,
-    audited ``lease.collection_resumed``; refused, with one sentence and nothing written,
+    """Staff's "Resume collection" (PLAN-015b §3 B): a paused lease becomes active under its
+    row lock, audited ``lease.collection_resumed``; refused, with one sentence and nothing written,
     unless it is paused and meets the activation requirements. ``autopay_resume`` is true
     when the latest pause paused autopay and a rent schedule of the lease is still paused
     at the provider: the view queues ``autopay_resume``, which needs the lease active. Then

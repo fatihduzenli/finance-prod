@@ -44,6 +44,7 @@ from ledger.models import (
 from ledger.services import leases as service
 from ledger.services import rent_run
 from ledger.services.leases import AutopayAction, LeaseRefused
+from ledger.validators import PAYMENT_DATA_MESSAGE
 from ledger.wording import format_amount
 from payments.errors import CircuitOpen, ProviderError, ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
@@ -2367,7 +2368,7 @@ def test_pause_collection_is_refused_unless_active(status: str) -> None:
     [
         ("", "A reason is required: say why collection is paused."),
         ("   ​  ", "A reason is required: say why collection is paused."),
-        (f"Card {CARD} on file", service.PAYMENT_DATA_MESSAGE),
+        (f"Card {CARD} on file", PAYMENT_DATA_MESSAGE),
     ],
     ids=["empty", "invisible", "card number"],
 )
