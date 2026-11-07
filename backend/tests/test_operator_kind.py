@@ -487,7 +487,19 @@ def test_the_lease_forms_never_repeat_a_refused_select(field: str) -> None:
         refusal = str(CHANNEL_REFUSED) if field == "payment_channel" else CHOICE_REFUSED
         _assert_not_echoed(admin, "/leases/new/", lease_data(**{field: CARD}), refusal)
     lease = a_lease(a_store("Edited store"), an_operator("Edited Co"))
-    _assert_not_echoed(admin, f"/leases/{lease.pk}/edit/", edit_data(lease, **{field: CARD}))
+    path = f"/leases/{lease.pk}/edit/"
+    # Re-pinned (Opus, PLAN-015a): Edit lease has no store, operator or status field (the
+    # wizards change them): a posted value is ignored, never shown and never saved; its
+    # channel cards word their refusal as New lease's do.
+    if field == "payment_channel":
+        _assert_not_echoed(admin, path, edit_data(lease, **{field: CARD}), str(CHANNEL_REFUSED))
+        return
+    before = (lease.store_id, lease.operator_id, lease.collection_status)
+    response = admin.post(path, edit_data(lease, **{field: CARD}))
+    assert response.status_code == 302 and CARD not in response.content.decode()
+    assert CARD not in admin.get(path).content.decode()
+    lease.refresh_from_db()
+    assert (lease.store_id, lease.operator_id, lease.collection_status) == before
 
 
 @pytest.mark.parametrize(

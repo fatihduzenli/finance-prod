@@ -109,6 +109,7 @@ from ledger.models import (
     LeaseRentHistory,
     Operator,
     PaymentChannel,
+    RentCharge,
     RentSource,
     ScheduleKind,
     ScheduleState,
@@ -423,9 +424,47 @@ def open_rent(lease: Lease) -> LeaseRentHistory | None:
     return lease.rent_history.filter(effective_to__isnull=True).first()
 
 
-def planned_debits(lease: Lease, rent: Decimal) -> list[PlannedDebit]:
-    """One debit per debit day of the lease, in seq order."""
+def next_rent_due(lease: Lease, today: date) -> date:
+    """The next day strictly after ``today`` a rent debit of ``lease`` falls on (PLAN-015a):
+    the nearer of its debit days, a day above the month's length on that month's last day
+    (as the rent run counts them); the first of next month for a lease without a debit day.
+    The Edit lease page's default date for a rent change. No query."""
     days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+    next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
+    if not days:
+        return next_month
+    found: list[date] = []
+    for first in (today.replace(day=1), next_month):
+        last = calendar.monthrange(first.year, first.month)[1]
+        found += [first.replace(day=min(day, last)) for day in days]
+    return min(day for day in found if day > today)
+
+
+def first_month_charge(lease: Lease) -> RentCharge | None:
+    """The lease's charge for its start month (``period_month`` the 1st of ``started_on``'s
+    month), the earliest made, whatever its proration or invoice; ``None`` without a start
+    date or before the first month is billed. One query."""
+    if lease.started_on is None:
+        return None
+    return (
+        RentCharge.objects.filter(lease=lease, period_month=lease.started_on.replace(day=1))
+        .order_by("created_at", "seq")
+        .first()
+    )
+
+
+def first_month_billed(lease: Lease) -> bool:
+    """Whether the lease's first month has a charge (PLAN-015a): the Edit lease page then
+    no longer offers "Prorate the first month". One query."""
+    return first_month_charge(lease) is not None
+
+
+def planned_debits(lease: Lease, rent: Decimal) -> list[PlannedDebit]:
+    """One debit per debit day of the lease, in seq order; none for a lease without a debit
+    day (QA-015a finding: its every live provider schedule then no longer matches)."""
+    days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+    if not days:
+        return []
     amounts = debit_amounts(rent, twice_monthly=len(days) == 2)
     return [
         PlannedDebit(seq, day, amount)

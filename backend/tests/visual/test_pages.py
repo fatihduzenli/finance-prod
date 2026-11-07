@@ -97,6 +97,8 @@ PAGES: dict[str, Callable[[Site], str]] = {
     "new-lease": lambda site: (
         reverse("ledger:leases:create") + f"?store={site.world.vacant_store.pk}"
     ),
+    # PLAN-015a: Edit lease in the New lease family (the four cards and the Changes card).
+    "edit-lease": lambda site: reverse("ledger:leases:edit", kwargs={"pk": site.world.lease.pk}),
     "operator-form": lambda site: reverse(
         "ledger:operators:edit", kwargs={"pk": site.world.operator.pk}
     ),
@@ -146,11 +148,12 @@ def settled_payment_of(site: Site) -> Payment:
     return found
 
 
-#: The lease-end wizard and the New store and New lease forms are for admins only.
+#: The lease-end wizard and the New store, New lease and Edit lease forms are for admins only.
 AS_ADMIN = {
     "lease-end-statement",
     "new-store",
     "new-lease",
+    "edit-lease",
     "void-payment",
     "settings",
     "message-templates",

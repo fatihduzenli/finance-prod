@@ -614,8 +614,15 @@ def test_the_second_debit_day_renders_empty_by_default(admin: Client) -> None:
     assert "value=" not in field
     assert "required" not in field
     lease = make_lease()
-    edit_field = _input(admin.get(f"/leases/{lease.pk}/edit/").content.decode(), "second_debit_day")
-    assert "value=" not in edit_field
+    # Re-pinned (Opus, QA-015a): Edit lease's second day is a select of the 1st to the 28th;
+    # on a lease without a second day only the blank "—" option is selected.
+    edit_page = admin.get(f"/leases/{lease.pk}/edit/").content.decode()
+    match = re.search(r'<select[^>]*name="second_debit_day"[^>]*>(.*?)</select>', edit_page, re.S)
+    assert match is not None
+    assert "required" not in match.group(0)[: match.group(0).index(">") + 1]
+    selected = re.findall(r'<option value="([^"]*)"[^>]*selected', match.group(1))
+    assert selected == [""]
+    assert '<option value="" selected>—</option>' in match.group(1)
     form = LeaseCreateForm()
     assert form.fields["second_debit_day"].required is False
     assert form["second_debit_day"].value() is None
