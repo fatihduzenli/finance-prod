@@ -154,7 +154,7 @@ def clean_company(data: Mapping[str, object]) -> tuple[dict[str, str], str]:
     found: dict[str, str] = {}
     for name in COMPANY_FIELDS[:-1]:
         value = " ".join(_text(data.get(name)).split())
-        limit = CompanySettings._meta.get_field(name).max_length or 0
+        limit = getattr(CompanySettings._meta.get_field(name), "max_length", None) or 0
         if len(value) > limit:
             return {}, TOO_LONG.format(label=COMPANY_LABELS[name], count=limit)
         try:
