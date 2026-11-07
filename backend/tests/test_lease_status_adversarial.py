@@ -95,8 +95,11 @@ def test_a_post_without_the_csrf_token_is_refused_and_changes_nothing(action: st
     status = (
         CollectionStatus.PAUSED if action == "resume-collection" else CollectionStatus.PROSPECTIVE
     )
+    # The role each route needs (§9.3: Resume is admin, Activate billing), so only the
+    # missing token refuses the POST.
+    role = Role.ADMIN if action == "resume-collection" else Role.BILLING
     lease = a_world(status)
-    user, device = make_user(f"billing-csrf-{action}", Role.BILLING)
+    user, device = make_user(f"csrf-{action}", role)
     assert device is not None
     client = verified_client(user, device, Client(enforce_csrf_checks=True))
     response = client.post(f"/leases/{lease.pk}/{action}/", {})
