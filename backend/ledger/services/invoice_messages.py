@@ -168,7 +168,7 @@ def _queue(
     if operator is None:
         raise ValueError(NO_LEASE)
     subject_text, body_text = template.subject, template.body
-    if not values.get(PROVIDER_PAY_LINK, "x"):
+    if PROVIDER_PAY_LINK in values and not values[PROVIDER_PAY_LINK]:
         subject_text = without_lines_naming(subject_text, PROVIDER_PAY_LINK)
         body_text = without_lines_naming(body_text, PROVIDER_PAY_LINK)
     shown = messaging.with_gaps(values)

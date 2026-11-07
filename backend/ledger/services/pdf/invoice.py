@@ -129,25 +129,26 @@ class Charges:
 
 
 def charges_of(invoice: Invoice) -> Charges:
-    rent = {invoice.rent_charge_id} - {None}
-    one_off = {invoice.one_off_charge_id} - {None}
+    """The invoice's source charge and its lines' charges."""
+    rent = {invoice.rent_charge_id}
+    one_off = {invoice.one_off_charge_id}
     for rent_id, one_off_id in invoice.line_items.values_list(
         "rent_charge_id", "one_off_charge_id"
     ):
-        rent |= {rent_id} - {None}
-        one_off |= {one_off_id} - {None}
+        rent.add(rent_id)
+        one_off.add(one_off_id)
     return Charges(
-        rent=tuple(sorted(r for r in rent if r is not None)),
-        one_off=tuple(sorted(o for o in one_off if o is not None)),
+        rent=tuple(sorted(found for found in rent if found is not None)),
+        one_off=tuple(sorted(found for found in one_off if found is not None)),
         insurance=tuple(i for i in (invoice.insurance_charge_id,) if i is not None),
         adjustment=tuple(a for a in (invoice.charge_adjustment_id,) if a is not None),
     )
 
 
-def payments_of(invoice: Invoice, charges: Charges | None = None) -> QuerySet[Payment]:
+def payments_of(invoice: Invoice) -> QuerySet[Payment]:
     """The settled, non-refund payments of the invoice or of a charge it bills, oldest
     first."""
-    found = charges if charges is not None else charges_of(invoice)
+    found = charges_of(invoice)
     which = Q(invoice=invoice)
     if found.rent:
         which |= Q(rent_charge_id__in=found.rent)
