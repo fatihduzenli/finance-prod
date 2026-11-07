@@ -729,6 +729,33 @@ def test_no_operator_makes_no_draft_and_one_sentence() -> None:
     assert not InvoiceDraft.objects.exists()
 
 
+@pytest.mark.parametrize(
+    ("status", "made"),
+    [("prospective", True), ("active", True), ("paused", False), ("ended", False)],
+)
+def test_the_move_in_draft_is_made_for_a_prospective_or_active_lease_only(
+    today: date, status: str, made: bool
+) -> None:
+    """PLAN-015b §9.1, the owner's option (a): a prospective lease (a start after today) has
+    its move-in draft as an active one does; a paused or ended lease gets none and the
+    sentence says why."""
+    lease = a_lease(
+        a_store("7202", number=7202),
+        an_operator("Option A"),
+        started=date(2026, 12, 10),
+        status=status,
+    )
+    billing = client_for(Role.BILLING, "billing-move-in")[1]
+    found = move_in.create_draft(lease, [], creation_key=uuid.uuid4(), actor=billing)
+    if made:
+        assert found.draft is not None and found.draft.due_date == date(2026, 12, 10)
+        [line] = found.draft.lines.all()
+        assert (line.rent_lease_id, line.rent_month) == (lease.pk, date(2026, 12, 1))
+    else:
+        assert (found.draft, found.message) == (None, move_in.NOT_ACTIVE)
+        assert not InvoiceDraft.objects.filter(lease=lease).exists()
+
+
 def test_a_replayed_form_makes_one_lease_and_one_draft(admin: Client, today: date) -> None:
     store = vacant_store()
     operator = an_operator("Replay")

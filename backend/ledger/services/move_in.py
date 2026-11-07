@@ -1,6 +1,7 @@
 """The move-in invoice of a new lease (docs/qa/PLAN-014b item 1, Fable's decision 6).
 
-When the New lease page saves an ``active`` lease with an operator,
+When the New lease page saves an ``active`` lease with an operator, or a ``prospective`` one
+(a start after today, PLAN-015b §9.1; the owner's option (a), 2026-11-07),
 :func:`create_draft` makes one invoice-builder **draft** (local only; nothing reaches the
 payment provider until staff send it): one Rent line for the start month (``rent_lease``,
 ``rent_month``; its amount left to the builder, which takes the rent run's charge's when the
@@ -16,7 +17,9 @@ no charge; sending the draft makes the start month's charge through the same ``c
 (or takes the one the run made meanwhile, unpaid and at the line's amount) and marks it
 ``billed_by_invoice``. The run then finds that charge and counts it as already created; a run
 before the send makes the charge itself and the send takes it. Either way the month has one
-charge and is billed once.
+charge and is billed once. A prospective lease is the same: the run skips it until the daily
+job (:func:`ledger.services.leases.activate_due`) or staff's "Activate now" makes it active,
+and the catch-up that follows leaves a month that has its charge as it is.
 
 The draft cannot be made, and the lease stays saved, when the lease has no operator or no
 start date, or the builder refuses a line (a lease debited twice a month: its months are the
@@ -42,6 +45,8 @@ KEY_SUFFIX = "move-in-invoice"
 MEMO = "Move-in invoice"
 NO_OPERATOR = "The lease has no operator, so no move-in invoice was made."
 NOT_ACTIVE = "The lease is not active, so no move-in invoice was made."
+#: The statuses a move-in draft is made for (a paused or ended lease gets none).
+DRAFTED_STATUSES = frozenset({CollectionStatus.ACTIVE, CollectionStatus.PROSPECTIVE})
 NO_START = "The lease has no start date, so no move-in invoice was made."
 REFUSED = "The move-in invoice could not be made: {reason}"
 _LINE_PREFIX = re.compile(r"\ALine \d+: ")
@@ -73,7 +78,7 @@ def create_draft(
     operator = lease.operator
     if operator is None:
         return MoveIn(None, NO_OPERATOR)
-    if lease.collection_status != CollectionStatus.ACTIVE:
+    if lease.collection_status not in DRAFTED_STATUSES:
         return MoveIn(None, NOT_ACTIVE)
     start = lease.started_on
     if start is None:
