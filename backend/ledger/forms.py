@@ -523,7 +523,8 @@ class LeaseForm(_LeaseFormBase):
     Rent is a separate field: the service writes its first history row (D5). The Edit lease
     page has its own form since PLAN-015a (:class:`LeaseEditForm`)."""
 
-    #: The status of a form without the Status field (the New lease page saves ``active``).
+    #: The status whose rules a form without the Status field checks (the New lease page:
+    #: ``active``; it saves a lease starting after today ``prospective``, PLAN-015b §9.1).
     fixed_status: str | None = None
 
     debit_day = forms.IntegerField(min_value=1, max_value=31, required=False)
@@ -642,6 +643,9 @@ CHANNEL_CARDS: tuple[tuple[str, Any, Any, Any], ...] = (
 )
 #: The Summary card's empty value.
 NO_VALUE = "\u2014"
+#: The Summary card's last line (PLAN-015b §9.1: the second for a start after today).
+SUMMARY_AFTER = "After saving you can send the move-in invoice by e-mail."
+ACTIVATED_ON_START = "Starts {day}, activated on that day."
 CHANNEL_REFUSED = provider_sentence(
     "Choose Autopay (bank debit), E-mail invoice or Paid outside {provider}."
 )
@@ -682,14 +686,16 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
     is chosen; the operator select's options carry the contact details "Copy from
     operator" fills in the browser.
 
-    PLAN-014b item 1 (Fable's decisions 1 to 4): no Status (the lease is saved ``active``
-    and the active lease's rules apply); the Debit day a select of the 1st to the 28th (the
-    1st by default); the channel one of the three cards (:data:`CHANNEL_CARDS`; Zelle, Wire
-    and Unknown are refused here, the Edit lease form keeps them); the deposit is the price
-    field of the first refundable fee type (:attr:`deposit_type`); "+ Add item" offers one row
-    per active fee type not in the checklist (:attr:`extra_types`), charged as a checklist row
-    is, only with a price. ``stores``: the operator's other current stores per operator id,
-    for the options' ``data-stores``."""
+    PLAN-014b item 1 (Fable's decisions 1 to 4): no Status (the active lease's rules apply;
+    the lease is saved ``active``, or ``prospective`` when it starts after ``today``,
+    PLAN-015b §9.1, and the daily job activates it on its start date); the Debit day a
+    select of the 1st to the 28th (the 1st by default); the channel one of the three cards
+    (:data:`CHANNEL_CARDS`; Zelle, Wire and Unknown are refused here, the Edit lease form
+    keeps them); the deposit is the price field of the first refundable fee type
+    (:attr:`deposit_type`); "+ Add item" offers one row per active fee type not in the
+    checklist (:attr:`extra_types`), charged as a checklist row is, only with a price.
+    ``stores``: the operator's other current stores per operator id, for the options'
+    ``data-stores``."""
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
     fixed_status = CollectionStatus.ACTIVE
@@ -702,9 +708,11 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         accounts: Sequence[SharedAccount] = (),
         enter_refusal: str = "",
         stores: dict[uuid.UUID, list[str]] | None = None,
+        today: date | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
+        self.today = today or timezone.localdate()
         self.instance.collection_status = CollectionStatus.ACTIVE
         self.fields["debit_day"] = _QuietTypedChoiceField(
             label="Debit day", choices=DEBIT_DAY_CHOICES, coerce=int, initial=1
@@ -761,11 +769,13 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             return None
 
     def summary(self) -> dict[str, str]:
-        """The Summary card (decision 5) from what the form holds: the operator, the start,
-        the rent, who collects, the first month (prorated when the toggle is on and the
-        lease starts after the 1st, as :func:`ledger.services.rent_run.first_month`), the
-        move-in charges (every priced row, the deposit included) and the first invoice's
-        total. The page's script keeps it live; this is the page without it."""
+        """The Summary card (decision 5) from what the form holds: the operator, the start
+        and the last line (``after``: "Starts <date>, activated on that day." for a start
+        after ``today``, PLAN-015b §9.1, else ``default_after``), the rent, who collects, the
+        first month (prorated when the toggle is on and the lease starts after the 1st, as
+        :func:`ledger.services.rent_run.first_month`), the move-in charges (every priced row,
+        the deposit included) and the first invoice's total. The page's script keeps it
+        live; this is the page without it."""
         operator = self._value("operator")
         start: date | None = self._value("started_on")
         rent: Decimal | None = self._value("rent")
@@ -789,6 +799,12 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         return {
             "operator": operator.display_name if isinstance(operator, Operator) else NO_VALUE,
             "starts": day_text(start) if start is not None else NO_VALUE,
+            "after": (
+                ACTIVATED_ON_START.format(day=day_text(start))
+                if start is not None and start > self.today
+                else SUMMARY_AFTER
+            ),
+            "default_after": SUMMARY_AFTER,
             "rent": format_amount(rent) if rent is not None else NO_VALUE,
             "collected_by": " \u00b7 ".join(part for part in (str(short), days) if part)
             or NO_VALUE,
@@ -841,6 +857,9 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         self.cleaned_data["collection_status"] = CollectionStatus.ACTIVE
         data = super().clean()
         started = data.get("started_on")
+        if started is not None and started > self.today:
+            # PLAN-015b §9.1: checked by the active lease's rules, saved prospective.
+            data["collection_status"] = CollectionStatus.PROSPECTIVE
         for fee_type in self.fee_types:
             name = _setup_name(fee_type)
             if data.get(f"{name}_price") is None:
