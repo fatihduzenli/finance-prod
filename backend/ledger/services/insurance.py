@@ -400,6 +400,11 @@ def record_manual_payment(
             transaction.set_rollback(True)
             return outcome(False, rent_run.PAY_NOTE_PAYMENT_DATA, "note")
         contacts.close_kept_by_payment(payment)
+        # PLAN-015c: a payment recorded outside the processor gets the app's receipt e-mail
+        # (imported here: the messaging engine imports this module).
+        from ledger.services import invoice_messages
+
+        invoice_messages.queue_receipt_if_due(payment, actor)
         AuditLog.objects.create(
             actor=actor,
             action=PAYMENT_ACTION,

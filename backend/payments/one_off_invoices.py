@@ -18,7 +18,11 @@ class and the field names it rejected (never provider text).
   :mod:`payments.invoice_sync`) and it becomes ``ready``. For collection ``email`` it
   is then sent (:func:`send`); a failed send leaves it linked and ``ready``.
 - :func:`send` (``invoice_send``): the e-mail alone, then a re-fetch; ``sent`` once the
-  provider shows it sent (a later webhook does the same, :func:`note_sent`).
+  provider shows it sent (a later webhook does the same, :func:`note_sent`). When the company
+  setting "Invoice e-mails sent by" is the company (ADR-0020, PLAN-015c), the provider is asked
+  for no e-mail: the app's invoice e-mail with its PDF is queued
+  (:func:`ledger.services.invoice_messages.queue_invoice`, held by the Outbox while mail is
+  off), the invoice becomes ``sent`` here and the send is audited with ``sender: company``.
 - :func:`delete` (``invoice_delete``): the cancel of an invoiced charge (D6). The
   invoice is re-fetched (a paid one is never deleted), deleted (a 404 counts as already
   deleted) and re-fetched again; only an invoice the provider shows ``DELETED`` or no
@@ -183,6 +187,12 @@ SEND_REQUESTED = provider_sentence(
 )
 SEND_FAILED = provider_sentence("Invoice {number} is in {provider}, but sending it failed")
 ALREADY_SENT = "Invoice {number} was already sent."
+#: ADR-0020 (PLAN-015c): the company e-mails the invoice with its PDF.
+COMPANY_SENT = "Invoice {number} is queued to be e-mailed with its PDF."
+COMPANY_SEND_FAILED = (
+    "Invoice {number} could not be queued for e-mail: it bills no lease, or the invoice"
+    " template is off."
+)
 NOT_LINKED = provider_sentence("The charge's invoice is not in {provider} yet. Nothing was sent.")
 DELETE_PAID = provider_sentence("{provider} shows the invoice paid. Nothing was cancelled.")
 DELETE_NOT_CONFIRMED = provider_sentence(
@@ -599,6 +609,10 @@ def note_sent(invoice: Invoice, record: InvoiceRecord) -> None:
 def _send(
     charge: OneOffCharge | RentCharge, invoice: Invoice, ref: str, actor: User | None
 ) -> Result:
+    from ledger.services import invoice_messages
+
+    if invoice_messages.company_sends():
+        return _queue_company_email(invoice, ref, actor)
     number = invoice.invoice_number
     provider = payments.get_provider()
     entity = ENTITY_RENT_CHARGE if isinstance(charge, RentCharge) else ENTITY_CHARGE
@@ -628,6 +642,34 @@ def _send(
         },
     )
     return True, (SENT if shown else SEND_REQUESTED).format(number=number)
+
+
+def _queue_company_email(invoice: Invoice, ref: str, actor: User | None) -> Result:
+    """The company sends (ADR-0020): queue the app's invoice e-mail, ask the provider for
+    none, and mark the invoice ``sent`` (from ``draft`` or ``ready``) here."""
+    from ledger.services import invoice_messages
+
+    number = invoice.invoice_number
+    try:
+        queued = invoice_messages.queue_invoice(invoice, actor=actor)
+    except ValueError:
+        return False, COMPANY_SEND_FAILED.format(number=number)
+    Invoice.objects.filter(
+        pk=invoice.pk, internal_status__in=[InvoiceStatus.DRAFT, InvoiceStatus.READY]
+    ).update(internal_status=InvoiceStatus.SENT, updated_at=timezone.now())
+    _audit(
+        actor,
+        "invoice.sent",
+        ENTITY_INVOICE,
+        invoice.pk,
+        {
+            "invoice_number": number,
+            "provider_invoice": mask_identifier(ref),
+            "sender": "company",
+            "message": str(queued.pk) if queued is not None else None,
+        },
+    )
+    return True, COMPANY_SENT.format(number=number)
 
 
 def send(charge_id: uuid.UUID, actor: User | None) -> Result:
