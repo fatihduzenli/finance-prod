@@ -465,3 +465,17 @@ def test_send_a_message_now_offers_neither_the_invoice_nor_the_receipt_template(
     offered = {row.code for row in messaging.manual_templates()}
     assert not offered & merge.PDF_CODES
     assert offered, "the other operator templates are still offered"
+
+
+def test_the_invoice_preview_names_the_company_settings_name_not_the_environment_s(
+    settings: Any,
+) -> None:
+    from ledger.models import InvoiceDraft
+    from ledger.services import invoice_builder
+    from tests.receivables_helpers import an_operator
+
+    settings.COMPANY_NAME = "Environment Name Inc"
+    CompanySettings.objects.filter(pk=CompanySettings.current().pk).update(name="Acme Storage Co")
+    _, user = admin_client()
+    draft = InvoiceDraft.objects.create(operator=an_operator("Decision Four"), created_by=user)
+    assert invoice_builder.preview(draft).company == "Acme Storage Co"

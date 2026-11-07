@@ -201,6 +201,7 @@ from ledger.models import (
     AutopayPlan,
     CollectionMethod,
     CollectionStatus,
+    CompanySettings,
     FeeType,
     InstallmentCollection,
     InstallmentOrigin,
@@ -736,7 +737,8 @@ def preview(draft: InvoiceDraft, today: date | None = None) -> Preview:
         draft=draft,
         lines=lines,
         total=invoice.total if invoice is not None else total_of(lines),
-        company=str(settings.COMPANY_NAME),
+        # PLAN-015c, the owner's decision 4: the company settings' name (as the PDFs').
+        company=str(CompanySettings.current().name),
         operator=draft.operator,
         lease=lease,
         store=lease.store if lease is not None else None,
