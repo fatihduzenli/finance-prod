@@ -174,3 +174,26 @@ strict, lock clean; the QA-015 entry names the counts and the verdict.
    with a future start, and nothing in the app creates a prospective lease.
 2. On **Resume collection**, the months that fell inside the pause are charged (rent owed, collection
    paused). Confirm, or should paused months be skipped?
+
+## 9. The owner's decisions (2026-11-07), applied on this branch before the merge
+
+1. **Q1 — yes.** The New lease page saves a lease whose start date is after today as **Prospective**
+   (`LeaseCreateForm`: `fixed_status` becomes prospective for a future start; Active otherwise); the
+   daily job activates it on the start date, or staff "Activate now". Its tests and the page's summary
+   words follow; autopay set-up waits for activation (the existing `NOT_ACTIVE` blocker).
+2. **Q2 — as built.** The months inside a pause are billed on resume. "Resume collection" becomes a
+   dialog (GET + POST, `waive.html`'s pattern) whose first line states it: "Resuming will bill N paused
+   months: $X." (N and X from the rent run's catch-up preview for this lease; "Resuming will bill
+   nothing." when N is 0). A month to be forgiven is waived afterwards with the existing Waive,
+   audited.
+3. **Roles.** Pause and Resume collection are **admin only** (`RouteRule(min_role=Role.ADMIN)` and the
+   views' own check), consistent with the autopay pause/resume routes. "Activate now" stays billing.
+4. **Words.** The LEASE card's actions read "Pause" and "Resume" (ids unchanged) so the Status row fits
+   on one line at 1280.
+5. **The stale-job race.** A queued `autopay_pause` / `autopay_resume` job carries what it was queued
+   for: when queued by Pause or Resume collection, the lease's expected collection status
+   (`paused` / `active`). When the job runs, the runner reads the lease under its row lock and, if the
+   status no longer matches, does nothing: no provider call, the job completes as skipped and the
+   audit row `lease.autopay_pause_stale` / `lease.autopay_resume_stale` records it. A job queued by the
+   admin autopay routes carries no expectation and runs as today. Test: pause → resume → the stale
+   pause job runs → the schedules stay active at the provider (no call), the audit row is written.
