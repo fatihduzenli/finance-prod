@@ -1221,14 +1221,14 @@ def _store_dialog(request: HttpRequest, lease: Lease, extra: dict[str, Any]) -> 
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def lease_pause_collection(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:leases:pause_collection`` (billing; PLAN-015b §3 B): GET is the dialog over
+    """``ledger:leases:pause_collection`` (admin; PLAN-015b §3 B, §9.3): GET is the dialog over
     the store page (what will happen, the required reason); POST pauses collection
     (:func:`ledger.services.leases.pause_collection`) and, when the lease's autopay was on,
     queues its pause (``autopay_pause``, the worker's job; the view never calls the provider).
     A form with errors or a refusal is held for the dialog's next GET (a reason holding a card
     or account number is dropped, never shown again: :func:`ledger.views.operators._hold`);
     done, it returns to the store page."""
-    refused = _billing_only(request)
+    refused = _admin_only(request)
     if refused is not None:
         return refused
     lease = _load(pk)
@@ -1286,12 +1286,12 @@ def resume_bills(lease: Lease, today: date) -> str:
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def lease_resume_collection(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:leases:resume_collection`` (billing; PLAN-015b §3 B, §9.2): GET is the Resume
+    """``ledger:leases:resume_collection`` (admin; PLAN-015b §3 B, §9.2, §9.3): GET is the Resume
     dialog over the store page, its first line what resuming bills (:func:`resume_bills`);
     POST resumes collection (:func:`ledger.services.leases.resume_collection`, which charges
     those months) and, when the pause paused autopay, queues its resume (``autopay_resume``).
     A refusal re-renders the dialog with its sentence; done, it returns to the store page."""
-    refused = _billing_only(request)
+    refused = _admin_only(request)
     if refused is not None:
         return refused
     lease = _load(pk)

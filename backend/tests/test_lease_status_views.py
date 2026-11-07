@@ -64,6 +64,11 @@ def billing() -> Client:
 
 
 @pytest.fixture
+def admin() -> Client:
+    return client_for(Role.ADMIN, "admin-lease-status")[0]
+
+
+@pytest.fixture
 def viewer() -> Client:
     return client_for(Role.VIEWER)[0]
 
@@ -140,9 +145,9 @@ def status_actions(lease: Lease) -> list[str]:
 # --- The LEASE card's Status row -------------------------------------------------------------
 
 
-def test_an_active_lease_shows_active_and_pause_collection_to_billing(billing: Client) -> None:
+def test_an_active_lease_shows_active_and_pause_collection_to_admin(admin: Client) -> None:
     lease = a_world()
-    row = status_row(body(billing, store_url(lease)))
+    row = status_row(body(admin, store_url(lease)))
     assert 'class="badge badge-paid"' in row and "Active</span>" in row
     assert f'id="pause-collection" href="{pause_url(lease)}">Pause collection</a>' in row
     assert_absent(row, "resume-collection")
@@ -150,14 +155,24 @@ def test_an_active_lease_shows_active_and_pause_collection_to_billing(billing: C
     assert_absent(row, "pause-reason")
 
 
-def test_a_paused_lease_shows_paused_since_its_reason_and_resume(billing: Client) -> None:
+def test_a_paused_lease_shows_paused_since_its_reason_and_resume(admin: Client) -> None:
     lease = a_world()
     service.pause_collection(lease.pk, reason="Store closed for repairs.", actor=None)
-    row = status_row(body(billing, store_url(lease)))
+    row = status_row(body(admin, store_url(lease)))
     assert 'class="badge badge-pending"' in row and "Paused</span>" in row
     assert f'id="resume-collection" href="{resume_url(lease)}">Resume collection</a>' in row
     assert 'id="pause-reason">Paused since Nov 7, 2026 — Store closed for repairs.</span>' in row
     assert_absent(row, "pause-collection")
+
+
+@pytest.mark.parametrize("status", [CollectionStatus.ACTIVE, CollectionStatus.PAUSED])
+def test_billing_sees_the_status_and_no_pause_or_resume(billing: Client, status: str) -> None:
+    # PLAN-015b §9.3: Pause and Resume collection are admin's.
+    lease = a_world(status)
+    row = status_row(body(billing, store_url(lease)))
+    assert '<span class="badge badge-' in row
+    for action in ("pause-collection", "resume-collection", "activate-lease"):
+        assert_absent(row, action)
 
 
 def test_a_prospective_lease_shows_prospective_and_activate_now(billing: Client) -> None:
@@ -234,10 +249,10 @@ def test_the_lease_list_badge_reads_paused(billing: Client) -> None:
 
 
 def test_the_pause_dialog_opens_over_the_store_page_with_its_reason_field(
-    billing: Client,
+    admin: Client,
 ) -> None:
     lease = a_world()
-    html = body(billing, pause_url(lease))
+    html = body(admin, pause_url(lease))
     assert 'id="pause-collection-dialog"' in html and 'id="store-title"' in html
     assert "Are you sure?" in html and "What will happen" in html
     assert 'name="reason"' in html and "Required: why collection is paused." in html
@@ -247,32 +262,32 @@ def test_the_pause_dialog_opens_over_the_store_page_with_its_reason_field(
     assert_absent(html, "its schedules are paused")
 
 
-def test_the_pause_dialog_says_autopay_will_be_paused_when_it_is_on(billing: Client) -> None:
+def test_the_pause_dialog_says_autopay_will_be_paused_when_it_is_on(admin: Client) -> None:
     lease = a_world()
     autopay_on(lease)
-    assert "Autopay is on: its schedules are paused in" in body(billing, pause_url(lease))
+    assert "Autopay is on: its schedules are paused in" in body(admin, pause_url(lease))
 
 
 def test_pausing_without_autopay_pauses_and_queues_nothing(
-    billing: Client, fake: FakeProvider
+    admin: Client, fake: FakeProvider
 ) -> None:
     lease = a_world()
-    response = billing.post(pause_url(lease), {"reason": "Store closed for repairs."})
+    response = admin.post(pause_url(lease), {"reason": "Store closed for repairs."})
     assert response.status_code == 302 and response["Location"] == store_url(lease)
     lease.refresh_from_db()
     assert lease.collection_status == CollectionStatus.PAUSED
     assert jobs_of(lease) == [] and fake.calls == []
     assert status_actions(lease) == ["lease.collection_paused"]
-    page = billing.get(store_url(lease)).content.decode()
+    page = admin.get(store_url(lease)).content.decode()
     assert views.COLLECTION_PAUSED in page
 
 
 def test_pausing_with_autopay_on_queues_its_pause_and_calls_nothing(
-    billing: Client, fake: FakeProvider
+    admin: Client, fake: FakeProvider
 ) -> None:
     lease = a_world()
     autopay_on(lease)
-    response = billing.post(pause_url(lease), {"reason": "Owner asked."}, follow=True)
+    response = admin.post(pause_url(lease), {"reason": "Owner asked."}, follow=True)
     assert views.COLLECTION_PAUSED_AUTOPAY in response.content.decode()
     assert jobs_of(lease) == [JobKind.AUTOPAY_PAUSE]
     assert fake.calls == []
@@ -291,13 +306,13 @@ def test_pausing_with_autopay_on_queues_its_pause_and_calls_nothing(
     ids=["empty", "invisible", "card number", "too long"],
 )
 def test_a_bad_reason_re_renders_the_dialog_and_changes_nothing(
-    billing: Client, reason: str, message: str
+    admin: Client, reason: str, message: str
 ) -> None:
     lease = a_world()
-    response = billing.post(pause_url(lease), {"reason": reason})
+    response = admin.post(pause_url(lease), {"reason": reason})
     # The form is held for the dialog's next GET; a reason with payment data is dropped.
     assert response.status_code == 302 and response["Location"] == pause_url(lease)
-    html = body(billing, pause_url(lease))
+    html = body(admin, pause_url(lease))
     assert 'id="pause-collection-dialog"' in html and message in html
     assert CARD not in html
     assert "4111111111111111" not in html
@@ -309,12 +324,12 @@ def test_a_bad_reason_re_renders_the_dialog_and_changes_nothing(
 @pytest.mark.parametrize(
     "status", [CollectionStatus.PAUSED, CollectionStatus.PROSPECTIVE, CollectionStatus.ENDED]
 )
-def test_the_pause_dialog_refuses_a_lease_that_is_not_active(billing: Client, status: str) -> None:
+def test_the_pause_dialog_refuses_a_lease_that_is_not_active(admin: Client, status: str) -> None:
     lease = a_world(status)
-    html = body(billing, pause_url(lease))
+    html = body(admin, pause_url(lease))
     assert f'id="pause-collection-refusal"><strong>{service.PAUSE_NOT_ACTIVE}</strong>' in html
     assert_absent(html, "pause-collection-submit")
-    response = billing.post(pause_url(lease), {"reason": "Owner asked."}, follow=True)
+    response = admin.post(pause_url(lease), {"reason": "Owner asked."}, follow=True)
     html = response.content.decode()
     assert html.count(service.PAUSE_NOT_ACTIVE) == 1
     lease.refresh_from_db()
@@ -325,11 +340,11 @@ def test_the_pause_dialog_refuses_a_lease_that_is_not_active(billing: Client, st
 
 
 def test_resuming_resumes_charges_the_paused_months_and_queues_nothing_without_autopay(
-    billing: Client, fake: FakeProvider
+    admin: Client, fake: FakeProvider
 ) -> None:
     lease = a_world()
     service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
-    response = billing.post(resume_url(lease), follow=True)
+    response = admin.post(resume_url(lease), follow=True)
     assert response.redirect_chain[-1][0] == store_url(lease)
     assert views.COLLECTION_RESUMED in response.content.decode()
     lease.refresh_from_db()
@@ -340,14 +355,14 @@ def test_resuming_resumes_charges_the_paused_months_and_queues_nothing_without_a
 
 
 def test_resuming_after_a_pause_that_paused_autopay_queues_its_resume(
-    billing: Client, fake: FakeProvider
+    admin: Client, fake: FakeProvider
 ) -> None:
     lease = a_world()
     schedule = autopay_on(lease)
-    billing.post(pause_url(lease), {"reason": "Owner asked."})
+    admin.post(pause_url(lease), {"reason": "Owner asked."})
     # The worker ran the pause job.
     CollectionSchedule.objects.filter(pk=schedule.pk).update(state=ScheduleState.PAUSED)
-    response = billing.post(resume_url(lease), follow=True)
+    response = admin.post(resume_url(lease), follow=True)
     assert views.COLLECTION_RESUMED_AUTOPAY in response.content.decode()
     assert jobs_of(lease) == [JobKind.AUTOPAY_PAUSE, JobKind.AUTOPAY_RESUME]
     assert fake.calls == []
@@ -356,9 +371,9 @@ def test_resuming_after_a_pause_that_paused_autopay_queues_its_resume(
 @pytest.mark.parametrize(
     "status", [CollectionStatus.ACTIVE, CollectionStatus.PROSPECTIVE, CollectionStatus.ENDED]
 )
-def test_resume_is_refused_unless_paused(billing: Client, status: str) -> None:
+def test_resume_is_refused_unless_paused(admin: Client, status: str) -> None:
     lease = a_world(status)
-    response = billing.post(resume_url(lease), follow=True)
+    response = admin.post(resume_url(lease), follow=True)
     assert service.RESUME_NOT_PAUSED in response.content.decode()
     lease.refresh_from_db()
     assert lease.collection_status == status
@@ -366,11 +381,11 @@ def test_resume_is_refused_unless_paused(billing: Client, status: str) -> None:
 
 
 def test_the_resume_dialog_opens_over_the_store_page_and_says_what_it_bills(
-    billing: Client,
+    admin: Client,
 ) -> None:
     lease = a_world()
     service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
-    html = body(billing, resume_url(lease))
+    html = body(admin, resume_url(lease))
     assert 'id="resume-collection-dialog"' in html and 'id="store-title"' in html
     assert "Are you sure?" in html and "What will happen" in html
     what = html[html.index('id="resume-collection-what"') :]
@@ -386,44 +401,44 @@ def test_the_resume_dialog_opens_over_the_store_page_and_says_what_it_bills(
 
 
 def test_the_resume_dialog_with_every_month_billed_says_it_bills_nothing(
-    billing: Client,
+    admin: Client,
 ) -> None:
     lease = a_world()
     for month in (date(2026, 9, 1), date(2026, 10, 1), date(2026, 11, 1)):
         a_rent_charge(lease, month)
     service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
-    html = body(billing, resume_url(lease))
+    html = body(admin, resume_url(lease))
     assert 'id="resume-collection-bills">Resuming will bill nothing.<' in html
     assert_absent(html, "Resuming will bill 0")
-    billing.post(resume_url(lease))
+    admin.post(resume_url(lease))
     assert RentCharge.objects.filter(lease=lease).count() == 3
 
 
-def test_the_resume_dialog_says_one_paused_month(billing: Client) -> None:
+def test_the_resume_dialog_says_one_paused_month(admin: Client) -> None:
     lease = a_world()
     for month in (date(2026, 9, 1), date(2026, 10, 1)):
         a_rent_charge(lease, month)
     service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
-    html = body(billing, resume_url(lease))
+    html = body(admin, resume_url(lease))
     assert 'id="resume-collection-bills">Resuming will bill 1 paused month: $3,500.00.<' in html
 
 
-def test_the_resume_dialog_counts_a_month_debited_twice_once(billing: Client) -> None:
+def test_the_resume_dialog_counts_a_month_debited_twice_once(admin: Client) -> None:
     lease = a_world(second_debit_day=15)
     service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
-    html = body(billing, resume_url(lease))
+    html = body(admin, resume_url(lease))
     # Sep 1 and 15, Oct 1 and 15, Nov 1 (Nov 15 is after today): five halves of $3,500.00.
     assert 'id="resume-collection-bills">Resuming will bill 3 paused months: $8,750.00.<' in html
 
 
-def test_resuming_bills_exactly_the_months_the_dialog_named(billing: Client) -> None:
+def test_resuming_bills_exactly_the_months_the_dialog_named(admin: Client) -> None:
     lease = a_world(second_debit_day=15)
     a_rent_charge(lease, date(2026, 9, 1), due="1750.00")
     service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
     lease.refresh_from_db()
     planned = rent_run.months_resume_would_create(lease, TODAY)
     assert views.resume_bills(lease, TODAY) == ("Resuming will bill 3 paused months: $7,000.00.")
-    billing.post(resume_url(lease))
+    admin.post(resume_url(lease))
     made = RentCharge.objects.filter(lease=lease).exclude(period_month=date(2026, 9, 1), seq=1)
     assert sorted((c.period_month, c.seq, c.due_on, c.amount_due) for c in made) == sorted(
         (plan.period_month, plan.seq, plan.due_on, plan.amount) for plan in planned
@@ -444,23 +459,23 @@ def test_the_resume_preview_is_empty_unless_the_lease_is_paused(status: str) -> 
 @pytest.mark.parametrize(
     "status", [CollectionStatus.ACTIVE, CollectionStatus.PROSPECTIVE, CollectionStatus.ENDED]
 )
-def test_the_resume_dialog_refuses_a_lease_that_is_not_paused(billing: Client, status: str) -> None:
+def test_the_resume_dialog_refuses_a_lease_that_is_not_paused(admin: Client, status: str) -> None:
     lease = a_world(status)
-    html = body(billing, resume_url(lease))
+    html = body(admin, resume_url(lease))
     assert f'id="resume-collection-refusal"><strong>{service.RESUME_NOT_PAUSED}</strong>' in html
     assert_absent(html, "resume-collection-submit")
     assert_absent(html, "Resuming will bill")
 
 
 def test_the_resume_dialog_refuses_a_paused_lease_missing_a_requirement(
-    billing: Client,
+    admin: Client,
 ) -> None:
     lease = a_world(CollectionStatus.PAUSED)
     Lease.objects.filter(pk=lease.pk).update(operator=None)
-    html = body(billing, resume_url(lease))
+    html = body(admin, resume_url(lease))
     assert f"<strong>{service.NO_OPERATOR}</strong>" in html
     assert_absent(html, "resume-collection-submit")
-    billing.post(resume_url(lease))
+    admin.post(resume_url(lease))
     lease.refresh_from_db()
     assert lease.collection_status == CollectionStatus.PAUSED
     assert not RentCharge.objects.filter(lease=lease).exists()
@@ -549,6 +564,31 @@ def test_a_viewers_get_and_post_are_403_and_change_nothing(viewer: Client, route
     assert status_actions(lease) == [] and jobs_of(lease) == []
 
 
+@pytest.mark.parametrize("route", ["pause", "resume"])
+def test_billings_get_and_post_to_pause_and_resume_are_403_and_change_nothing(
+    billing: Client, route: str
+) -> None:
+    # PLAN-015b §9.3: admin only, as the autopay pause and resume.
+    status = CollectionStatus.ACTIVE if route == "pause" else CollectionStatus.PAUSED
+    lease = a_world(status)
+    autopay_on(lease, ScheduleState.ACTIVE if route == "pause" else ScheduleState.PAUSED)
+    path = pause_url(lease) if route == "pause" else resume_url(lease)
+    assert billing.get(path).status_code == 403
+    assert billing.post(path, {"reason": "Owner asked."}).status_code == 403
+    lease.refresh_from_db()
+    assert lease.collection_status == status
+    assert status_actions(lease) == [] and jobs_of(lease) == []
+    assert not RentCharge.objects.filter(lease=lease).exists()
+
+
+def test_billing_may_activate(billing: Client) -> None:
+    lease = a_world(CollectionStatus.PROSPECTIVE)
+    assert billing.get(activate_url(lease)).status_code == 200
+    assert billing.post(activate_url(lease)).status_code == 302
+    lease.refresh_from_db()
+    assert lease.collection_status == CollectionStatus.ACTIVE
+
+
 @pytest.mark.parametrize("route", ["pause", "resume", "activate"])
 def test_a_post_without_the_csrf_token_is_refused(route: str) -> None:
     status = {
@@ -557,7 +597,9 @@ def test_a_post_without_the_csrf_token_is_refused(route: str) -> None:
         "activate": CollectionStatus.PROSPECTIVE,
     }[route]
     lease = a_world(status)
-    user, device = make_user("billing-csrf", Role.BILLING)
+    # The role each route needs, so the token is what refuses the POST.
+    role = Role.BILLING if route == "activate" else Role.ADMIN
+    user, device = make_user(f"csrf-{route}", role)
     assert device is not None
     client = verified_client(user, device, Client(enforce_csrf_checks=True))
     path = {"pause": pause_url, "resume": resume_url, "activate": activate_url}[route](lease)
@@ -575,13 +617,13 @@ def test_a_post_without_the_csrf_token_is_refused(route: str) -> None:
         "/leases/not-a-uuid/pause-collection/",
     ],
 )
-def test_a_missing_lease_is_404(billing: Client, path: str) -> None:
-    assert billing.get(path).status_code == 404
+def test_a_missing_lease_is_404(admin: Client, path: str) -> None:
+    assert admin.get(path).status_code == 404
 
 
-def test_a_post_to_a_missing_lease_is_404(billing: Client) -> None:
+def test_a_post_to_a_missing_lease_is_404(admin: Client) -> None:
     missing = "/leases/00000000-0000-0000-0000-000000000000/resume-collection/"
-    assert billing.post(missing).status_code == 404
+    assert admin.post(missing).status_code == 404
 
 
 # --- Notes & follow-ups: the status changes (PLAN-015b §3 B) ---------------------------------
