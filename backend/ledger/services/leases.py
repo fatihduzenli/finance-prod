@@ -196,6 +196,15 @@ RESUME_REFUSED = (
 ALREADY_ENABLED = "Autopay is already set up for every debit day. Nothing was created."
 NOTHING_TO_PAUSE = "Autopay is not on."
 NOTHING_TO_RESUME = "Autopay is not paused."
+#: PLAN-015b §9.5: an ``autopay_pause`` / ``autopay_resume`` job queued by Pause or Resume
+#: collection carries the collection status it was queued for under this ``params`` key; the
+#: runner does nothing when the lease no longer has it. The admin autopay routes set none.
+EXPECTED_STATUS_PARAM = "expected_status"
+AUTOPAY_PAUSE_STALE_ACTION = "lease.autopay_pause_stale"
+AUTOPAY_RESUME_STALE_ACTION = "lease.autopay_resume_stale"
+STALE_JOB = (
+    "Skipped: the lease's collection status changed after this was queued. Nothing was sent."
+)
 #: PLAN-012e D5 amendment: stopping autopay.
 NOTHING_TO_STOP = "Autopay is already off."
 NOTHING_TO_MOVE = provider_sentence(
@@ -267,6 +276,8 @@ class AutopayAction(StrEnum):
     STOPPED = "stopped"
     MOVED = "moved"
     ALREADY = "already"
+    #: PLAN-015b §9.5: the job was queued for a collection status the lease no longer has.
+    SKIPPED = "skipped"
     REFUSED = "refused"
     FAILED = "failed"
 
@@ -289,6 +300,7 @@ class AutopayOutcome:
             AutopayAction.STOPPED,
             AutopayAction.MOVED,
             AutopayAction.ALREADY,
+            AutopayAction.SKIPPED,
         )
 
     @property
@@ -1930,10 +1942,17 @@ def enable_autopay(
     return AutopayOutcome(AutopayAction.ENABLED, "Autopay enabled.")
 
 
-def pause_autopay(lease_id: uuid.UUID, *, actor: User | None) -> AutopayOutcome:
-    """D4: ``active=False`` on every active schedule of the lease; never an amount."""
+def pause_autopay(
+    lease_id: uuid.UUID, *, actor: User | None, expected_status: str | None = None
+) -> AutopayOutcome:
+    """D4: ``active=False`` on every active schedule of the lease; never an amount.
+
+    With ``expected_status`` (PLAN-015b §9.5, a job queued by Pause collection), nothing is
+    sent when the locked lease's collection status is no longer that one (:func:`_stale`)."""
     with transaction.atomic():
         lease = _locked(lease_id)
+        if expected_status is not None and lease.collection_status != expected_status:
+            return _stale(actor, lease, AUTOPAY_PAUSE_STALE_ACTION, expected_status)
         rows = [
             (row, ref)
             for row in live_schedules(lease)
@@ -1955,15 +1974,23 @@ def pause_autopay(lease_id: uuid.UUID, *, actor: User | None) -> AutopayOutcome:
 
 
 def resume_autopay(
-    lease_id: uuid.UUID, *, actor: User | None, now: datetime | None = None
+    lease_id: uuid.UUID,
+    *,
+    actor: User | None,
+    now: datetime | None = None,
+    expected_status: str | None = None,
 ) -> AutopayOutcome:
     """D4: ``active=True`` and a rule with a new future ``DTSTART``; never an amount.
 
     Refused while the lease blocks autopay or any paused schedule no longer matches it.
+    With ``expected_status`` (PLAN-015b §9.5, a job queued by Resume collection), nothing is
+    sent when the locked lease's collection status is no longer that one (:func:`_stale`).
     """
     moment = now or timezone.now()
     with transaction.atomic():
         lease = _locked(lease_id)
+        if expected_status is not None and lease.collection_status != expected_status:
+            return _stale(actor, lease, AUTOPAY_RESUME_STALE_ACTION, expected_status)
         rows = [
             (row, ref)
             for row in live_schedules(lease)
@@ -2387,6 +2414,16 @@ def _failure_message(error: ProviderError) -> str:
 
 def _fields(error: ProviderError) -> tuple[str, ...]:
     return error.error_fields if isinstance(error, ProviderRejected) else ()
+
+
+def _stale(actor: User | None, lease: Lease, action: str, expected: str) -> AutopayOutcome:
+    """PLAN-015b §9.5: a queued autopay job whose lease no longer has the collection status
+    it was queued for: audited ``action`` (``before``/``after`` the snapshot, ``after`` with
+    ``expected`` and ``found``) and skipped; the provider is not called."""
+    snapshot = _snapshot(lease)
+    found = lease.collection_status
+    _audit(actor, action, lease, snapshot, {**snapshot, "expected": expected, "found": found})
+    return AutopayOutcome(AutopayAction.SKIPPED, STALE_JOB)
 
 
 def _failed(

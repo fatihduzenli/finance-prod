@@ -1244,7 +1244,13 @@ def lease_pause_collection(request: HttpRequest, pk: str) -> HttpResponse:
                 form.add_error(error.field if error.field in form.fields else None, str(error))
             else:
                 if outcome.autopay_paused:
-                    submit(request, JobKind.AUTOPAY_PAUSE, lease)
+                    # PLAN-015b §9.5: the job does nothing if collection is resumed first.
+                    submit(
+                        request,
+                        JobKind.AUTOPAY_PAUSE,
+                        lease,
+                        {service.EXPECTED_STATUS_PARAM: CollectionStatus.PAUSED.value},
+                    )
                     messages.success(request, COLLECTION_PAUSED_AUTOPAY)
                 else:
                     messages.success(request, COLLECTION_PAUSED)
@@ -1308,7 +1314,13 @@ def lease_resume_collection(request: HttpRequest, pk: str) -> HttpResponse:
             refusal = str(error)
         else:
             if outcome.autopay_resume:
-                submit(request, JobKind.AUTOPAY_RESUME, lease)
+                # PLAN-015b §9.5: the job does nothing if collection is paused again first.
+                submit(
+                    request,
+                    JobKind.AUTOPAY_RESUME,
+                    lease,
+                    {service.EXPECTED_STATUS_PARAM: CollectionStatus.ACTIVE.value},
+                )
                 messages.success(request, COLLECTION_RESUMED_AUTOPAY)
             else:
                 messages.success(request, COLLECTION_RESUMED)

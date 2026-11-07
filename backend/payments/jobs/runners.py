@@ -194,12 +194,27 @@ def autopay_enable_job(job: Job) -> Result:
     )
 
 
+def _expected_status(job: Job) -> str | None:
+    """PLAN-015b §9.5: the collection status a Pause or Resume collection job was queued for;
+    ``None`` for a job of the admin autopay routes, which runs as before."""
+    value = job.params.get(leases.EXPECTED_STATUS_PARAM)
+    return None if value is None else str(value)
+
+
 def autopay_pause_job(job: Job) -> Result:
-    return _autopay(leases.pause_autopay(job.entity_id, actor=job.requested_by))
+    return _autopay(
+        leases.pause_autopay(
+            job.entity_id, actor=job.requested_by, expected_status=_expected_status(job)
+        )
+    )
 
 
 def autopay_resume_job(job: Job) -> Result:
-    return _autopay(leases.resume_autopay(job.entity_id, actor=job.requested_by))
+    return _autopay(
+        leases.resume_autopay(
+            job.entity_id, actor=job.requested_by, expected_status=_expected_status(job)
+        )
+    )
 
 
 def autopay_stop_job(job: Job) -> Result:
