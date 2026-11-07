@@ -149,7 +149,8 @@ def test_an_active_lease_shows_active_and_pause_collection_to_admin(admin: Clien
     lease = a_world()
     row = status_row(body(admin, store_url(lease)))
     assert 'class="badge badge-paid"' in row and "Active</span>" in row
-    assert f'id="pause-collection" href="{pause_url(lease)}">Pause collection</a>' in row
+    # PLAN-015b §9.4: the card's words are "Pause" and "Resume"; the ids are unchanged.
+    assert f'id="pause-collection" href="{pause_url(lease)}">Pause</a>' in row
     assert_absent(row, "resume-collection")
     assert_absent(row, "activate-lease")
     assert_absent(row, "pause-reason")
@@ -160,7 +161,7 @@ def test_a_paused_lease_shows_paused_since_its_reason_and_resume(admin: Client) 
     service.pause_collection(lease.pk, reason="Store closed for repairs.", actor=None)
     row = status_row(body(admin, store_url(lease)))
     assert 'class="badge badge-pending"' in row and "Paused</span>" in row
-    assert f'id="resume-collection" href="{resume_url(lease)}">Resume collection</a>' in row
+    assert f'id="resume-collection" href="{resume_url(lease)}">Resume</a>' in row
     assert 'id="pause-reason">Paused since Nov 7, 2026 — Store closed for repairs.</span>' in row
     assert_absent(row, "pause-collection")
 
