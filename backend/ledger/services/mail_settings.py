@@ -1,5 +1,6 @@
 """Admin › Settings › Mail (docs/qa/PLAN-014-per-lease-billing-messaging-portal-deposits.md D1,
-D2): the company's sender, Reply-To, managers' list and sandbox allowlist.
+D2): the company's sender, Reply-To, managers' list and sandbox allowlist; and, since PLAN-015c
+(ADR-0020), the Company card: the address the PDFs print and who e-mails the invoices.
 
 :func:`save` (admin) writes the four fields of the company settings row: each address blank
 or one plain address, each list one address per line (blank lines ignored, lower-cased, each
@@ -9,6 +10,12 @@ and after, as the Django admin audited the row.
 
 :func:`status` says whether mail leaves the app here, from the presence of the
 service-account key (never its value), ``MAIL_ENABLED`` and the sender address.
+
+:func:`save_company` (admin; the Company card, posted to the same route with
+``section=company``) writes :data:`COMPANY_FIELDS`: the five address fields (each optional,
+trimmed, at most its column's length, never a card or account number) and ``invoice_sender``
+(``processor`` or ``company``; anything else is refused). It is refused, audited and answered as
+:func:`save` is.
 """
 
 from __future__ import annotations
@@ -21,7 +28,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 import mail
-from ledger.models import AuditLog, CompanySettings
+from ledger.models import AuditLog, CompanySettings, InvoiceSender
 from ledger.validators import validate_no_payment_data
 from mail.base import ADDRESS_LINES_MAX, ADDRESS_LINES_TOO_MANY, is_address
 
@@ -39,6 +46,28 @@ LIST_TOO_LONG = "{label}: a list holds at most {count} addresses."
 PAYMENT_DATA = "{label} cannot hold a card or account number."
 SAVED = "Mail settings saved."
 UNCHANGED = "Nothing changed."
+
+#: PLAN-015c: the Company card's fields, with their labels and longest lengths.
+COMPANY_FIELDS: tuple[str, ...] = (
+    "address_line1",
+    "address_line2",
+    "city",
+    "state",
+    "postal_code",
+    "invoice_sender",
+)
+COMPANY_LABELS: dict[str, str] = {
+    "address_line1": "Address line 1",
+    "address_line2": "Address line 2",
+    "city": "City",
+    "state": "State",
+    "postal_code": "ZIP code",
+    "invoice_sender": "Invoice e-mails sent by",
+}
+COMPANY_SECTION = "company"
+TOO_LONG = "{label}: at most {count} characters."
+SENDER_REFUSED = "Invoice e-mails sent by: choose one of the two."
+COMPANY_SAVED = "Company settings saved."
 
 SET_UP = "Mail: set up."
 NOT_SET_UP_NO_KEY = "Mail: not set up (no key in this environment)."
@@ -115,3 +144,51 @@ def save(data: Mapping[str, object], actor: User) -> Outcome:
             after=found,
         )
     return Outcome(True, SAVED)
+
+
+# --- The Company card (PLAN-015c) -----------------------------------------------------------
+
+
+def clean_company(data: Mapping[str, object]) -> tuple[dict[str, str], str]:
+    """The Company card's fields as stored, and ``""``; or ``{}`` and the refusal."""
+    found: dict[str, str] = {}
+    for name in COMPANY_FIELDS[:-1]:
+        value = " ".join(_text(data.get(name)).split())
+        limit = CompanySettings._meta.get_field(name).max_length or 0
+        if len(value) > limit:
+            return {}, TOO_LONG.format(label=COMPANY_LABELS[name], count=limit)
+        try:
+            validate_no_payment_data(value)
+        except ValidationError:
+            return {}, PAYMENT_DATA.format(label=COMPANY_LABELS[name])
+        found[name] = value
+    sender = _text(data.get("invoice_sender"))
+    if sender not in InvoiceSender.values:
+        return {}, SENDER_REFUSED
+    found["invoice_sender"] = sender
+    return found, ""
+
+
+def save_company(data: Mapping[str, object], actor: User) -> Outcome:
+    """Write the Company card's fields (see the module docstring)."""
+    found, refusal = clean_company(data)
+    if refusal:
+        return Outcome(False, refusal)
+    with transaction.atomic():
+        row = CompanySettings.current()
+        row = CompanySettings.objects.select_for_update().defer("logo_png").get(pk=row.pk)
+        before = {name: getattr(row, name) for name in COMPANY_FIELDS}
+        if before == found:
+            return Outcome(True, UNCHANGED)
+        for name, value in found.items():
+            setattr(row, name, value)
+        row.save(update_fields=[*COMPANY_FIELDS, "updated_at"])
+        AuditLog.objects.create(
+            actor=actor,
+            action=f"{ENTITY}.updated",
+            entity_type=ENTITY,
+            entity_id=str(row.pk),
+            before=before,
+            after=found,
+        )
+    return Outcome(True, COMPANY_SAVED)

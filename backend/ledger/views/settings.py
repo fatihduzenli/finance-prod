@@ -10,6 +10,9 @@ GET as well). The cards:
   or down.
 - **Mail** (:mod:`ledger.services.mail_settings`, D1): the sender, the Reply-To, the managers'
   list and the sandbox allowlist, and whether mail is set up here (the key's presence only).
+- **Company** (PLAN-015c, ADR-0020; the same route with ``section=company``): the address the
+  invoice and receipt PDFs print, and "Invoice e-mails sent by" (the processor's display name
+  or the company's short name, from the settings row).
 - **Message templates** (:mod:`ledger.services.message_templates`, D4): the list, a page per
   template to edit its subject and body with the placeholders it may use, and a Preview
   with a store's real values and sample amounts (nothing queued).
@@ -35,7 +38,12 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from banking import services as banking
-from ledger.models import TEMPLATE_SUBJECT_MAX_LENGTH, CompanySettings, MessageTemplate
+from ledger.models import (
+    TEMPLATE_SUBJECT_MAX_LENGTH,
+    CompanySettings,
+    InvoiceSender,
+    MessageTemplate,
+)
 from ledger.services import brands, mail_settings, message_templates
 from ledger.services.message_templates import BODY_MAX_LENGTH
 from ledger.views.leases import _admin_only
@@ -80,6 +88,11 @@ def settings_index(request: HttpRequest) -> HttpResponse:
             "name_max": brands.NAME_MAX,
             "mail_status": mail_settings.status(),
             "mail": {name: getattr(company, name) for name in mail_settings.FIELDS},
+            "company_card": {name: getattr(company, name) for name in mail_settings.COMPANY_FIELDS},
+            "invoice_senders": [
+                (InvoiceSender.PROCESSOR, str(company.provider_name)),
+                (InvoiceSender.COMPANY, str(company.short_name)),
+            ],
             "bank": banking.card(),
         },
     )
@@ -135,10 +148,15 @@ def brand_move(request: HttpRequest, pk: str) -> HttpResponse:
 @role_required
 @require_POST
 def mail_save(request: HttpRequest) -> HttpResponse:
-    """``ledger:settings:mail_save`` (admin, POST): the Mail card's four fields."""
+    """``ledger:settings:mail_save`` (admin, POST): the Mail card's four fields; with
+    ``section=company``, the Company card's (PLAN-015c: the address and who e-mails the
+    invoices)."""
     refused = _admin_only(request)
     if refused is not None:
         return refused
+    if request.POST.get("section") == mail_settings.COMPANY_SECTION:
+        outcome = mail_settings.save_company(request.POST, _actor(request))
+        return _answer(request, outcome, f"{reverse(INDEX)}#company")
     outcome = mail_settings.save(request.POST, _actor(request))
     return _answer(request, outcome, f"{reverse(INDEX)}#mail")
 

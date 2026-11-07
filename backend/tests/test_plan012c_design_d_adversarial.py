@@ -45,9 +45,12 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     # rent month (rules A and B before the month's charge).
     "ChargeEntityType": [
         "insurance_charge",
+        # PLAN-015c: an invoice and a payment, what the invoice and receipt e-mails are about.
+        "invoice",
         "lease_end",
         "lease_month",
         "one_off_charge",
+        "payment",
         # PLAN-014 H2: a portal account, what a portal message is about.
         "portal_user",
         "rent_charge",
@@ -96,13 +99,16 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "InstallmentPlanStatus": ["active", "attention", "cancelled", "completed", "paused"],
     "InvoiceDraftStatus": ["cancelled", "draft", "sent"],
     "InvoiceLineKind": ["charge", "discount", "fee", "surcharge", "tax"],
+    # PLAN-015c (ADR-0020): who e-mails the invoices.
+    "InvoiceSender": ["company", "processor"],
     "InvoiceStatus": ["closed", "draft", "ready", "sent", "void"],
     "LeaseEndReason": ["moved_out", "other", "terminated", "transfer"],
     "LeaseEndStatus": ["confirmed", "draft"],
     "LeaseTransferStatus": ["confirmed", "draft"],
     "LegacyStatus": ["paid", "unpaid"],
     # PLAN-014 H2: the portal's invitation and reset ("portal").
-    "MessageKind": ["final_statement", "ladder", "portal"],
+    # "invoice" and "receipt" added by ledger 0071 (PLAN-015c).
+    "MessageKind": ["final_statement", "invoice", "ladder", "portal", "receipt"],
     # PLAN-014 D2: held in the Outbox; D3: the message's channel, rule and held reason.
     # "combined" and "waiting" added for one e-mail per lease and day (owner, 2026-11-02).
     "MessageStatus": [
@@ -124,9 +130,12 @@ FROZEN_CHOICES: dict[str, list[str]] = {
         "E",
         "F",
         "final_statement",
+        # PLAN-015c (ledger 0071): the invoice and receipt e-mails.
+        "invoice",
         "ladder",
         "manual",
         "portal",
+        "receipt",
     ],
     # "missing_value" and "settings_incomplete" added by ledger 0069 (owner, 2026-11-02).
     "HeldReason": [
