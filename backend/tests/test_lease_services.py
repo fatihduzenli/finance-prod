@@ -12,12 +12,14 @@ import threading
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from io import StringIO
 from typing import Any
 
 import httpx
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.db import connection
 from django.db.models import ProtectedError
 from django.test import override_settings
@@ -2501,3 +2503,49 @@ def test_collection_pause_reads_the_latest_pause_after_a_resume() -> None:
 def test_collection_pause_is_none_for_a_lease_paused_without_a_row() -> None:
     lease = make_lease(collection_status=CollectionStatus.PAUSED)
     assert service.collection_pause(lease) is None
+
+
+# --- PLAN-015b §3 A: the daily job's activation step -----------------------------------------
+
+
+def tick_on(monkeypatch: pytest.MonkeyPatch, day: date) -> str:
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: day)
+    out = StringIO()
+    call_command("collections_tick", stdout=out)
+    return out.getvalue()
+
+
+def test_the_daily_job_activates_and_charges_a_lease_on_its_start_date_and_counts_one_waiting(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeProvider
+) -> None:
+    starts = prospective(date(2026, 11, 7))
+    waits = prospective(date(2026, 11, 2), operator=make_operator(email="wait@example.com"))
+    Lease.objects.filter(pk=waits.pk).update(payment_channel=PaymentChannel.UNKNOWN)
+    later = prospective(date(2026, 11, 8), operator=make_operator(email="later@example.com"))
+    line = tick_on(monkeypatch, date(2026, 11, 7))
+    assert line.rstrip().endswith(
+        "Lease-end drafts without terms removed: 0. Leases activated: 1 (1 waiting on details)."
+    )
+    starts.refresh_from_db()
+    assert starts.collection_status == CollectionStatus.ACTIVE
+    [charge] = RentCharge.objects.filter(lease=starts)
+    assert charge.due_on == date(2026, 11, 7)
+    # The rent run after it found the charge made already: none twice.
+    assert "Rent charges created: 0." in line
+    for lease in (waits, later):
+        lease.refresh_from_db()
+        assert lease.collection_status == CollectionStatus.PROSPECTIVE
+    # The daily job never calls the provider.
+    assert fake.calls == []
+    # Run again the same day: nothing more.
+    again = tick_on(monkeypatch, date(2026, 11, 7))
+    assert "Leases activated: 0 (1 waiting on details)." in again
+    assert RentCharge.objects.filter(lease=starts).count() == 1
+
+
+def test_the_daily_job_with_no_prospective_lease_activates_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    make_lease()
+    line = tick_on(monkeypatch, date(2026, 11, 7))
+    assert "Leases activated: 0 (0 waiting on details)." in line
