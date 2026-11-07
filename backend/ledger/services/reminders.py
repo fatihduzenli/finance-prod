@@ -48,6 +48,11 @@ of that lease and for its month's B; A still goes, since the debit will happen a
 promise past its date is broken and pauses nothing: the rules resume from the next rule day,
 without catching up the days paused.
 
+**Collection paused** (PLAN-015b §3 B). A lease whose collection is paused gets no A or B for
+its months (only active leases are listed) and no B to E for the charges it bills (skipped,
+"collection is paused"); a message queued before the pause is suppressed at the send
+(``LeasePaused``). Once collection resumes the rules go again from the next rule day.
+
 **Plan, then queue** (:func:`plan`, :func:`queue_due`). :func:`plan` reads what the day's rules
 would queue, writing nothing: per lease month and open charge its rule, template, lease (and
 store), operator, amount and outcome (:class:`Planned`) — it would be queued, paused by a
@@ -370,6 +375,8 @@ NO_LEASE = "no_lease"
 NO_TEMPLATE = "no_template"
 MONTH_SETTLED = "month_settled"
 ALREADY_QUEUED = "already_queued"
+#: PLAN-015b §3 B: the lease that bills the charge has its collection paused.
+COLLECTION_PAUSED = "collection_paused"
 OUTCOME_TEXT: Mapping[str, str] = {
     QUEUE: "Would queue",
     PAUSED: "Paused by a promise",
@@ -377,6 +384,7 @@ OUTCOME_TEXT: Mapping[str, str] = {
     NO_TEMPLATE: "Skipped: no active template",
     MONTH_SETTLED: "Skipped: the month is settled",
     ALREADY_QUEUED: "Skipped: already queued",
+    COLLECTION_PAUSED: "Skipped: collection is paused",
 }
 #: Added to "Would queue" when the lease has no billing e-mail: the send holds it.
 HELD_NO_EMAIL = "held: no billing e-mail"
@@ -545,6 +553,8 @@ def plan(today: date) -> list[Planned]:
         template = templates.get(rule.template)
         if charge is None or billed is None or operator is None:
             outcome = NO_LEASE
+        elif billed.collection_status == CollectionStatus.PAUSED:
+            outcome = COLLECTION_PAUSED
         elif template is None:
             outcome = NO_TEMPLATE
         elif rule.code in PAUSED_BY_PROMISE and _paused(billed, operator.pk, pending):

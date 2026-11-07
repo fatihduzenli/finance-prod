@@ -644,7 +644,8 @@ def _record_refusal(plan: AutopayPlan, outcome: Outcome, actor: User | None) -> 
 
 def make_due(plan: AutopayPlan, today: date, actor: User | None = None) -> OneOffCharge | None:
     """Make the plan's next occurrence when it is due (``next_on - LEAD_DAYS`` is
-    ``today`` or earlier) and the plan is active; ``None`` otherwise, or when the one-off
+    ``today`` or earlier), the plan is active and its lease's collection is not paused
+    (PLAN-015b); ``None`` otherwise, or when the one-off
     rules refuse it (audited, the plan unchanged). Under the plan's row lock: two calls
     make one occurrence."""
     with transaction.atomic():
@@ -654,6 +655,10 @@ def make_due(plan: AutopayPlan, today: date, actor: User | None = None) -> OneOf
             .get(pk=plan.pk)
         )
         if locked.state != AutopayPlanState.ACTIVE:
+            return None
+        # PLAN-015b §3 B: no debit while the lease's collection is paused; the plan's own
+        # state is untouched and the occurrence is made once collection resumes.
+        if locked.lease.collection_status == CollectionStatus.PAUSED:
             return None
         if locked.next_on - timedelta(days=LEAD_DAYS) > today:
             return None

@@ -35,7 +35,10 @@ transaction, once per returned ACH debit; a refund's return does nothing):
 re-debit due today or on the next business day gets its processor schedule, through the
 existing ``schedule_create`` job, and becomes ``scheduled``; nothing reaches the processor
 before that eve. One whose eve was missed (its day is already past) is re-dated to
-the next business day, audited ``redebit.rescheduled``, and scheduled in the same run. A
+the next business day, audited ``redebit.rescheduled``, and scheduled in the same run. While
+the lease that bills it has its collection paused (PLAN-015b §3 B) a re-debit waits: it is
+neither scheduled nor re-dated, and once collection resumes the first run re-dates it to the
+next business day and schedules it. A
 re-debit whose payment settles (:func:`on_settled`) is ``done`` and its returned payment
 resolved (``rescheduled`` on its date).
 
@@ -106,6 +109,7 @@ from ledger.models import (
     ZERO,
     AuditLog,
     CollectionMethod,
+    CollectionStatus,
     ContactEntry,
     ContactKind,
     FeeType,
@@ -945,6 +949,13 @@ def on_settled(payment: Payment, now: datetime | None = None) -> None:
 # --- The retry's schedule (F3) --------------------------------------------------------------
 
 
+def _collection_paused(charge: OneOffCharge) -> bool:
+    """Whether the lease that bills ``charge`` has its collection paused (PLAN-015b §3 B):
+    its re-debit waits."""
+    lease = leases.billing_lease(charge)
+    return lease is not None and lease.collection_status == CollectionStatus.PAUSED
+
+
 def _redate_missed(today: date, eve: date) -> None:
     """Re-date every ``auto_pending`` re-debit whose day is already past (its eve was
     missed: no tick that day, or the return came after it) to ``eve``, the next business
@@ -967,6 +978,7 @@ def _redate_missed(today: date, eve: date) -> None:
                 or charge.status == OneOffChargeStatus.VOIDED
                 or charge.retry_date is None
                 or charge.retry_date >= today
+                or _collection_paused(charge)
             ):
                 continue
             before = {
@@ -991,7 +1003,8 @@ def create_due_redebits(today: date) -> int:
     next business day (the eve), through the ``schedule_create`` job; each becomes
     ``scheduled``, audited ``redebit.scheduled``. A re-debit whose day is already past (its
     eve was missed) is first re-dated to the next business day (:func:`_redate_missed`), so
-    it is scheduled in the same run. How many were queued; a second run the same day queues
+    it is scheduled in the same run. A re-debit of a lease whose collection is paused waits
+    (neither scheduled nor re-dated). How many were queued; a second run the same day queues
     nothing."""
     eve = business_days.add(today, 1)
     _redate_missed(today, eve)
@@ -1013,6 +1026,7 @@ def create_due_redebits(today: date) -> int:
             if (
                 charge.retry_state != RetryState.AUTO_PENDING
                 or charge.status == OneOffChargeStatus.VOIDED
+                or _collection_paused(charge)
             ):
                 continue
             charge.retry_state = RetryState.SCHEDULED

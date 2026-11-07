@@ -36,6 +36,8 @@ operator (rules ``A`` to ``D``, ``F``, ``manual``) whose charge has closed since
 ``suppressed`` (``ChargeClosed``), as is one to an archived operator or a final statement
 whose lease end is gone; a message about a lease month is checked again instead of a charge
 (:func:`month_closed_reason`: ``LeaseEnded``, ``ScheduleStopped`` for A, ``MonthSettled``);
+a reminder (A to E, not sent by hand) whose lease has its collection paused is suppressed
+(``LeasePaused``, PLAN-015b);
 an operator handled personally holds its messages (``handled_personally``; never the
 internal E, which goes to the managers); a message without an address is held
 (``no_address``, or ``no_manager_list`` for an internal one).
@@ -201,6 +203,9 @@ MESSAGE_REFUSED = "MessageRefused"
 #: A message about a lease month (E4) not sent: the lease ended before the month's debit,
 #: the rent schedule of an A is no longer on, or the month's rent charge is closed.
 LEASE_ENDED = "LeaseEnded"
+#: PLAN-015b §3 B: a reminder (A to E, never one sent by hand) whose lease has its collection
+#: paused is not sent.
+LEASE_PAUSED = "LeasePaused"
 SCHEDULE_STOPPED = "ScheduleStopped"
 MONTH_SETTLED = "MonthSettled"
 
@@ -1197,6 +1202,24 @@ def month_closed_reason(message: OutboundMessage) -> str:
     return ""
 
 
+#: The reminder rules a paused collection stops (PLAN-015b §3 B): the daily job's A to E.
+PAUSED_RULES: frozenset[str] = frozenset(
+    {MessageRule.A, MessageRule.B, MessageRule.C, MessageRule.D, MessageRule.E}
+)
+
+
+def collection_paused(message: OutboundMessage) -> bool:
+    """Whether ``message`` is a reminder (rules A to E, not sent by hand) about a lease whose
+    collection is paused: it is suppressed (``LeasePaused``), as an ended lease's month is."""
+    lease = message.lease
+    return (
+        not message.manual
+        and message.rule in PAUSED_RULES
+        and lease is not None
+        and lease.collection_status == CollectionStatus.PAUSED
+    )
+
+
 def _closed_reason(message: OutboundMessage) -> str:
     """Why what ``message`` is about no longer calls for it (its charge or month closed, its
     statement or link gone); ``""`` when it still does."""
@@ -1207,6 +1230,8 @@ def _closed_reason(message: OutboundMessage) -> str:
         if issuer is None:
             return LINK_UNAVAILABLE
         return issuer.refusal(message)
+    if collection_paused(message):
+        return LEASE_PAUSED
     if message.charge_entity_type == ChargeEntityType.LEASE_MONTH:
         return month_closed_reason(message)
     if message.rule == MessageRule.FINAL_STATEMENT:

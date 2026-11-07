@@ -843,3 +843,35 @@ def test_the_run_page_has_the_plan_debits_made_today() -> None:
     assert [row.pk for row in response.context["autopay_charges"]] == [
         row.pk for row in occurrences(plan)
     ]
+
+
+# --- PLAN-015b §3 B: no occurrence while the lease's collection is paused --------------------
+
+
+def test_a_paused_leases_plan_makes_no_occurrence_until_collection_resumes() -> None:
+    lease = a_plan_lease()
+    plan = a_plan(lease)
+    second = fresh(plan).next_on
+    lead = second - timedelta(days=autopay_plans.LEAD_DAYS)
+    Lease.objects.filter(pk=lease.pk).update(collection_status=CollectionStatus.PAUSED)
+    assert autopay_plans.make_due(plan, lead) is None
+    assert autopay_plans.run_due(lead) == []
+    assert len(occurrences(plan)) == 1
+    # The plan's own state is untouched, and nothing was audited as refused.
+    current = fresh(plan)
+    assert (current.state, current.next_on, current.made_count) == ("active", second, 1)
+    assert "autopay_plan.occurrence_refused" not in plan_actions(plan)
+    Lease.objects.filter(pk=lease.pk).update(collection_status=CollectionStatus.ACTIVE)
+    [made] = autopay_plans.run_due(lead)
+    assert (made.due_date, made.period_no) == (second, 2)
+
+
+def test_an_active_leases_plan_beside_a_paused_one_still_makes_its_occurrence() -> None:
+    kept = a_plan(a_plan_lease())
+    stopped_lease = a_plan_lease()
+    stopped = a_plan(stopped_lease)
+    Lease.objects.filter(pk=stopped_lease.pk).update(collection_status=CollectionStatus.PAUSED)
+    lead = fresh(kept).next_on - timedelta(days=autopay_plans.LEAD_DAYS)
+    made = autopay_plans.run_due(lead)
+    assert [charge.autopay_plan_id for charge in made] == [kept.pk]
+    assert len(occurrences(stopped)) == 1
