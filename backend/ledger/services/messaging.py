@@ -1373,10 +1373,12 @@ def send(message_id: uuid.UUID, now: datetime | None = None) -> Outcome:
 
 
 def manual_templates() -> list[MessageTemplate]:
-    """What "Send a message now" offers: the active e-mail templates for operators."""
+    """What "Send a message now" offers: the active e-mail templates for operators (not the
+    final statement, the portal's two, or PLAN-015c's invoice and receipt, each about
+    something a charge is not)."""
     return list(
         MessageTemplate.objects.filter(active=True, internal=False, channel=MessageChannel.EMAIL)
-        .exclude(code__in=(merge.FINAL_STATEMENT_CODE, *merge.PORTAL_CODES))
+        .exclude(code__in=(merge.FINAL_STATEMENT_CODE, *merge.PORTAL_CODES, *merge.PDF_CODES))
         .order_by("name", "code")
     )
 

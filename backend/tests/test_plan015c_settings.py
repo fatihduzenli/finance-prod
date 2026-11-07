@@ -371,9 +371,11 @@ def test_0071_forward_and_back() -> None:
     leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
     try:
         old = _migrate(BEFORE)
-        assert not old.get_model("ledger", "MessageTemplate").objects.filter(
-            code__in=MIGRATION.SEEDED_CODES
-        ).exists()
+        assert (
+            not old.get_model("ledger", "MessageTemplate")
+            .objects.filter(code__in=MIGRATION.SEEDED_CODES)
+            .exists()
+        )
         new = _migrate(AFTER)
         codes = set(
             new.get_model("ledger", "MessageTemplate")
@@ -387,9 +389,11 @@ def test_0071_forward_and_back() -> None:
         with pytest.raises(IntegrityError), transaction.atomic():
             settings_model.objects.filter(pk=1).update(invoice_sender="nobody")
         back = _migrate(BEFORE)
-        assert not back.get_model("ledger", "MessageTemplate").objects.filter(
-            code__in=MIGRATION.SEEDED_CODES
-        ).exists()
+        assert (
+            not back.get_model("ledger", "MessageTemplate")
+            .objects.filter(code__in=MIGRATION.SEEDED_CODES)
+            .exists()
+        )
         assert "invoice_sender" not in {
             field.name for field in back.get_model("ledger", "CompanySettings")._meta.fields
         }
@@ -451,3 +455,13 @@ def test_an_invoice_message_must_name_an_invoice_under_its_rule() -> None:
                 charge_entity_id=invoice.pk,
                 to_address="ops@example.com",
             )
+
+
+def test_send_a_message_now_offers_neither_the_invoice_nor_the_receipt_template() -> None:
+    from ledger.services import messaging
+
+    for code in merge.PDF_CODES:
+        seeded(code)
+    offered = {row.code for row in messaging.manual_templates()}
+    assert not offered & merge.PDF_CODES
+    assert offered, "the other operator templates are still offered"
