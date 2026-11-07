@@ -232,8 +232,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: portal's own web app manifest (portal:manifest, opening on /portal/), owner, 2026-11-05;
 #: 319 since the dashboard's "Download spreadsheet" (ledger:dashboard_export), PLAN-015 Batch 1;
 #: 320 since the New calendar entry dialog's link type-ahead (ledger:calendar:search), owner,
-#: 2026-11-06.
-FROZEN_ROUTES = (320, "56dde6ddaa674d1dc8ad54fcd6c28f4fecefc69b461d48e2fb3cec588f066489")
+#: 2026-11-06; 323 since the LEASE card's Pause / Resume collection and Activate now
+#: (ledger:leases:pause_collection, resume_collection and activate), PLAN-015b.
+FROZEN_ROUTES = (323, "43d2144e5aba83c72ee54ef1ea356a80a5dd66fe95d84ef499ef70f745143a67")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

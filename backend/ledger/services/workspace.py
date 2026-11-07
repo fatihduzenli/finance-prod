@@ -47,7 +47,7 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
-from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Subquery, Sum
+from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Subquery, Sum
 from django.urls import reverse
 from django.utils import timezone
 
@@ -62,6 +62,7 @@ from ledger.models import (
     AutopayPlanState,
     CollectionMethod,
     CollectionSchedule,
+    CollectionStatus,
     ContactEntry,
     DepositResolution,
     DepositResolutionKind,
@@ -248,6 +249,24 @@ class Header:
     collections: detail_cards.LeaseCollections | None = None
     #: The billing lines (PLAN-014 C3: company, e-mail, bank), with a lease.
     account: detail_cards.LeaseAccount | None = None
+    #: The LEASE card's Status row (PLAN-015b): its lease (the current one, else on the store
+    #: page the store's upcoming prospective lease, :func:`upcoming_lease`), that lease's
+    #: collection status, its badge's tone (:data:`STATUS_TONES`) and, while paused, the
+    #: pause in force (when, why).
+    status_lease: Lease | None = None
+    status_label: str = ""
+    status_tone: str = ""
+    pause: leases.CollectionPause | None = None
+
+
+#: The Status row's badge tone by collection status (PLAN-015b): Active paid, Paused pending,
+#: Prospective and Ended neutral.
+STATUS_TONES: dict[str, str] = {
+    CollectionStatus.ACTIVE: "paid",
+    CollectionStatus.PAUSED: "pending",
+    CollectionStatus.PROSPECTIVE: "neutral",
+    CollectionStatus.ENDED: "neutral",
+}
 
 
 def _autopay_state(schedules: list[CollectionSchedule]) -> str:
@@ -474,6 +493,31 @@ def _header(
         next_insurance=_next_insurance(lease, today),
         collections=detail_cards.lease_collections(lease, today),
         account=detail_cards.lease_account(lease),
+        **_status_fields(lease),
+    )
+
+
+def _status_fields(lease: Lease) -> dict[str, Any]:
+    """The Status row's fields of :class:`Header` for ``lease`` (one query while paused)."""
+    return {
+        "status_lease": lease,
+        "status_label": lease.get_collection_status_display(),
+        "status_tone": STATUS_TONES.get(lease.collection_status, "neutral"),
+        "pause": leases.collection_pause(lease),
+    }
+
+
+def upcoming_lease(store: Store) -> Lease | None:
+    """The store's prospective lease not ended, the earliest start first (none last): what
+    the LEASE card's Status row shows, with "Activate now", while the store has no current
+    lease (PLAN-015b)."""
+    return (
+        Lease.objects.filter(
+            store=store, collection_status=CollectionStatus.PROSPECTIVE, ended_on__isnull=True
+        )
+        .select_related("store", "operator")
+        .order_by(F("started_on").asc(nulls_last=True), "created_at", "id")
+        .first()
     )
 
 
@@ -1372,6 +1416,8 @@ def store_workspace(
         balances.total,
         len(balances.owed),
     )
+    if header.lease is None and (upcoming := upcoming_lease(store)) is not None:
+        header = replace(header, **_status_fields(upcoming))
     return Workspace(
         store=store,
         header=header,

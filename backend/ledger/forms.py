@@ -1955,6 +1955,25 @@ class WaiveForm(forms.Form):
         return note
 
 
+class PauseCollectionForm(forms.Form):
+    """Pause collection on a lease (PLAN-015b §3 B, billing): the reason, nothing else."""
+
+    reason = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required: why collection is paused.",
+        error_messages={"required": "A reason is required: say why collection is paused."},
+    )
+
+    def clean_reason(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a reason.
+        reason = visible_text(self.cleaned_data["reason"])
+        if not reason:
+            raise forms.ValidationError(self.fields["reason"].error_messages["required"])
+        return reason
+
+
 class ResolveMismatchForm(forms.Form):
     """Resolve a reconciliation mismatch (PLAN-010 D10): a note, nothing else."""
 

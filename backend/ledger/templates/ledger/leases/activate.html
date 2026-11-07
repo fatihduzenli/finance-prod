@@ -1,0 +1,22 @@
+{% extends "ledger/stores/detail.html" %}
+{% load components dates %}
+{% comment %}Activate now (docs/qa/15/PLAN-015b-lease-status.md §3 A; billing): the dialog over the lease's store page. ledger.views.leases.lease_activate: GET asks first (the start date becomes today when it is later; the first month is billed), POST makes the prospective lease active. The refusal and the dates come as activate_refusal, activate_today and activate_moves_start; "Keep it prospective" and × go back to the store page.{% endcomment %}
+{% block title %}Activate now{% endblock %}
+{% block dialog %}{% url 'ledger:stores:detail' pk=status_lease.store_id as back_url %}{% dialog id="activate-dialog" title="Activate now" size="sm" open=True return_url=back_url %}
+  <section class="confirm" aria-labelledby="confirm-question">
+  <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <div class="confirm-what">
+  <h3>What will happen</h3>
+  <ul id="activate-what">
+    <li>The lease's status becomes Active today.</li>
+    {% if activate_moves_start %}<li>The start date becomes {{ activate_today|day }}{% if status_lease.started_on %} (it was {{ status_lease.started_on|day }}){% endif %}.</li>{% else %}<li>The start date stays {{ status_lease.started_on|day }}.</li>{% endif %}
+    <li>The first month is billed now, and the rent run bills the lease from then on.</li>
+  </ul>
+  </div>
+  {% if activate_refusal %}<p id="activate-refusal"><strong>{{ activate_refusal }}</strong></p>{% endif %}
+  <form method="post" id="activate-form" class="js-single-submit">
+    {% csrf_token %}
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="activate-keep">Keep it prospective</a>{% if not activate_refusal %} <button class="btn btn-primary" type="submit" id="activate-submit">Activate now</button>{% endif %}</div>
+  </form>
+  </section>
+{% enddialog %}{% endblock %}
