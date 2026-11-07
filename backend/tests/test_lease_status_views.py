@@ -9,6 +9,7 @@ call it (its call list stays empty); only ``Job`` rows are written.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any
 
@@ -27,7 +28,8 @@ from ledger.models import (
     ScheduleState,
 )
 from ledger.services import leases as service
-from ledger.services import workspace
+from ledger.services import notes as note_service
+from ledger.services import timeline, workspace
 from ledger.views import leases as views
 from payments.fake import FakeProvider
 from payments.models import ExternalRef, Job, JobKind
@@ -484,3 +486,109 @@ def test_a_missing_lease_is_404(billing: Client, path: str) -> None:
 def test_a_post_to_a_missing_lease_is_404(billing: Client) -> None:
     missing = "/leases/00000000-0000-0000-0000-000000000000/resume-collection/"
     assert billing.post(missing).status_code == 404
+
+
+# --- Notes & follow-ups: the status changes (PLAN-015b §3 B) ---------------------------------
+
+
+def entries_of(html: str) -> list[str]:
+    """The ids of the list's entries, in order."""
+    block = html[html.index('id="contact-entries"') :]
+    block = block[: block.index("</ul>")]
+    return re.findall(r'<li class="contact-entry[^"]*" id="([^"]+)"', block)
+
+
+def changes_of(lease: Lease) -> list[AuditLog]:
+    return list(
+        AuditLog.objects.filter(
+            entity_type="lease", entity_id=str(lease.pk), action__in=service.STATUS_ACTIONS
+        ).order_by("id")
+    )
+
+
+def test_the_tab_lists_pause_and_resume_with_a_note_newest_first(billing: Client) -> None:
+    _, staff = client_for(Role.BILLING, "pause-staff")
+    lease = a_world()
+    service.pause_collection(lease.pk, reason="Store closed for repairs.", actor=staff)
+    note = note_service.add(lease.store, "Called the operator.", staff)
+    service.resume_collection(lease.pk, actor=staff, today=TODAY)
+    paused, resumed = changes_of(lease)
+    html = body(billing, f"{store_url(lease)}?tab=contacts")
+    assert entries_of(html) == [f"status-{resumed.pk}", f"note-{note.pk}", f"status-{paused.pk}"]
+    block = html[html.index(f'id="status-{paused.pk}"') :]
+    block = block[: block.index("</li>")]
+    assert "Collection paused — Store closed for repairs." in block
+    assert 'class="badge badge-pending"' in block and "pause-staff" in block
+    block = html[html.index(f'id="status-{resumed.pk}"') :]
+    block = block[: block.index("</li>")]
+    assert "Collection resumed" in block and 'class="badge badge-paid"' in block
+
+
+def test_an_activation_reads_start_date_or_by_staff(billing: Client) -> None:
+    by_job = a_world(CollectionStatus.PROSPECTIVE)
+    Lease.objects.filter(pk=by_job.pk).update(started_on=TODAY)
+    service.activate_due(TODAY)
+    html = body(billing, f"{store_url(by_job)}?tab=contacts")
+    assert "Lease activated (start date)" in html and "The daily job" in html
+    by_staff = a_lease(
+        a_store("Ankara", 1992), an_operator("Ankara Co"), started=TODAY, status="prospective"
+    )
+    service.activate(by_staff.pk, actor=None, today=TODAY)
+    assert "Lease activated (by staff)" in body(billing, f"{store_url(by_staff)}?tab=contacts")
+
+
+def test_the_lease_status_filter_lists_only_the_status_changes(billing: Client) -> None:
+    lease = a_world()
+    _, staff = client_for(Role.BILLING)
+    note_service.add(lease.store, "Called the operator.", staff)
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    [paused] = changes_of(lease)
+    html = body(billing, f"{store_url(lease)}?tab=contacts&show=status")
+    assert entries_of(html) == [f"status-{paused.pk}"]
+    assert ">Lease status</a>" in html
+    notes_only = body(billing, f"{store_url(lease)}?tab=contacts&show=notes")
+    assert all(entry.startswith("note-") for entry in entries_of(notes_only))
+    assert len(entries_of(notes_only)) == 1
+
+
+def test_the_status_filter_with_none_says_so(billing: Client) -> None:
+    lease = a_world()
+    html = body(billing, f"{store_url(lease)}?tab=contacts&show=status")
+    assert 'id="timeline-empty">No status changes yet.</li>' in html
+
+
+def test_the_all_entries_page_counts_and_lists_the_status_changes(billing: Client) -> None:
+    lease = a_world()
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    service.resume_collection(lease.pk, actor=None, today=TODAY)
+    assert timeline.Listing(lease.store, "all", include_deleted=False).count() == 2
+    assert timeline.Listing(lease.store, "status", include_deleted=False).count() == 2
+    assert timeline.Listing(lease.store, "notes", include_deleted=False).count() == 0
+    html = body(billing, f"/stores/{lease.store_id}/contacts/")
+    assert len([entry for entry in entries_of(html) if entry.startswith("status-")]) == 2
+
+
+def test_another_stores_status_changes_are_not_listed(billing: Client) -> None:
+    lease = a_world()
+    other = a_lease(a_store("Izmir", 1993), an_operator("Izmir Co"))
+    service.pause_collection(other.pk, reason="Not this store.", actor=None)
+    html = body(billing, f"{store_url(lease)}?tab=contacts")
+    assert_absent(html, "Not this store.")
+    assert timeline.Listing(lease.store, "status", include_deleted=False).count() == 0
+
+
+def test_a_reason_with_markup_is_escaped_in_the_timeline(billing: Client) -> None:
+    lease = a_world()
+    service.pause_collection(lease.pk, reason="<b>Closed</b> & gone", actor=None)
+    html = body(billing, f"{store_url(lease)}?tab=contacts")
+    assert "Collection paused — &lt;b&gt;Closed&lt;/b&gt; &amp; gone" in html
+    assert "<b>Closed</b>" not in html
+
+
+def test_the_charges_tab_card_keeps_its_contact_entries_only(billing: Client) -> None:
+    lease = a_world()
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    html = body(billing, store_url(lease))
+    card = html[html.index('id="contact-card"') :]
+    card = card[: card.index("</section>")]
+    assert_absent(card, "Collection paused")
