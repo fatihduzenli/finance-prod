@@ -382,9 +382,10 @@ FORM_PAGES = (
     # PLAN-014 B5: the Edit note and Delete note dialogs over the store page.
     "ledger:notes:edit",
     "ledger:notes:delete",
-    # PLAN-015b: Pause collection and Activate now, dialogs over the store page (the world's
-    # lease is active, so Activate now shows its refusal).
+    # PLAN-015b: Pause collection, Resume collection (§9.2) and Activate now, dialogs over the
+    # store page (the world's lease is active, so Resume and Activate now show their refusal).
     "ledger:leases:pause_collection",
+    "ledger:leases:resume_collection",
     "ledger:leases:activate",
 )
 
@@ -496,8 +497,6 @@ for _name in (
     "ledger:leases:alias_remove",
     # PLAN-014 I-b: the LEASE card's insurance "Bill now" posts here.
     "ledger:leases:insurance_bill",
-    # PLAN-015b: the LEASE card's "Resume collection" posts here.
-    "ledger:leases:resume_collection",
 ):
     NOT_PAGES[_name] = POST_ONLY
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
@@ -79,6 +80,7 @@ from ledger.services import (
     insurance,
     list_filters,
     one_off_charges,
+    rent_run,
     search,
     workspace,
 )
@@ -1203,6 +1205,9 @@ COLLECTION_PAUSED_AUTOPAY = "Collection paused. Autopay is being paused."
 COLLECTION_RESUMED = "Collection resumed."
 COLLECTION_RESUMED_AUTOPAY = "Collection resumed. Autopay is being resumed."
 LEASE_ACTIVATED = "Lease activated."
+#: The Resume dialog's first line (PLAN-015b §9.2).
+RESUME_BILLS = "Resuming will bill {count} paused {months}: {amount}."
+RESUME_BILLS_NOTHING = "Resuming will bill nothing."
 
 
 def _store_dialog(request: HttpRequest, lease: Lease, extra: dict[str, Any]) -> dict[str, Any]:
@@ -1263,30 +1268,63 @@ def lease_pause_collection(request: HttpRequest, pk: str) -> HttpResponse:
     )
 
 
+def resume_bills(lease: Lease, today: date) -> str:
+    """The Resume dialog's first line (PLAN-015b §9.2): what resuming ``lease`` on ``today``
+    bills, from the rent run's preview (:func:`ledger.services.rent_run.months_resume_would_create`;
+    a month is counted once when debited twice)."""
+    planned = rent_run.months_resume_would_create(lease, today)
+    if not planned:
+        return RESUME_BILLS_NOTHING
+    count = len({plan.period_month for plan in planned})
+    return RESUME_BILLS.format(
+        count=count,
+        months="month" if count == 1 else "months",
+        amount=format_amount(sum((plan.amount for plan in planned), Decimal("0.00"))),
+    )
+
+
 @role_required
-@require_POST
+@require_http_methods(["GET", "HEAD", "POST"])
 def lease_resume_collection(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:leases:resume_collection`` (billing; PLAN-015b §3 B): the LEASE card's "Resume
-    collection". Resumes collection (:func:`ledger.services.leases.resume_collection`, which
-    charges the months owed) and, when the pause paused autopay, queues its resume
-    (``autopay_resume``); a refusal is one sentence. Returns to the store page."""
+    """``ledger:leases:resume_collection`` (billing; PLAN-015b §3 B, §9.2): GET is the Resume
+    dialog over the store page, its first line what resuming bills (:func:`resume_bills`);
+    POST resumes collection (:func:`ledger.services.leases.resume_collection`, which charges
+    those months) and, when the pause paused autopay, queues its resume (``autopay_resume``).
+    A refusal re-renders the dialog with its sentence; done, it returns to the store page."""
     refused = _billing_only(request)
     if refused is not None:
         return refused
     lease = _load(pk)
-    try:
-        outcome = service.resume_collection(
-            lease.pk, actor=_actor(request), today=timezone.localdate()
-        )
-    except LeaseRefused as error:
-        messages.error(request, str(error))
-    else:
-        if outcome.autopay_resume:
-            submit(request, JobKind.AUTOPAY_RESUME, lease)
-            messages.success(request, COLLECTION_RESUMED_AUTOPAY)
+    today = timezone.localdate()
+    refusal = ""
+    if lease.collection_status != CollectionStatus.PAUSED or lease.ended_on is not None:
+        refusal = service.RESUME_NOT_PAUSED
+    elif blockers := service.activation_blockers(lease):
+        refusal = blockers[0]
+    if request.method == "POST" and not refusal:
+        try:
+            outcome = service.resume_collection(lease.pk, actor=_actor(request), today=today)
+        except LeaseRefused as error:
+            refusal = str(error)
         else:
-            messages.success(request, COLLECTION_RESUMED)
-    return redirect("ledger:stores:detail", pk=lease.store_id)
+            if outcome.autopay_resume:
+                submit(request, JobKind.AUTOPAY_RESUME, lease)
+                messages.success(request, COLLECTION_RESUMED_AUTOPAY)
+            else:
+                messages.success(request, COLLECTION_RESUMED)
+            return redirect("ledger:stores:detail", pk=lease.store_id)
+    return render(
+        request,
+        "ledger/leases/resume_collection.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "resume_refusal": refusal,
+                "resume_bills": "" if refusal else resume_bills(lease, today),
+            },
+        ),
+    )
 
 
 @role_required

@@ -817,10 +817,26 @@ def months_catch_up_would_create(lease: Lease, day: date) -> list[Planned]:
     first month prorated. Months after the month of ``ended_on`` and months before
     :data:`CATCH_UP_MONTHS` are never looked at; a month with the debit's charge (paid,
     waived or not) is left as it is."""
+    if lease.collection_status != CollectionStatus.ACTIVE:
+        return []
+    return _missing_months(lease, day)
+
+
+def months_resume_would_create(lease: Lease, day: date) -> list[Planned]:
+    """The charges resuming the paused ``lease`` on ``day`` would create (PLAN-015b §9.2,
+    the Resume dialog's first line), without writing anything: the charges
+    :func:`months_catch_up_would_create` plans for it once it is active again, under the
+    same rules. Nothing for a lease that is not paused."""
+    if lease.collection_status != CollectionStatus.PAUSED:
+        return []
+    return _missing_months(lease, day)
+
+
+def _missing_months(lease: Lease, day: date) -> list[Planned]:
+    """:func:`months_catch_up_would_create` past its status check."""
     start = lease.started_on
     if (
-        lease.collection_status != CollectionStatus.ACTIVE
-        or lease.payment_channel == PaymentChannel.UNKNOWN
+        lease.payment_channel == PaymentChannel.UNKNOWN
         or lease.debit_day is None
         or start is None
         or start > day

@@ -1,7 +1,7 @@
 """PLAN-015b §3 A and B (docs/qa/15/PLAN-015b-lease-status.md), Opus's tests of the pages: the
-LEASE card's Status row and its actions per status, the Pause collection and Activate now
-dialogs over the store page, the Resume collection POST, the queued autopay jobs, the roles,
-CSRF, the refusals, a reason with markup escaped, and the lease list's Paused badge.
+LEASE card's Status row and its actions per status, the Pause collection, Resume collection
+(§9.2) and Activate now dialogs over the store page, the queued autopay jobs, the roles, CSRF,
+the refusals, a reason with markup escaped, and the lease list's Paused badge.
 
 ``payments.get_provider`` is a :class:`~payments.fake.FakeProvider`: no view or service may
 call it (its call list stays empty); only ``Job`` rows are written.
@@ -29,13 +29,13 @@ from ledger.models import (
 )
 from ledger.services import leases as service
 from ledger.services import notes as note_service
-from ledger.services import timeline, workspace
+from ledger.services import rent_run, timeline, workspace
 from ledger.validators import PAYMENT_DATA_MESSAGE
 from ledger.views import leases as views
 from payments.fake import FakeProvider
 from payments.models import ExternalRef, Job, JobKind
 from tests.auth_helpers import make_user, verified_client
-from tests.receivables_helpers import a_lease, a_store, an_operator
+from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
 from tests.test_operator_views import client_for
 from tests.text_helpers import assert_absent
 
@@ -155,8 +155,7 @@ def test_a_paused_lease_shows_paused_since_its_reason_and_resume(billing: Client
     service.pause_collection(lease.pk, reason="Store closed for repairs.", actor=None)
     row = status_row(body(billing, store_url(lease)))
     assert 'class="badge badge-pending"' in row and "Paused</span>" in row
-    assert f'action="{resume_url(lease)}"' in row
-    assert 'id="resume-collection">Resume collection</button>' in row
+    assert f'id="resume-collection" href="{resume_url(lease)}">Resume collection</a>' in row
     assert 'id="pause-reason">Paused since Nov 7, 2026 — Store closed for repairs.</span>' in row
     assert_absent(row, "pause-collection")
 
@@ -366,9 +365,105 @@ def test_resume_is_refused_unless_paused(billing: Client, status: str) -> None:
     assert status_actions(lease) == [] and jobs_of(lease) == []
 
 
-def test_resume_answers_405_to_a_get(billing: Client) -> None:
+def test_the_resume_dialog_opens_over_the_store_page_and_says_what_it_bills(
+    billing: Client,
+) -> None:
+    lease = a_world()
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    html = body(billing, resume_url(lease))
+    assert 'id="resume-collection-dialog"' in html and 'id="store-title"' in html
+    assert "Are you sure?" in html and "What will happen" in html
+    what = html[html.index('id="resume-collection-what"') :]
+    assert what.index('id="resume-collection-bills">') < what.index("becomes Active")
+    assert 'id="resume-collection-bills">Resuming will bill 3 paused months: $10,500.00.<' in html
+    assert 'id="resume-collection-submit">Resume collection</button>' in html
+    assert f'href="{store_url(lease)}" id="resume-collection-keep">Keep it paused</a>' in html
+    # Asking writes nothing.
+    assert not RentCharge.objects.filter(lease=lease).exists()
+    lease.refresh_from_db()
+    assert lease.collection_status == CollectionStatus.PAUSED
+    assert status_actions(lease) == ["lease.collection_paused"]
+
+
+def test_the_resume_dialog_with_every_month_billed_says_it_bills_nothing(
+    billing: Client,
+) -> None:
+    lease = a_world()
+    for month in (date(2026, 9, 1), date(2026, 10, 1), date(2026, 11, 1)):
+        a_rent_charge(lease, month)
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    html = body(billing, resume_url(lease))
+    assert 'id="resume-collection-bills">Resuming will bill nothing.<' in html
+    assert_absent(html, "Resuming will bill 0")
+    billing.post(resume_url(lease))
+    assert RentCharge.objects.filter(lease=lease).count() == 3
+
+
+def test_the_resume_dialog_says_one_paused_month(billing: Client) -> None:
+    lease = a_world()
+    for month in (date(2026, 9, 1), date(2026, 10, 1)):
+        a_rent_charge(lease, month)
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    html = body(billing, resume_url(lease))
+    assert 'id="resume-collection-bills">Resuming will bill 1 paused month: $3,500.00.<' in html
+
+
+def test_the_resume_dialog_counts_a_month_debited_twice_once(billing: Client) -> None:
+    lease = a_world(second_debit_day=15)
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    html = body(billing, resume_url(lease))
+    # Sep 1 and 15, Oct 1 and 15, Nov 1 (Nov 15 is after today): five halves of $3,500.00.
+    assert 'id="resume-collection-bills">Resuming will bill 3 paused months: $8,750.00.<' in html
+
+
+def test_resuming_bills_exactly_the_months_the_dialog_named(billing: Client) -> None:
+    lease = a_world(second_debit_day=15)
+    a_rent_charge(lease, date(2026, 9, 1), due="1750.00")
+    service.pause_collection(lease.pk, reason="Owner asked.", actor=None)
+    lease.refresh_from_db()
+    planned = rent_run.months_resume_would_create(lease, TODAY)
+    assert views.resume_bills(lease, TODAY) == ("Resuming will bill 3 paused months: $7,000.00.")
+    billing.post(resume_url(lease))
+    made = RentCharge.objects.filter(lease=lease).exclude(period_month=date(2026, 9, 1), seq=1)
+    assert sorted((c.period_month, c.seq, c.due_on, c.amount_due) for c in made) == sorted(
+        (plan.period_month, plan.seq, plan.due_on, plan.amount) for plan in planned
+    )
+    lease.refresh_from_db()
+    assert rent_run.months_resume_would_create(lease, TODAY) == []
+    assert rent_run.months_catch_up_would_create(lease, TODAY) == []
+
+
+@pytest.mark.parametrize(
+    "status", [CollectionStatus.ACTIVE, CollectionStatus.PROSPECTIVE, CollectionStatus.ENDED]
+)
+def test_the_resume_preview_is_empty_unless_the_lease_is_paused(status: str) -> None:
+    lease = a_world(status)
+    assert rent_run.months_resume_would_create(lease, TODAY) == []
+
+
+@pytest.mark.parametrize(
+    "status", [CollectionStatus.ACTIVE, CollectionStatus.PROSPECTIVE, CollectionStatus.ENDED]
+)
+def test_the_resume_dialog_refuses_a_lease_that_is_not_paused(billing: Client, status: str) -> None:
+    lease = a_world(status)
+    html = body(billing, resume_url(lease))
+    assert f'id="resume-collection-refusal"><strong>{service.RESUME_NOT_PAUSED}</strong>' in html
+    assert_absent(html, "resume-collection-submit")
+    assert_absent(html, "Resuming will bill")
+
+
+def test_the_resume_dialog_refuses_a_paused_lease_missing_a_requirement(
+    billing: Client,
+) -> None:
     lease = a_world(CollectionStatus.PAUSED)
-    assert billing.get(resume_url(lease)).status_code == 405
+    Lease.objects.filter(pk=lease.pk).update(operator=None)
+    html = body(billing, resume_url(lease))
+    assert f"<strong>{service.NO_OPERATOR}</strong>" in html
+    assert_absent(html, "resume-collection-submit")
+    billing.post(resume_url(lease))
+    lease.refresh_from_db()
+    assert lease.collection_status == CollectionStatus.PAUSED
+    assert not RentCharge.objects.filter(lease=lease).exists()
 
 
 # --- Activate now ----------------------------------------------------------------------------
@@ -448,8 +543,7 @@ def test_a_viewers_get_and_post_are_403_and_change_nothing(viewer: Client, route
     path = {"pause": pause_url, "resume": resume_url, "activate": activate_url}[route](lease)
     data = {"reason": "Owner asked."} if route == "pause" else {}
     assert viewer.post(path, data).status_code == 403
-    if route != "resume":
-        assert viewer.get(path).status_code == 403
+    assert viewer.get(path).status_code == 403
     lease.refresh_from_db()
     assert lease.collection_status == status
     assert status_actions(lease) == [] and jobs_of(lease) == []
@@ -476,6 +570,7 @@ def test_a_post_without_the_csrf_token_is_refused(route: str) -> None:
     "path",
     [
         "/leases/00000000-0000-0000-0000-000000000000/pause-collection/",
+        "/leases/00000000-0000-0000-0000-000000000000/resume-collection/",
         "/leases/00000000-0000-0000-0000-000000000000/activate/",
         "/leases/not-a-uuid/pause-collection/",
     ],
