@@ -92,6 +92,9 @@ PORTAL_ROUTE_NAMES: frozenset[str] = PORTAL_PUBLIC_ROUTE_NAMES | frozenset(
         "portal:bank",
         "portal:account",
         "portal:password",
+        # PLAN-015c: the invoice and receipt PDFs of the operator's own stores.
+        "portal:invoice_pdf",
+        "portal:receipt_pdf",
     }
 )
 

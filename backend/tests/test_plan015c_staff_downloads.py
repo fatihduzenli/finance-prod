@@ -20,6 +20,7 @@ from ledger.models import (
     InvoiceDraft,
     InvoiceDraftStatus,
     InvoiceStatus,
+    Lease,
     Payment,
     PaymentMethod,
 )
@@ -173,7 +174,7 @@ def test_the_store_tabs_link_every_invoice_and_each_receipt() -> None:
     assert f"/payments/{returned.pk}/receipt.pdf" not in page
 
 
-def billed_store_of(invoice: Invoice) -> object:
+def billed_store_of(invoice: Invoice) -> Lease:
     from ledger.services.pdf.invoice import lease_of
 
     lease = lease_of(invoice)

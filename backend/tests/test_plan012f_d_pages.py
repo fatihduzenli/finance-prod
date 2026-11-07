@@ -576,6 +576,23 @@ PORTAL_NOT_PAGES: dict[str, str] = {
 }
 
 
+#: PLAN-015c: the portal's routes that are not pages and need a signed-in operator (so not in
+#: the public manifest's test above): files rendered on request. Their isolation and their
+#: answers are tested per route in tests/test_plan014_h_isolation.py.
+PORTAL_PRIVATE_NOT_PAGES: dict[str, str] = {
+    "portal:invoice_pdf": "the invoice PDF",
+    "portal:receipt_pdf": "the receipt PDF",
+}
+
+
+def test_the_portal_private_routes_that_are_not_pages_are_classified() -> None:
+    names = {name for name, _, _ in iter_routes() if name}
+    for name in PORTAL_PRIVATE_NOT_PAGES:
+        assert name in names and name in registry.PORTAL_ROUTE_NAMES, name
+        assert name not in registry.PORTAL_PUBLIC_ROUTE_NAMES, name
+        assert name not in PORTAL_NOT_PAGES, name
+
+
 def test_the_portal_routes_that_are_not_pages_answer_as_listed() -> None:
     names = {name for name, _, _ in iter_routes() if name}
     for name in PORTAL_NOT_PAGES:

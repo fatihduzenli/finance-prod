@@ -1,5 +1,5 @@
 {% extends "portal/base.html" %}{% load money dates %}
-{% comment %}Invoices (PLAN-014 H3; portal.services.invoices): the invoices sent; under an Open one, the memo line with its number (PLAN-014 I5).{% endcomment %}
+{% comment %}Invoices (PLAN-014 H3; portal.services.invoices): the invoices sent; under an Open or Partly paid one, the memo line with its number (PLAN-014 I5); "Download PDF" on each (PLAN-015c).{% endcomment %}
 {% block title %}Invoices{% endblock %}
 {% block content %}
 {% include "portal/_store_title.html" %}
@@ -8,13 +8,13 @@
   <h2>Invoices</h2>
   <div class="portal-scroll">
   <table id="invoices">
-    <thead><tr><th>Number</th><th>Date</th><th class="portal-money">Amount</th><th>Status</th></tr></thead>
+    <thead><tr><th>Number</th><th>Date</th><th class="portal-money">Amount</th><th>Status</th><th></th></tr></thead>
     <tbody>
       {% for row in rows %}
-      <tr class="invoice-row"><td>{{ row.number }}</td><td>{{ row.issued|day }}</td><td class="portal-money">{{ row.total|money }}</td><td>{{ row.status }}</td></tr>
-      {% if row.pay_memo %}<tr class="invoice-memo-row"><td colspan="4" class="portal-muted invoice-pay-memo">{{ row.pay_memo }}</td></tr>{% endif %}
+      <tr class="invoice-row"><td>{{ row.number }}</td><td>{{ row.issued|day }}</td><td class="portal-money">{{ row.total|money }}</td><td>{{ row.status }}</td><td><a class="invoice-pdf" href="{% url 'portal:invoice_pdf' invoice=row.pk %}">Download PDF</a></td></tr>
+      {% if row.pay_memo %}<tr class="invoice-memo-row"><td colspan="5" class="portal-muted invoice-pay-memo">{{ row.pay_memo }}</td></tr>{% endif %}
       {% empty %}
-      <tr><td colspan="4" class="portal-muted" id="no-invoices">No invoice yet.</td></tr>
+      <tr><td colspan="5" class="portal-muted" id="no-invoices">No invoice yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

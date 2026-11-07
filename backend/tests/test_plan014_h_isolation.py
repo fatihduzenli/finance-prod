@@ -4,7 +4,9 @@ signed out it redirects to the portal sign-in (or, public, answers without a sta
 operator A's user, a route with a store id answers 404 for operator B's store, for an unknown
 id and for garbage, and 200 for A's own stores (an ended one included); a route with a token
 answers 404 for a bogus token; a page without parameters answers 200 for A and never carries
-B's store number, name or amounts as whole tokens. Then the principals: a staff session opens no
+B's store number, name or amounts as whole tokens; an invoice or receipt PDF route (PLAN-015c)
+answers 404 for B's document, A's unlisted one, an unknown id and garbage, and A's own PDF
+(audited with the portal user) for A only. Then the principals: a staff session opens no
 portal page, a portal session opens no staff page, a disabled account is signed out at its next
 request, and every portal POST is CSRF-protected."""
 
@@ -34,20 +36,29 @@ pytestmark = pytest.mark.django_db
 B_TOKENS = ("202", "Betaburg", "7,777.00", "9999")
 
 
+#: The parameters a portal route may take: a store's id, a link's token, and (PLAN-015c) an
+#: invoice's or a payment's id for its PDF.
+PARAMETERS = ("pk", "token", "invoice", "payment")
+PDF_PARAMETERS = ("invoice", "payment")
+
+
 def routes() -> list[tuple[str, str, str]]:
-    """(name, path template, parameter) for every portal route; the parameter is ``pk``,
-    ``token`` or ``""``."""
+    """(name, path template, parameter) for every portal route; the parameter is one of
+    :data:`PARAMETERS` or ``""``."""
     found = []
     for pattern in portal_urls.urlpatterns:
         assert isinstance(pattern, URLPattern), pattern
         route = str(pattern.pattern)
-        parameter = "pk" if "<str:pk>" in route else "token" if "<str:token>" in route else ""
-        found.append((f"portal:{pattern.name}", route, parameter))
+        named = [name for name in PARAMETERS if f"<str:{name}>" in route]
+        assert len(named) <= 1, route
+        found.append((f"portal:{pattern.name}", route, named[0] if named else ""))
     return found
 
 
 def url(route: str, value: str = "") -> str:
-    return "/portal/" + route.replace("<str:pk>", value).replace("<str:token>", value)
+    for name in PARAMETERS:
+        route = route.replace(f"<str:{name}>", value)
+    return "/portal/" + route
 
 
 def whole_tokens_absent(body: str) -> None:
@@ -101,6 +112,60 @@ def test_a_store_route_answers_404_for_another_operators_store_and_200_for_ones_
         response = client.get(url(route, str(store.pk)))
         assert response.status_code == 200, (name, store.external_label)
         whole_tokens_absent(response.content.decode())
+
+
+def pdf_ids(world: World, parameter: str) -> tuple[str, str, list[str]]:
+    """A's own document id, B's, and A's ids that are not listed (a draft invoice, a pending
+    payment) for an invoice or a payment PDF route."""
+    from datetime import date
+
+    from ledger.models import Invoice, Payment
+    from tests.receivables_helpers import a_payment
+
+    if parameter == "invoice":
+        mine = str(world.invoice_a.pk)
+        theirs = str(Invoice.objects.get(operator=world.b).pk)
+        hidden = [str(Invoice.objects.get(operator=world.a, internal_status="draft").pk)]
+        return mine, theirs, hidden
+    mine = str(Payment.objects.get(rent_charge=world.paid_a).pk)
+    theirs = str(Payment.objects.get(rent_charge__lease=world.lease_b).pk)
+    pending = a_payment(
+        world.rent_a, "100.00", None, status="pending", initiated_on=date(2026, 9, 5)
+    )
+    return mine, theirs, [str(pending.pk)]
+
+
+@pytest.mark.parametrize(
+    ("name", "route", "parameter"), [row for row in routes() if row[2] in PDF_PARAMETERS]
+)
+def test_a_pdf_route_answers_404_for_another_operators_document_and_200_for_ones_own(
+    world: World, name: str, route: str, parameter: str
+) -> None:
+    import io
+
+    from pypdf import PdfReader
+
+    from ledger.models import AuditLog
+
+    client = portal_client(active_user(world.a))
+    mine, theirs, hidden = pdf_ids(world, parameter)
+    for value in (theirs, *hidden, str(uuid.uuid4()), "not-a-uuid", str(world.store_a.pk)):
+        response = client.get(url(route, value))
+        assert response.status_code == 404, (name, value)
+        assert b"%PDF" not in response.content
+    assert not AuditLog.objects.filter(entity_id=theirs).exists()
+    response = client.get(url(route, mine))
+    assert response.status_code == 200, name
+    assert response["Content-Type"] == "application/pdf"
+    assert response["Cache-Control"] == "private, no-store"
+    text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.content)).pages)
+    whole_tokens_absent(text)
+    entry = AuditLog.objects.get(entity_id=mine, action__endswith="downloaded")
+    assert entry.actor_id is None and entry.after is not None
+    assert entry.after["portal_user"] == str(PortalUser.objects.get(operator=world.a).pk)
+    # B, signed in, gets A's as 404 too.
+    other = portal_client(active_user(world.b))
+    assert other.get(url(route, mine)).status_code == 404, name
 
 
 @pytest.mark.parametrize(

@@ -24,6 +24,10 @@ urlpatterns = [
     path("stores/<str:pk>/pay/", views.pay, name="pay"),
     path("stores/<str:pk>/pay/status/", views.pay_status, name="pay_status"),
     path("stores/<str:pk>/bank/", views.bank, name="bank"),
+    # PLAN-015c: an invoice's PDF and a payment's receipt PDF (the invoice's or the payment's
+    # id, never a store's: the isolation walk tells them apart by the parameter's name).
+    path("invoices/<str:invoice>.pdf", views.invoice_pdf, name="invoice_pdf"),
+    path("payments/<str:payment>/receipt.pdf", views.receipt_pdf, name="receipt_pdf"),
     path("statement/", views.statement, name="statement"),
     path("account/", views.account, name="account"),
     path("account/password/", views.password, name="password"),

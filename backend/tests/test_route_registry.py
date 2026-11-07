@@ -120,6 +120,9 @@ def test_the_portal_sets_are_pinned_and_apart_from_the_staff_ones() -> None:
         "portal:bank",
         "portal:account",
         "portal:password",
+        # PLAN-015c: the invoice and receipt PDFs of the operator's own stores.
+        "portal:invoice_pdf",
+        "portal:receipt_pdf",
     }
     names = {name for name, _, _ in iter_routes() if name}
     assert {name for name in names if name.startswith("portal:")} == registry.PORTAL_ROUTE_NAMES
