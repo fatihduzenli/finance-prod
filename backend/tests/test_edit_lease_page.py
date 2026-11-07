@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -195,11 +195,66 @@ def test_the_rent_in_effect_the_upcoming_one_and_the_history_newest_first(admin:
     body = card(page(admin, lease), "rent-card")
     assert '$3,500.00</span> <span class="muted">a month since Jan 13, 2026' in body
     assert "Changes to $3,600.00 on Dec 1, 2026" in body
-    history = body[body.index('id="rent-history"') :]
-    rows = re.findall(r"<li>(.*?)</li>", history, re.S)
+    # Re-pinned for PLAN-015b §3 C: the rows of the list itself (the latest five); fewer than
+    # six rows, so no "Show all".
+    rows = history_rows(body)
     assert len(rows) == 2
     assert "$3,600.00" in rows[0] and "from Dec 1, 2026" in rows[0]
     assert "$3,500.00" in rows[1] and "Jan 13, 2026 – Nov 30, 2026" in rows[1]
+    assert_absent(body, "rent-history-more")
+
+
+def history_rows(body: str) -> list[str]:
+    """The rows of the History list (ul#rent-history), not those behind "Show all"."""
+    history = body[body.index('id="rent-history"') :]
+    return re.findall(r"<li>(.*?)</li>", history[: history.index("</ul>")], re.S)
+
+
+def test_the_history_shows_the_latest_five_and_the_rest_behind_show_all(admin: Client) -> None:
+    lease = a_world()
+    first = LeaseRentHistory.objects.get(lease=lease)
+    first.effective_to = date(2026, 1, 31)
+    first.save(update_fields=["effective_to"])
+    # Six more rows, a month each, then the open one: seven in all.
+    for month in range(2, 8):
+        LeaseRentHistory.objects.create(
+            lease=lease,
+            amount=D("3500.00") + month,
+            effective_from=date(2026, month, 1),
+            effective_to=date(2026, month + 1, 1) - timedelta(days=1) if month < 7 else None,
+            source="staff",
+        )
+    assert LeaseRentHistory.objects.filter(lease=lease).count() == 7
+    body = card(page(admin, lease), "rent-card")
+    rows = history_rows(body)
+    assert len(rows) == 5
+    assert "$3,507.00" in rows[0] and "from Jul 1, 2026" in rows[0]
+    assert "$3,503.00" in rows[4] and "Mar 1, 2026 – Mar 31, 2026" in rows[4]
+    more = body[body.index('<details class="rent-history-more" id="rent-history-more">') :]
+    more = more[: more.index("</details>")]
+    assert "<summary>Show all (2 more)</summary>" in more
+    hidden = re.findall(r"<li>(.*?)</li>", more, re.S)
+    assert len(hidden) == 2
+    assert "$3,502.00" in hidden[0] and "Feb 1, 2026 – Feb 28, 2026" in hidden[0]
+    assert "$3,500.00" in hidden[1] and "Jan 13, 2026 – Jan 31, 2026" in hidden[1]
+
+
+def test_exactly_five_rows_show_no_show_all(admin: Client) -> None:
+    lease = a_world()
+    first = LeaseRentHistory.objects.get(lease=lease)
+    first.effective_to = date(2026, 1, 31)
+    first.save(update_fields=["effective_to"])
+    for month in range(2, 6):
+        LeaseRentHistory.objects.create(
+            lease=lease,
+            amount=D("3500.00") + month,
+            effective_from=date(2026, month, 1),
+            effective_to=date(2026, month + 1, 1) - timedelta(days=1) if month < 5 else None,
+            source="staff",
+        )
+    body = card(page(admin, lease), "rent-card")
+    assert len(history_rows(body)) == 5
+    assert_absent(body, "rent-history-more")
 
 
 # --- Rent ------------------------------------------------------------------------------------
