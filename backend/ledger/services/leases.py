@@ -165,7 +165,12 @@ LEASE_FIELDS: tuple[str, ...] = (
     "started_on",
     "collection_status",
     "prorate_first_month",
+    # PLAN-015d §3 (2): free rent by days (ledger.services.free_rent).
+    "free_rent_days",
+    "free_rent_from",
 )
+#: PLAN-015d: a lease's free-rent terms were set or changed (before/after: days and start).
+FREE_RENT_SET_ACTION = "lease.free_rent_set"
 _RULE_DAY = re.compile(r"\ADTSTART=(\d{4})(\d{2})(\d{2})T")
 
 # --- Fixed sentences ------------------------------------------------------------------
@@ -1463,6 +1468,8 @@ def create_lease(
             None,
             {**_snapshot(lease), "creation_key": str(creation_key)},
         )
+        if lease.free_rent_days:
+            _audit(actor, FREE_RENT_SET_ACTION, lease, None, _free_rent_terms(lease))
         _catch_up(lease, actor, today)
         if billing is not None:
             start_billing(lease, billing, account, actor=actor)
@@ -1488,6 +1495,7 @@ def update_lease(
     with transaction.atomic():
         lease = Lease.objects.select_for_update().get(pk=lease_id)
         before = _snapshot(lease)
+        free_before = _free_rent_terms(lease)
         old_operator_id = lease.operator_id
         for name, value in _editable(fields).items():
             setattr(lease, name, value)
@@ -1511,8 +1519,19 @@ def update_lease(
         after = _snapshot(lease)
         if after != before:
             _audit(actor, "lease.updated", lease, before, after)
+        if _free_rent_terms(lease) != free_before or after["started_on"] != before["started_on"]:
+            from ledger.services import free_rent  # free_rent reads the rent run's amounts
+
+            if _free_rent_terms(lease) != free_before:
+                _audit(actor, FREE_RENT_SET_ACTION, lease, free_before, _free_rent_terms(lease))
+            # The concession of every month not billed yet follows the new period (§3 (2)).
+            free_rent.recompute(lease, actor)
         _catch_up(lease, actor, today)
     return lease
+
+
+def _free_rent_terms(lease: Lease) -> dict[str, Any]:
+    return {"free_rent_days": lease.free_rent_days, "free_rent_from": lease.free_rent_from}
 
 
 def _catch_up(lease: Lease, actor: User | None, today: date | None) -> None:

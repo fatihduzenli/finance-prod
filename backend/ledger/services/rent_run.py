@@ -101,7 +101,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Sum
+from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Sum
 from django.utils import timezone
 
 import payments
@@ -736,6 +736,9 @@ def create_month(
         month = first_month(lease, period, rent.amount)
         amount = debit_amounts(month.amount, twice_monthly=len(days) == 2)[seq - 1]
         proration_text = month.text
+    from ledger.services import free_rent  # free_rent reads this module's amounts
+
+    concession, concession_text = free_rent.concession_for(lease, period, amount, seq=seq)
     with transaction.atomic():
         charge, made = RentCharge.objects.get_or_create(
             lease=lease,
@@ -744,8 +747,10 @@ def create_month(
             defaults={
                 "due_on": due_on,
                 "amount_due": amount,
-                "status": RentChargeStatus.DUE,
+                "status": free_rent.status_for(amount, concession),
                 "proration_text": proration_text or None,
+                "concession": concession,
+                "concession_text": concession_text,
             },
         )
         if made:
@@ -1240,7 +1245,7 @@ def _match_one(
                     "schedule": mask_identifier(ref),
                 },
             )
-            if total != charge.amount_due:
+            if total != charge.net_due:
                 _flag(
                     charge,
                     actor,
@@ -1273,7 +1278,7 @@ def charge_review_message(charge: RentCharge, *, with_partial: bool = True) -> s
         return ""
     partial = partial_marking(charge)
     parts = []
-    if charge.invoices.exclude(total=charge.amount_due).exists():
+    if charge.invoices.exclude(total=charge.net_due).exists():
         parts.append(TOTAL_MISMATCH)
     if AuditLog.objects.filter(
         entity_type=ENTITY_CHARGE, entity_id=str(charge.pk), action=LINKED_TOTAL_DIFFERS_ACTION
@@ -1370,16 +1375,20 @@ def unlinked_invoices(charge: ChargeRow) -> list[UnlinkedInvoice]:
 
 
 def _auto_candidates(operator_id: uuid.UUID, total: Decimal, issued: date) -> QuerySet[RentCharge]:
-    return RentCharge.objects.filter(
-        lease__operator_id=operator_id,
-        status__in=AUTO_LINK_STATUSES,
-        balance__gt=0,
-        amount_due=total,
-        period_month=issued.replace(day=1),
-        invoices__isnull=True,
-        # PLAN-012b-b D5: a month billed on an invoice builder invoice has its invoice.
-        invoice_lines__isnull=True,
-    ).exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
+    return (
+        RentCharge.objects.annotate(net=F("amount_due") - F("concession"))
+        .filter(
+            lease__operator_id=operator_id,
+            status__in=AUTO_LINK_STATUSES,
+            balance__gt=0,
+            net=total,
+            period_month=issued.replace(day=1),
+            invoices__isnull=True,
+            # PLAN-012b-b D5: a month billed on an invoice builder invoice has its invoice.
+            invoice_lines__isnull=True,
+        )
+        .exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
+    )
 
 
 def _attach(charge: ChargeRow, invoice: Invoice, kind: ChargeKind | None = None) -> None:
@@ -2011,7 +2020,7 @@ def recompute_charge(charge: RentCharge) -> None:
         return
     paid = _paid(charge)
     payments = Payment.objects.filter(rent_charge=charge, is_refund=False)
-    if paid >= charge.net_due and paid > 0:
+    if paid >= charge.net_due and (paid > 0 or charge.net_due <= 0):
         status = RentChargeStatus.PAID
     elif paid > 0:
         status = RentChargeStatus.PARTIAL
@@ -2127,6 +2136,12 @@ def _charge(charge: RentCharge) -> dict[str, Any]:
         "status": charge.status,
         "needs_review": charge.needs_review,
         "proration_text": charge.proration_text,
+        # PLAN-015d: the free rent, named only when there is some (older rows read as before).
+        **(
+            {"concession": str(charge.concession), "concession_text": charge.concession_text}
+            if charge.concession
+            else {}
+        ),
     }
 
 

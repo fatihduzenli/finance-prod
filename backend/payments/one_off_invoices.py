@@ -399,7 +399,7 @@ def _builder_lines(charge: OneOffCharge) -> list[InvoiceLineItem]:
         .filter(Q(one_off_charge__isnull=False) | Q(rent_charge__isnull=False))
         .exclude(one_off_charge__status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
         .exclude(rent_charge__status__in=NOT_BILLED_RENT)
-        .select_related("one_off_charge")
+        .select_related("one_off_charge", "rent_charge")
         .order_by("position")
     )
 
@@ -416,7 +416,7 @@ def _rent_lines(invoice: Invoice) -> list[InvoiceLineItem]:
 def _line_amounts(items: list[InvoiceLineItem]) -> Amounts:
     """One provider line per line item, no tax; the total is their sum."""
     provider_lines = tuple(_provider_line(item) for item in items)
-    amount = sum((Decimal(item.line_total) for item in items), ZERO)
+    amount = sum((line.total for line in provider_lines), ZERO)
     return Amounts(amount, amount, ZERO, provider_lines)
 
 
@@ -424,18 +424,27 @@ def _provider_line(item: InvoiceLineItem) -> LineItem:
     """One builder line for the provider: its text (the item, PLAN-012b D3), its quantity
     and unit price when they multiply to its total exactly, else quantity 1 at its total
     with the charge's description (which names the quantity), so that the lines always
-    sum to the invoice's total; its detail as the line's ``details`` either way."""
+    sum to the invoice's total; its detail as the line's ``details`` either way. A Rent line
+    whose charge carries a free-rent concession carries it as the line's discount (PLAN-015d
+    §9.2), so the line's total is the charge's net."""
     quantity = Decimal(item.quantity)
+    rent = item.rent_charge
+    discount = Decimal(rent.concession) if rent is not None else ZERO
     if quantity * Decimal(item.unit_price) == Decimal(item.line_total):
         return LineItem(
             item.description,
             Decimal(format_quantity(quantity)),
             Decimal(item.unit_price),
             details=item.details,
+            discount=discount,
         )
     text = item.one_off_charge.description if item.one_off_charge is not None else ""
     return LineItem(
-        text or item.description, Decimal(1), Decimal(item.line_total), details=item.details
+        text or item.description,
+        Decimal(1),
+        Decimal(item.line_total),
+        details=item.details,
+        discount=discount,
     )
 
 
