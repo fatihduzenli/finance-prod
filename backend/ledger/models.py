@@ -443,6 +443,9 @@ class ReviewReason(models.TextChoices):
     RETURNED_DEBIT = "returned_debit", "Returned debit: new payment method needed"
     #: PLAN-014 F2: the original debit was re-debited twice within 180 days (Nacha).
     REDEBIT_LIMIT = "redebit_limit", "Re-debit limit reached (Nacha)"
+    #: PLAN-015e: a bank debit kept as a credit was returned; the credit is reversed and the
+    #: charges it paid are owed again (the audit row ``lease_credit.reversed`` says what).
+    CREDIT_RETURNED = "credit_returned", "Returned debit: credit reversed"
 
 
 class PaymentChannel(models.TextChoices):
@@ -2232,6 +2235,11 @@ class LeaseCredit(GuardedModel):
     )
     #: The payment entry that kept it (:attr:`Payment.allocation_group`).
     allocation_group = models.UUIDField()
+    #: PLAN-015e: the bank debit whose money this credit held was returned: when the credit
+    #: was reversed (``remaining`` 0, its applications returned), and the return's code and
+    #: reason. Null and empty otherwise.
+    reversed_at = models.DateTimeField(null=True, blank=True)
+    reversed_reason = free_text(default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2243,6 +2251,11 @@ class LeaseCredit(GuardedModel):
             models.CheckConstraint(
                 condition=Q(remaining__lte=F("amount")),
                 name="lease_credits_remaining_at_most_amount",
+            ),
+            # PLAN-015e: a reversed credit holds nothing.
+            models.CheckConstraint(
+                condition=Q(reversed_at__isnull=True) | Q(remaining=0),
+                name="lease_credits_reversed_holds_nothing",
             ),
             models.CheckConstraint(
                 # With ``lease_credits_method_valid``: Zelle, wire, check or other, never ACH.
@@ -2312,6 +2325,12 @@ class Payment(GuardedModel):
     #: ``rent`` payment naming no charge, the credit its money is held as (PLAN-015d).
     credit = models.ForeignKey(
         LeaseCredit, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
+    )
+    #: PLAN-015e: on a payment held as a credit that was split off another (Change start
+    #: date's "Keep as credit" of part of a payment), the payment it came from: the row the
+    #: processor's transaction names. A return of that transaction returns this row too.
+    split_from = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="split_rows"
     )
     #: PLAN-012f-c D2: the void of a payment recorded outside the processor (billing) keeps
     #: its reason; both voids, that one and the processor's, stamp who and when. Rows voided
@@ -2408,6 +2427,12 @@ class Payment(GuardedModel):
                     one_off_charge__isnull=True,
                 ),
                 name="payments_credit_only_credit_rows",
+            ),
+            # PLAN-015e: only a payment held as a credit is split off another.
+            models.CheckConstraint(
+                condition=Q(split_from__isnull=True)
+                | Q(credit__isnull=False, kind="rent", is_refund=False),
+                name="payments_split_from_held_row",
             ),
             # A credit refund is money paid back by hand, of a credit and nothing else.
             models.CheckConstraint(
@@ -2878,6 +2903,10 @@ class MessageRule(models.TextChoices):
     INVOICE = "invoice", "Invoice e-mailed"
     #: PLAN-015c: the receipt of a payment recorded outside the processor, with its PDF.
     RECEIPT = "receipt", "Receipt e-mailed"
+    #: PLAN-015e: a bank debit kept as a credit was returned and the credit reversed: the
+    #: managers' e-mail and the operator's.
+    CREDIT_RETURNED = "credit_returned", "Credit reversed (internal)"
+    CREDIT_RETURNED_OPERATOR = "credit_returned_operator", "Credit reversed"
 
 
 #: The rule of the retired collections ladder (owner, 2026-11-01): nothing queues it any more
@@ -2911,6 +2940,8 @@ class ChargeEntityType(models.TextChoices):
     INVOICE = "invoice", "Invoice"
     #: PLAN-015c: a payment whose receipt the message e-mails (its PDF rendered at the send).
     PAYMENT = "payment", "Payment"
+    #: PLAN-015e: a lease credit reversed because the bank debit it held was returned.
+    LEASE_CREDIT = "lease_credit", "Lease credit"
 
 
 #: The charge types a message about a charge (not a lease end) names; a lease month is the
@@ -2938,6 +2969,9 @@ class MessageKind(models.TextChoices):
     INVOICE = "invoice", "Invoice"
     #: PLAN-015c: a payment's receipt, its PDF attached at the send (rule ``receipt``).
     RECEIPT = "receipt", "Receipt"
+    #: PLAN-015e: a credit reversed by a returned bank debit (rules ``credit_returned`` and
+    #: ``credit_returned_operator``), about the lease credit.
+    CREDIT_RETURNED = "credit_returned", "Credit reversed"
 
 
 #: PLAN-015c: (kind, entity type, rule) of the two messages that carry a rendered PDF; each
@@ -2945,6 +2979,13 @@ class MessageKind(models.TextChoices):
 PDF_MESSAGES: tuple[tuple[str, str, str], ...] = (
     (MessageKind.INVOICE, ChargeEntityType.INVOICE, MessageRule.INVOICE),
     (MessageKind.RECEIPT, ChargeEntityType.PAYMENT, MessageRule.RECEIPT),
+)
+
+
+#: PLAN-015e: the rules of the two messages about a reversed credit.
+CREDIT_RETURNED_RULES: tuple[str, ...] = (
+    MessageRule.CREDIT_RETURNED,
+    MessageRule.CREDIT_RETURNED_OPERATOR,
 )
 
 
@@ -3098,7 +3139,21 @@ class OutboundMessage(GuardedModel):
                 # PLAN-015c: an invoice message names an invoice under rule ``invoice``, a
                 # receipt a payment under rule ``receipt``; no other message names either.
                 & _pdf_message_shape(*PDF_MESSAGES[0])
-                & _pdf_message_shape(*PDF_MESSAGES[1]),
+                & _pdf_message_shape(*PDF_MESSAGES[1])
+                # PLAN-015e: a message about a reversed credit names the credit under one of
+                # its two rules; no other message names a credit or uses those rules.
+                & (
+                    Q(
+                        kind=MessageKind.CREDIT_RETURNED,
+                        charge_entity_type=ChargeEntityType.LEASE_CREDIT,
+                        rule__in=CREDIT_RETURNED_RULES,
+                    )
+                    | (
+                        ~Q(kind=MessageKind.CREDIT_RETURNED)
+                        & ~Q(charge_entity_type=ChargeEntityType.LEASE_CREDIT)
+                        & ~Q(rule__in=CREDIT_RETURNED_RULES)
+                    )
+                ),
                 name="outbound_messages_kind_matches_rule",
             ),
             models.CheckConstraint(
