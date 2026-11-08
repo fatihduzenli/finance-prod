@@ -287,13 +287,20 @@ def _autopay_state(schedules: list[CollectionSchedule]) -> str:
 
 
 def _next_rent(
-    schedules: list[CollectionSchedule], moved: leases.AutopayMove | None, now: datetime
+    lease: Lease,
+    schedules: list[CollectionSchedule],
+    moved: leases.AutopayMove | None,
+    now: datetime,
 ) -> date | None:
+    """The next rent debit of the lease's active schedules: never in a month the free
+    period touches (PLAN-015d, :func:`ledger.services.leases.first_debit_floor`, the floor
+    the schedule's ``DTSTART`` was sent with)."""
     found: list[date] = []
+    floor = leases.first_debit_floor(lease, now)
     for row in schedules:
         if row.state != ScheduleState.ACTIVE or row.debit_day is None:
             continue
-        run = leases.next_debit_at(row.debit_day, now)
+        run = leases.next_debit_at(row.debit_day, floor)
         if moved is not None and str(row.pk) in moved.starts:
             run = moved.starts[str(row.pk)]
         found.append(run.date())
@@ -339,7 +346,7 @@ def _next_payment(
     now: datetime,
 ) -> NextPayment | None:
     found: list[NextPayment] = []
-    rent = _next_rent(schedules, moved, now)
+    rent = _next_rent(lease, schedules, moved, now)
     if rent is not None:
         found.append(NextPayment(rent, NEXT_RENT))
     one_off = _next_one_off(lease, today)
@@ -506,7 +513,7 @@ def _header(
         free_rent_note=free_rent.card_note(
             lease, today, autopay=any(row.state == ScheduleState.ACTIVE for row in schedules)
         ),
-        next_rent=_next_rent(schedules, moved, now) or _next_debit_day(lease, today),
+        next_rent=_next_rent(lease, schedules, moved, now) or _next_debit_day(lease, today),
         next_insurance=_next_insurance(lease, today),
         collections=detail_cards.lease_collections(lease, today),
         account=detail_cards.lease_account(lease),

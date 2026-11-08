@@ -166,3 +166,23 @@ def test_resume_after_the_free_period_takes_the_next_debit_day(fake: FakeProvide
     service.resume_autopay(lease.pk, actor=None, now=datetime(2026, 12, 20, 15, 0, tzinfo=UTC))
     [(_ref, update)] = [item for item in updates(fake) if item[1].active]
     assert update.rule == "DTSTART=20270115T120000Z;FREQ=MONTHLY"
+
+
+def test_the_lease_card_names_the_first_rent_debit_after_the_free_period(
+    fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fable's review: the LEASE card's next rent debit uses the same floor as the schedule."""
+    from ledger.services import workspace
+
+    lease = a_lease_on_autopay(fake, 31)  # 1–31 Oct free in full; DTSTART 15 Nov
+    moment = datetime(2026, 10, 5, 15, 0, tzinfo=UTC)
+    schedules = service.live_schedules(lease)
+    assert workspace._next_rent(lease, schedules, None, moment) == date(2026, 11, 15)
+    monkeypatch.setattr("django.utils.timezone.now", lambda: moment)
+    monkeypatch.setattr(
+        "django.utils.timezone.localdate", lambda *args, **kwargs: date(2026, 10, 5)
+    )
+    page = client_for(Role.ADMIN, "admin-free-next")[0].get(f"/stores/{lease.store_id}/")
+    text = page.content.decode()
+    assert 'id="header-next-payment">Nov 15, 2026</dd>' in text
+    assert "Oct 15, 2026" not in text
