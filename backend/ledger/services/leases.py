@@ -2028,7 +2028,9 @@ def resume_autopay(
     now: datetime | None = None,
     expected_status: str | None = None,
 ) -> AutopayOutcome:
-    """D4: ``active=True`` and a rule with a new future ``DTSTART``; never an amount.
+    """D4: ``active=True`` and a rule with a new future ``DTSTART``; never an amount. The
+    ``DTSTART`` is at or after the first month the lease's free period leaves for autopay
+    (:func:`first_debit_floor`, as :func:`enable_autopay`); the audit row names the rule.
 
     Refused while the lease blocks autopay or any paused schedule no longer matches it.
     With ``expected_status`` (PLAN-015b §9.5, a job queued by Resume collection), nothing is
@@ -2049,8 +2051,10 @@ def resume_autopay(
         blockers = autopay_blockers(lease)
         if blockers:
             return AutopayOutcome(AutopayAction.REFUSED, blockers[0])
+        # PLAN-015d: never a DTSTART in a month the free period touches (as enabling).
+        floor = first_debit_floor(lease, moment)
         planned = [
-            (row, ref, schedule_rule(row.debit_day, moment))
+            (row, ref, schedule_rule(row.debit_day, floor))
             for row, ref in rows
             if row.debit_day is not None and not row.needs_review
         ]

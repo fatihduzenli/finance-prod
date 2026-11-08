@@ -6,14 +6,14 @@ LEASE card says so; a change of the free period on Edit lease flags the live sch
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
 import pytest
 
 from accounts.roles import Role
-from ledger.models import FreeRentFrom, MessageRule, RentChargeStatus
+from ledger.models import AuditLog, FreeRentFrom, MessageRule, RentChargeStatus
 from ledger.services import free_rent, receivables, reminders, rent_run
 from ledger.services import leases as service
 from payments.fake import FakeProvider
@@ -26,6 +26,7 @@ from tests.test_lease_services import (
     fake,
     make_lease,
     method,
+    updates,
 )
 from tests.test_operator_views import client_for
 
@@ -142,3 +143,26 @@ def test_an_unchanged_free_period_does_not_flag_the_schedule(fake: FakeProvider)
     edit(lease, RENT, free_rent_days=31, free_rent_from=FreeRentFrom.MOVE_IN)
     [row] = service.live_schedules(lease)
     assert not row.needs_review
+
+
+def test_resume_in_a_free_month_starts_after_the_free_period(fake: FakeProvider) -> None:
+    """Fable's review: resume applies the same floor as enabling."""
+    lease = a_lease_on_autopay(fake, 31)  # 1–31 Oct free in full; DTSTART 15 Nov
+    service.pause_autopay(lease.pk, actor=None)
+    # Resumed on 5 Oct: the next 15th is 15 Oct, a free month; the schedule starts 15 Nov.
+    outcome = service.resume_autopay(
+        lease.pk, actor=None, now=datetime(2026, 10, 5, 15, 0, tzinfo=UTC)
+    )
+    assert outcome.action is service.AutopayAction.RESUMED
+    [(_ref, update)] = [item for item in updates(fake) if item[1].active]
+    assert update.rule == "DTSTART=20261115T120000Z;FREQ=MONTHLY"
+    audit = AuditLog.objects.get(action="lease.autopay_resumed", entity_id=str(lease.pk))
+    assert audit.after["rule"] == update.rule
+
+
+def test_resume_after_the_free_period_takes_the_next_debit_day(fake: FakeProvider) -> None:
+    lease = a_lease_on_autopay(fake, 31)
+    service.pause_autopay(lease.pk, actor=None)
+    service.resume_autopay(lease.pk, actor=None, now=datetime(2026, 12, 20, 15, 0, tzinfo=UTC))
+    [(_ref, update)] = [item for item in updates(fake) if item[1].active]
+    assert update.rule == "DTSTART=20270115T120000Z;FREQ=MONTHLY"
