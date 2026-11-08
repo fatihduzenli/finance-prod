@@ -17,6 +17,10 @@ Fonts: Inter Regular and Bold (OFL, ``finance/static/finance/fonts``), registere
 TTF is missing, Helvetica. Every colour has a meaning that survives black-and-white printing:
 the band prints dark with white text, the body black on white, and the stamp's word says what
 its colour says. The same data gives the same bytes.
+
+Lengths and font sizes are exact (:data:`Points`: a ``Fraction`` or an ``int``), as all ledger
+code keeps away from float (``test_schema_adversarial``'s rule 15); reportlab takes them as
+numbers.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -41,15 +46,18 @@ from ledger.models import CompanySettings
 
 logger = logging.getLogger(__name__)
 
-PAGE_WIDTH, PAGE_HEIGHT = 612.0, 792.0  # US Letter, in points
-MARGIN = 72.0
+#: A length or a font size in points.
+type Points = Fraction | int
+
+PAGE_WIDTH, PAGE_HEIGHT = Fraction(612), Fraction(792)  # US Letter, in points
+MARGIN = Fraction(72)
 LEFT, RIGHT = MARGIN, PAGE_WIDTH - MARGIN
-BAND_HEIGHT = 150.0
+BAND_HEIGHT = Fraction(150)
 #: The band of the pages after the first.
-NARROW_BAND_HEIGHT = 64.0
+NARROW_BAND_HEIGHT = Fraction(64)
 #: The lowest point the body may draw at (the footer sits below it).
 BODY_BOTTOM = MARGIN
-FOOTER_Y = 40.0
+FOOTER_Y = 40
 
 BAND_TOP = "#0B2545"
 BAND_BOTTOM = "#0E4A5C"
@@ -68,8 +76,8 @@ STATIC = Path(settings.BASE_DIR) / "finance" / "static" / "finance"
 FONT_DIR = STATIC / "fonts"
 #: The brand logo the band shows when the company has none (940 × 320, transparent).
 BRAND_LOGO = STATIC / "brand" / "monvera_logo_dark_transparent.png"
-LOGO_HEIGHT = 40.0
-LOGO_MAX_WIDTH = 150.0
+LOGO_HEIGHT = Fraction(40)
+LOGO_MAX_WIDTH = Fraction(150)
 ADDRESS_LINES = 2
 
 REGULAR, BOLD = "Inter", "Inter-Bold"
@@ -119,7 +127,7 @@ class Cell:
 
 
 #: Where the info panel's four columns start, from the left margin.
-CELL_OFFSETS = (16.0, 190.0, 300.0, 390.0)
+CELL_OFFSETS = (16, 190, 300, 390)
 
 
 def company_facts() -> CompanyFacts:
@@ -155,11 +163,12 @@ def _register() -> tuple[str, str]:
     return REGULAR, BOLD
 
 
-def text_width(text: str, font: str, size: float) -> float:
-    return float(pdfmetrics.stringWidth(text, font, size))
+def text_width(text: str, font: str, size: Points) -> Fraction:
+    """``text``'s width in points, exactly as reportlab measures it."""
+    return Fraction(pdfmetrics.stringWidth(text, font, size))
 
 
-def fit(text: str, font: str, size: float, width: float) -> str:
+def fit(text: str, font: str, size: Points, width: Points) -> str:
     """``text`` cut to ``width`` points with an ellipsis when it is wider."""
     if text_width(text, font, size) <= width:
         return text
@@ -168,7 +177,7 @@ def fit(text: str, font: str, size: float, width: float) -> str:
     return text.rstrip() + ELLIPSIS
 
 
-def wrap(text: str, font: str, size: float, width: float) -> list[str]:
+def wrap(text: str, font: str, size: Points, width: Points) -> list[str]:
     """``text`` broken at spaces into lines of at most ``width`` points; a word wider than
     a line is cut with an ellipsis."""
     lines: list[str] = []
@@ -230,7 +239,7 @@ class Frame:
         self.canvas.setAuthor(company.name)
         self._logo = _logo(company)
         self._pages: list[dict[str, Any]] = []
-        self.top = 0.0
+        self.top: Points = 0
         self._start_page()
 
     # --- Pages ---------------------------------------------------------------------------
@@ -260,7 +269,7 @@ class Frame:
 
     # --- The band and the footer ---------------------------------------------------------
 
-    def _gradient(self, height: float) -> None:
+    def _gradient(self, height: Points) -> None:
         """The band's gradient across the top ``height`` points of the page."""
         c = self.canvas
         bottom = PAGE_HEIGHT - height
@@ -278,7 +287,7 @@ class Frame:
         )
         c.restoreState()
 
-    def _draw_logo(self, x: float, middle: float, height: float) -> float:
+    def _draw_logo(self, x: Points, middle: Points, height: Points) -> Points:
         """The logo at ``x``, centred on ``middle``, ``height`` points tall at most; the x
         after it (``x`` without a logo)."""
         if self._logo is None:
@@ -287,7 +296,7 @@ class Frame:
         shown_w = min(LOGO_MAX_WIDTH * height / LOGO_HEIGHT, height * width / max(tall, 1))
         shown_h = shown_w * tall / max(width, 1)
         self.canvas.drawImage(self._logo, x, middle - shown_h / 2, shown_w, shown_h, mask="auto")
-        return x + float(shown_w)
+        return x + Fraction(shown_w)
 
     def _narrow_band(self) -> None:
         """The band of the pages after the first: the logo, the title and the number."""
@@ -300,50 +309,68 @@ class Frame:
         c.drawRightString(RIGHT, middle - 5, fit(self.number, self.bold, 13, RIGHT / 3))
         c.setFillColor(HexColor(BAND_LABEL))
         shift = text_width(fit(self.number, self.bold, 13, RIGHT / 3), self.bold, 13) + 10
-        self.spaced(RIGHT - shift, middle - 4, self.title.upper(), self.bold, 8.5, 1.5, "right")
+        self.spaced(
+            RIGHT - shift,
+            middle - 4,
+            self.title.upper(),
+            self.bold,
+            Fraction("8.5"),
+            Fraction("1.5"),
+            "right",
+        )
 
     def _band(self) -> None:
         c = self.canvas
         self._gradient(BAND_HEIGHT)
         middle = PAGE_HEIGHT - BAND_HEIGHT / 2
-        x = LEFT
+        x: Points = LEFT
         if self._logo is not None:
             x = self._draw_logo(x, middle, LOGO_HEIGHT) + 14
             c.setStrokeColor(HexColor(BAND_RULE))
-            c.setLineWidth(0.75)
+            c.setLineWidth(Fraction("0.75"))
             c.line(x, middle - 18, x, middle + 18)
             x += 14
         # The number's width (at most a third of the page) and a gap; the company's lines
         # have the rest, the address on at most two lines.
         right_block = min(text_width(self.number, self.bold, 20), RIGHT / 3) + 24
         room = RIGHT - right_block - x
-        address = wrap(self.company.address, self.regular, 9.5, room)[:ADDRESS_LINES]
+        address = wrap(self.company.address, self.regular, Fraction("9.5"), room)[:ADDRESS_LINES]
         y = middle + 4 + 6 * len(address)
         c.setFillColor(HexColor(BAND_TEXT))
         c.setFont(self.bold, 11)
         c.drawString(x, y, fit(self.company.name, self.bold, 11, room))
         c.setFillColor(HexColor(BAND_MUTED))
-        c.setFont(self.regular, 9.5)
+        c.setFont(self.regular, Fraction("9.5"))
         for line in address:
             y -= 14
             c.drawString(x, y, line)
         # The title, the number and the stamp, right-aligned.
         c.setFillColor(HexColor(BAND_LABEL))
-        self.spaced(RIGHT, middle + 30, self.title.upper(), self.bold, 8.5, 1.5, align="right")
+        self.spaced(
+            RIGHT,
+            middle + 30,
+            self.title.upper(),
+            self.bold,
+            Fraction("8.5"),
+            Fraction("1.5"),
+            align="right",
+        )
         c.setFillColor(HexColor(BAND_TEXT))
         c.setFont(self.bold, 20)
         c.drawRightString(RIGHT, middle + 6, fit(self.number, self.bold, 20, RIGHT / 3))
         if self.stamp is not None:
             self._stamp(self.stamp, RIGHT, middle - 26)
 
-    def _stamp(self, stamp: Stamp, right: float, baseline: float) -> None:
+    def _stamp(self, stamp: Stamp, right: Points, baseline: Points) -> None:
         c = self.canvas
-        size, spacing = 8.5, 1.2
+        size, spacing = Fraction("8.5"), Fraction("1.2")
         word_width = text_width(stamp.word, self.bold, size) + spacing * (len(stamp.word) - 1)
-        width, height = word_width + 22, 17.0
+        width, height = word_width + 22, Fraction(17)
         c.setStrokeColor(HexColor(stamp.colour))
         c.setLineWidth(1)
-        c.roundRect(right - width, baseline - 5.5, width, height, height / 2, stroke=1, fill=0)
+        c.roundRect(
+            right - width, baseline - Fraction("5.5"), width, height, height / 2, stroke=1, fill=0
+        )
         c.setFillColor(HexColor(stamp.colour))
         self.spaced(right - 11, baseline, stamp.word, self.bold, size, spacing, align="right")
 
@@ -359,12 +386,12 @@ class Frame:
 
     def spaced(
         self,
-        x: float,
-        y: float,
+        x: Points,
+        y: Points,
         text: str,
         font: str,
-        size: float,
-        spacing: float,
+        size: Points,
+        spacing: Points,
         align: str = "left",
     ) -> None:
         """``text`` with ``spacing`` points between letters (the small-caps labels)."""
@@ -379,22 +406,22 @@ class Frame:
         self.canvas.drawText(line)
         self.canvas.restoreState()
 
-    def label(self, x: float, y: float, text: str, align: str = "left") -> None:
+    def label(self, x: Points, y: Points, text: str, align: str = "left") -> None:
         """A muted small-caps label ("BILL TO", "ITEM")."""
         self.canvas.setFillColor(HexColor(MUTED))
-        self.spaced(x, y, text.upper(), self.bold, 7.5, 1.0, align=align)
+        self.spaced(x, y, text.upper(), self.bold, Fraction("7.5"), 1, align=align)
 
     def text(
         self,
-        x: float,
-        y: float,
+        x: Points,
+        y: Points,
         text: str,
         *,
         bold: bool = False,
-        size: float = 10,
+        size: Points = 10,
         colour: str = INK,
         align: str = "left",
-        width: float | None = None,
+        width: Points | None = None,
     ) -> None:
         font = self.bold if bold else self.regular
         if width is not None:
@@ -410,7 +437,7 @@ class Frame:
     def info_panel(self, cells: Sequence[Cell]) -> None:
         """The grey panel under the band with up to four :class:`Cell` columns."""
         rows = max((len(cell.lines) for cell in cells), default=1)
-        height = 44.0 + 14 * rows
+        height = 44 + 14 * rows
         bottom = self.top - height
         self.panel(LEFT, bottom, RIGHT - LEFT, height, PANEL)
         label_y = self.top - 20
@@ -426,24 +453,28 @@ class Frame:
                     label_y - 16 - 14 * index,
                     line,
                     bold=first and cell.bold,
-                    size=10.5 if first else 10,
+                    size=Fraction("10.5") if first else 10,
                     colour=cell.colour if first else INK,
                     width=end - start,
                 )
         self.top = bottom - 30
 
-    def rule(self, y: float, left: float = LEFT, right: float = RIGHT) -> None:
+    def rule(self, y: Points, left: Points = LEFT, right: Points = RIGHT) -> None:
         self.canvas.setStrokeColor(HexColor(RULE))
-        self.canvas.setLineWidth(0.75)
+        self.canvas.setLineWidth(Fraction("0.75"))
         self.canvas.line(left, y, right, y)
 
-    def panel(self, x: float, y: float, width: float, height: float, colour: str) -> None:
+    def panel(self, x: Points, y: Points, width: Points, height: Points, colour: str) -> None:
         """A filled rounded rectangle whose bottom-left corner is (``x``, ``y``)."""
         self.canvas.setFillColor(HexColor(colour))
         self.canvas.roundRect(x, y, width, height, 8, stroke=0, fill=1)
 
     def rich_line(
-        self, x: float, y: float, parts: Sequence[tuple[str, bool]], size: float = 9.5
+        self,
+        x: Points,
+        y: Points,
+        parts: Sequence[tuple[str, bool]],
+        size: Points = Fraction("9.5"),
     ) -> None:
         """One line of (text, bold) runs, in :data:`INK`."""
         c = self.canvas

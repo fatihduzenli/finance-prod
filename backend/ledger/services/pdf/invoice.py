@@ -32,6 +32,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from fractions import Fraction
 
 from django.db.models import Q, QuerySet
 from django.db.models.functions import Coalesce
@@ -48,7 +49,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services.pdf import frame
-from ledger.services.pdf.frame import LEFT, RIGHT, Cell, Frame, Stamp
+from ledger.services.pdf.frame import LEFT, RIGHT, Cell, Frame, Points, Stamp
 from ledger.wording import format_amount
 
 ZERO = Decimal("0.00")
@@ -64,12 +65,12 @@ QUESTIONS = "Questions: {email}"
 QTY_X = LEFT + 300
 PRICE_X = LEFT + 380
 AMOUNT_X = RIGHT
-DESCRIPTION_WIDTH = 270.0
-ROW_WITH_DETAILS = 34.0
-ROW_PLAIN = 20.0
+DESCRIPTION_WIDTH = 270
+ROW_WITH_DETAILS = 34
+ROW_PLAIN = 20
 #: The space above the totals and above the "How to pay" panel.
-GAP = 20.0
-TOTALS_WIDTH = 240.0
+GAP = 20
+TOTALS_WIDTH = 240
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,9 +353,16 @@ def _line(page: Frame, line: Line) -> None:
         page.new_page()
         _table_header(page)
     y = page.top - (15 if line.details else 14)
-    page.text(LEFT, y, line.description, bold=True, size=10.5, width=DESCRIPTION_WIDTH)
+    page.text(LEFT, y, line.description, bold=True, size=Fraction("10.5"), width=DESCRIPTION_WIDTH)
     if line.details:
-        page.text(LEFT, y - 13, line.details, size=8.5, colour=frame.MUTED, width=DESCRIPTION_WIDTH)
+        page.text(
+            LEFT,
+            y - 13,
+            line.details,
+            size=Fraction("8.5"),
+            colour=frame.MUTED,
+            width=DESCRIPTION_WIDTH,
+        )
     middle = y - (4 if line.details else 0)
     page.text(QTY_X, middle, _quantity(line.quantity), size=10, align="right")
     page.text(PRICE_X, middle, format_amount(line.price), size=10, align="right")
@@ -366,7 +374,7 @@ def _line(page: Frame, line: Line) -> None:
 @dataclass(frozen=True, slots=True)
 class PayLine:
     parts: tuple[tuple[str, bool], ...]
-    size: float
+    size: Points
     #: The URL this line's text links to (``""``: none).
     link: str = ""
 
@@ -377,9 +385,9 @@ def _pay_lines(found: InvoiceFacts, page: Frame) -> list[PayLine]:
     width = RIGHT - LEFT - 32
     lines: list[PayLine] = []
     if found.pay_link:
-        size = 9.0
+        size: Points = 9
         while size > 6 and frame.text_width(found.pay_link, page.regular, size) > width:
-            size -= 0.5
+            size -= Fraction("0.5")
         for text in frame.wrap(ONLINE.format(link=found.pay_link), page.regular, size, width):
             link = found.pay_link if found.pay_link in text else ""
             lines.append(PayLine(((text, False),), size, link))
@@ -437,7 +445,7 @@ def _how_to_pay(page: Frame, found: InvoiceFacts) -> None:
     top = page.top - GAP
     page.panel(LEFT, top - height, RIGHT - LEFT, height, frame.PAY_PANEL)
     y = top - 22
-    page.text(LEFT + 16, y, "How to pay", bold=True, size=9.5)
+    page.text(LEFT + 16, y, "How to pay", bold=True, size=Fraction("9.5"))
     for line in lines:
         y -= 15
         page.rich_line(LEFT + 16, y, line.parts, size=line.size)

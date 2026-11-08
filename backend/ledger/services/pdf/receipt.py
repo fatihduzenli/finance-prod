@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from fractions import Fraction
 
 from django.db.models import Q
 
@@ -234,12 +235,12 @@ def draw(found: ReceiptFacts, company: frame.CompanyFacts) -> bytes:
     page.top -= 9
     for index, line in enumerate(found.applied_to):
         y = page.top - 15
-        page.text(LEFT, y, line, bold=index == 0, size=10.5, width=RIGHT - LEFT - 100)
+        page.text(LEFT, y, line, bold=index == 0, size=Fraction("10.5"), width=RIGHT - LEFT - 100)
         if index == len(found.applied_to) - 1:
             page.text(RIGHT, y, format_amount(found.amount), bold=True, size=10, align="right")
         page.top -= 22
         page.rule(page.top)
-    width = 300.0
+    width = 300
     box_top = page.top - 24
     page.panel(RIGHT - width, box_top - 44, width, 44, frame.BAND_TOP)
     page.text(RIGHT - width + 16, box_top - 26, REMAINING, size=10, colour=frame.BAND_TEXT)
