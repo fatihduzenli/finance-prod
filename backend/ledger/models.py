@@ -2795,6 +2795,10 @@ class MessageRule(models.TextChoices):
     LADDER = "ladder", "Old collections ladder"
     #: PLAN-014 H2: an invitation to the operator portal, or a link to choose a new password.
     PORTAL = "portal", "Portal access"
+    #: PLAN-015c (ADR-0020): an invoice e-mailed by the company, with its PDF.
+    INVOICE = "invoice", "Invoice e-mailed"
+    #: PLAN-015c: the receipt of a payment recorded outside the processor, with its PDF.
+    RECEIPT = "receipt", "Receipt e-mailed"
 
 
 #: The rule of the retired collections ladder (owner, 2026-11-01): nothing queues it any more
@@ -2824,6 +2828,10 @@ class ChargeEntityType(models.TextChoices):
     #: PLAN-014 H2: a portal account (``portal.PortalUser``) whose invitation or password
     #: reset the message carries; the message has no lease and goes to the account's e-mail.
     PORTAL_USER = "portal_user", "Portal account"
+    #: PLAN-015c: an invoice the message e-mails (its PDF rendered at the send).
+    INVOICE = "invoice", "Invoice"
+    #: PLAN-015c: a payment whose receipt the message e-mails (its PDF rendered at the send).
+    PAYMENT = "payment", "Payment"
 
 
 #: The charge types a message about a charge (not a lease end) names; a lease month is the
@@ -2847,6 +2855,26 @@ class MessageKind(models.TextChoices):
     FINAL_STATEMENT = "final_statement", "Final statement"
     #: PLAN-014 H2: about a portal account, never a charge (rule ``portal``).
     PORTAL = "portal", "Portal access"
+    #: PLAN-015c: an invoice, its PDF attached at the send (rule ``invoice``).
+    INVOICE = "invoice", "Invoice"
+    #: PLAN-015c: a payment's receipt, its PDF attached at the send (rule ``receipt``).
+    RECEIPT = "receipt", "Receipt"
+
+
+#: PLAN-015c: (kind, entity type, rule) of the two messages that carry a rendered PDF; each
+#: of the three names the other two (``outbound_messages_kind_matches_rule``).
+PDF_MESSAGES: tuple[tuple[str, str, str], ...] = (
+    (MessageKind.INVOICE, ChargeEntityType.INVOICE, MessageRule.INVOICE),
+    (MessageKind.RECEIPT, ChargeEntityType.PAYMENT, MessageRule.RECEIPT),
+)
+
+
+def _pdf_message_shape(kind: str, entity_type: str, rule: str) -> Q:
+    """A message of ``kind`` names an entity of ``entity_type`` under ``rule``, and only such a
+    message names either (PLAN-015c)."""
+    return Q(kind=kind, charge_entity_type=entity_type, rule=rule) | (
+        ~Q(kind=kind) & ~Q(charge_entity_type=entity_type) & ~Q(rule=rule)
+    )
 
 
 class OutboundMessage(GuardedModel):
@@ -2987,7 +3015,11 @@ class OutboundMessage(GuardedModel):
                         & ~Q(charge_entity_type=ChargeEntityType.PORTAL_USER)
                         & ~Q(rule=MessageRule.PORTAL)
                     )
-                ),
+                )
+                # PLAN-015c: an invoice message names an invoice under rule ``invoice``, a
+                # receipt a payment under rule ``receipt``; no other message names either.
+                & _pdf_message_shape(*PDF_MESSAGES[0])
+                & _pdf_message_shape(*PDF_MESSAGES[1]),
                 name="outbound_messages_kind_matches_rule",
             ),
             models.CheckConstraint(
@@ -3603,6 +3635,18 @@ LOGO_PATH_MESSAGE = "The logo must be the path of a stored document, or blank."
 LOGO_CONTENT_TYPES = (DocumentContentType.PNG, DocumentContentType.JPEG)
 
 validate_logo_path = RegexValidator(LOGO_PATH_PATTERN, LOGO_PATH_MESSAGE, code="logo_path")
+#: PLAN-015c: the most bytes the logo's PNG copy (``CompanySettings.logo_png``) may hold.
+LOGO_PNG_MAX_BYTES = 1024 * 1024
+
+
+class InvoiceSender(models.TextChoices):
+    """Who e-mails the invoices (ADR-0020, PLAN-015c): the payment processor (the default:
+    nothing changes) or the company, through the app's messaging engine with the invoice
+    PDF. The settings page names each with the processor's display name and the company's
+    short name; these labels are what nothing else shows."""
+
+    PROCESSOR = "processor", "The payment processor"
+    COMPANY = "company", "The company"
 
 
 class CompanySettings(PaymentDataGuardedModel):
@@ -3644,6 +3688,20 @@ class CompanySettings(PaymentDataGuardedModel):
     #: without a staff click only when the second is on as well.
     bank_deposits_enabled = models.BooleanField(default=False)
     bank_auto_confirm_exact = models.BooleanField(default=False)
+    #: PLAN-015c: the company's address, printed in the invoice and receipt PDFs' band (the
+    #: lines that are set, joined ", "); each optional. Edited on Admin › Settings.
+    address_line1 = guarded_char(NAME_MAX_LENGTH, blank=True, default="")
+    address_line2 = guarded_char(NAME_MAX_LENGTH, blank=True, default="")
+    city = guarded_char(100, blank=True, default="")
+    state = guarded_char(50, blank=True, default="")
+    postal_code = guarded_char(20, blank=True, default="")
+    #: ADR-0020: who e-mails the invoices (the processor by default).
+    invoice_sender = _choice(InvoiceSender, default=InvoiceSender.PROCESSOR)
+    #: PLAN-015c: a PNG copy of the logo override (at most :data:`LOGO_PNG_MAX_BYTES`),
+    #: written when the logo is saved in the admin and cleared when it is removed, so the
+    #: PDF renderer and the portal read the logo without a staff actor; empty: the brand
+    #: logo. Never read by :meth:`read` (the page path), which defers it.
+    logo_png = models.BinaryField(blank=True, default=b"", editable=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -3662,6 +3720,7 @@ class CompanySettings(PaymentDataGuardedModel):
                 condition=Q(logo="") | Q(logo__regex=LOGO_PATH_PATTERN),
                 name="company_settings_logo_path",
             ),
+            _valid_choice("company_settings", "invoice_sender", InvoiceSender),
         ]
 
     def __str__(self) -> str:
@@ -3698,7 +3757,7 @@ class CompanySettings(PaymentDataGuardedModel):
         from ledger.company_defaults import SEED
 
         try:
-            row = cls.objects.filter(pk=COMPANY_SETTINGS_ID).first()
+            row = cls.objects.filter(pk=COMPANY_SETTINGS_ID).defer("logo_png").first()
         except DatabaseError:
             row = None
         return row if row is not None else cls(pk=COMPANY_SETTINGS_ID, **SEED)

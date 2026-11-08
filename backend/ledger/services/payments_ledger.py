@@ -162,6 +162,9 @@ class LedgerRow:
     #: The provider's transaction ID, masked; empty when there is none.
     transaction: str
     has_note: bool
+    #: PLAN-015c: whether the row carries its entry's "Receipt PDF" (the first row of the
+    #: entry in the list, ``ledger.services.pdf.receipt.first_of_entries``).
+    has_receipt: bool = False
 
 
 def _date(value: str | None) -> date | None:
@@ -533,8 +536,11 @@ def _transactions(payment_ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, str]:
 
 def rows_for(payments: Iterable[Payment]) -> list[LedgerRow]:
     """What the ledger shows of each payment (one query for the transaction IDs)."""
+    from ledger.services.pdf.receipt import first_of_entries
+
     items = list(payments)
     refs = _transactions(item.pk for item in items)
+    with_link = first_of_entries(items)
     result = []
     for item in items:
         lease = charge_lease(item)
@@ -551,6 +557,7 @@ def rows_for(payments: Iterable[Payment]) -> list[LedgerRow]:
                 store=lease.store if lease is not None else None,
                 transaction=mask_identifier(ref) if ref else "",
                 has_note=bool(getattr(item, "has_note", False)),
+                has_receipt=item.pk in with_link,
             )
         )
     return result

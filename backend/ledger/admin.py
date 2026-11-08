@@ -203,3 +203,14 @@ class CompanySettingsAdmin(AuditedAdmin):
 
     def audit_action(self, change: bool) -> str:
         return f"{self.entity_type}.updated"
+
+    def save_model(
+        self, request: HttpRequest, obj: Any, form: forms.ModelForm[Any], change: bool
+    ) -> None:
+        """Save and audit the row; when the logo changed, write its PNG copy (PLAN-015c,
+        :func:`ledger.services.pdf.logo.refresh`, read as the admin who saved it)."""
+        from ledger.services.pdf import logo
+
+        super().save_model(request, obj, form, change)
+        if "logo" in form.changed_data and isinstance(request.user, User):
+            logo.refresh(obj, request.user)

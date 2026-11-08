@@ -13,11 +13,18 @@ of the operator not ended) marked, with what is open on it. :func:`store_page`: 
 charges with their due dates and balances, autopay "on"/"off" (the rent schedule of the
 operator's current lease, read only) and the bank on file ("····4821", the lease's or the one
 it shares; "none"). :func:`invoices`: the invoices sent (number, date, amount, status: Open,
-Paid or Void; drafts and invoices not sent are not shown; an Open one carries the memo line,
-:func:`ledger.wording.memo_line`, PLAN-014 I5). :func:`payments`: settled, pending
-and returned payments, with the method and, for a bank debit, the last four of the bank on
-file. :func:`statement`: the operator's statement, as the signed statement link shows it.
-:func:`set_theme` and :func:`change_password` are the Account page's.
+Partly paid, Paid or Void; drafts and invoices not sent are not shown; an Open or Partly paid
+one carries the memo line, :func:`ledger.wording.memo_line`, PLAN-014 I5). :func:`payments`:
+settled, pending and returned payments, with the method and, for a bank debit, the last four
+of the bank on file. :func:`statement`: the operator's statement, as the signed statement link
+shows it. :func:`set_theme` and :func:`change_password` are the Account page's.
+
+**PDFs** (PLAN-015c). :func:`invoice_of` and :func:`payment_of` answer the invoice or the
+payment an id names only when the store's page would list it: the invoice billed to the
+operator for a charge of one of its stores, sent, closed or void; the payment billed to the
+operator on one of its stores, settled money received (it has a receipt). Anything else
+(another operator's, unknown, unreadable, a draft, a pending payment) is ``None``: the views
+answer the portal's 404. Each row carries its id for the links.
 
 **Links.** :func:`accept_invitation` and :func:`reset_password` take the live token
 :func:`portal.tokens.find` answered: the new password (Django's validators), the token used
@@ -33,6 +40,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
@@ -197,14 +205,23 @@ class InvoiceRow:
     issued: date
     total: Decimal
     status: str
-    #: PLAN-014 I5: the memo line on an Open invoice, else ``""``.
+    #: PLAN-014 I5: the memo line on an Open or Partly paid invoice, else ``""``.
     pay_memo: str = ""
+    #: PLAN-015c: the invoice's id, for "Download PDF".
+    pk: uuid.UUID | None = None
+
+
+#: The statuses an invoice reads on the portal; the memo line shows under the owed ones.
+OPEN, PARTLY_PAID, PAID, VOID = "Open", "Partly paid", "Paid", "Void"
+OWED = (OPEN, PARTLY_PAID)
 
 
 def invoice_status(invoice: Invoice) -> str:
     if invoice.internal_status == InvoiceStatus.VOID:
-        return "Void"
-    return "Paid" if invoice.amount_paid >= invoice.total else "Open"
+        return VOID
+    if invoice.amount_paid >= invoice.total:
+        return PAID
+    return PARTLY_PAID if invoice.amount_paid > 0 else OPEN
 
 
 def invoices(user: PortalUser, store: Store) -> list[InvoiceRow]:
@@ -216,26 +233,54 @@ def invoices(user: PortalUser, store: Store) -> list[InvoiceRow]:
     for item in found:
         status = invoice_status(item)
         number = str(item.invoice_number)
-        memo = memo_line(number) if status == "Open" else ""
-        rows.append(InvoiceRow(number, item.issue_date, item.total, status, memo))
+        memo = memo_line(number) if status in OWED else ""
+        rows.append(InvoiceRow(number, item.issue_date, item.total, status, memo, item.pk))
     return rows
 
 
-@dataclass(frozen=True, slots=True)
-class PaymentRow:
-    on: date | None
-    description: str
-    amount: Decimal
-    is_refund: bool
-    status: str
-    method: str
-    last4: str
+def _key(raw_id: object) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(raw_id))
+    except ValueError:
+        return None
 
 
-def payments(user: PortalUser, store: Store) -> list[PaymentRow]:
-    """The settled, pending and returned payments billed to the operator on ``store``'s
-    charges, newest first."""
-    found = (
+def invoice_of(user: PortalUser, raw_id: object) -> Invoice | None:
+    """The invoice ``raw_id`` names when the Invoices page of one of the operator's stores
+    lists it (see the module docstring); else ``None``."""
+    key = _key(raw_id)
+    if key is None:
+        return None
+    invoice = (
+        Invoice.objects.select_related("operator")
+        .filter(pk=key, operator_id=user.operator_id, internal_status__in=SHOWN_INVOICE_STATUSES)
+        .first()
+    )
+    if invoice is None:
+        return None
+    stores = Store.objects.filter(pk__in=_leases(user).values("store_id"))
+    for store in stores:
+        if workspace.store_invoices(store).filter(pk=invoice.pk).exists():
+            return invoice
+    return None
+
+
+def payment_of(user: PortalUser, raw_id: object) -> Payment | None:
+    """The payment ``raw_id`` names when the Payments page of one of the operator's stores
+    lists it and it has a receipt (see the module docstring); else ``None``."""
+    from ledger.services.pdf.receipt import has_receipt
+
+    key = _key(raw_id)
+    if key is None:
+        return None
+    payment = _billed_payments(user, pk=key, store_of__in=_leases(user).values("store_id")).first()
+    return payment if payment is not None and has_receipt(payment) else None
+
+
+def _billed_payments(user: PortalUser, **narrowed: Any) -> QuerySet[Payment]:
+    """The payments billed to the operator that a Payments page shows, with their store
+    (``store_of``) and day (``on``), narrowed by ``narrowed`` (filters on those as well)."""
+    return (
         Payment.objects.select_related(
             "rent_charge", "insurance_charge", "one_off_charge__fee_type"
         )
@@ -248,9 +293,36 @@ def payments(user: PortalUser, store: Store) -> list[PaymentRow]:
             ),
             on=Coalesce("settled_on", "initiated_on"),
         )
-        .filter(billed=user.operator_id, store_of=store.pk, status__in=SHOWN_PAYMENT_STATUSES)
-        .order_by(F("on").desc(nulls_last=True), "-created_at")
+        .filter(billed=user.operator_id, status__in=SHOWN_PAYMENT_STATUSES, **narrowed)
     )
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentRow:
+    on: date | None
+    description: str
+    amount: Decimal
+    is_refund: bool
+    status: str
+    method: str
+    last4: str
+    #: PLAN-015c: the payment's id, and whether it carries its entry's "Receipt PDF" (the
+    #: first row of the entry on the page, ``ledger.services.pdf.receipt.first_of_entries``).
+    pk: uuid.UUID | None = None
+    has_receipt: bool = False
+
+
+def payments(user: PortalUser, store: Store) -> list[PaymentRow]:
+    """The settled, pending and returned payments billed to the operator on ``store``'s
+    charges, newest first."""
+    from ledger.services.pdf.receipt import first_of_entries
+
+    found = list(
+        _billed_payments(user, store_of=store.pk).order_by(
+            F("on").desc(nulls_last=True), "-created_at"
+        )
+    )
+    with_link = first_of_entries(found)
     last4 = bank_last4(lease_of(user, store))
     return [
         PaymentRow(
@@ -261,6 +333,8 @@ def payments(user: PortalUser, store: Store) -> list[PaymentRow]:
             status=str(payment.get_status_display()),
             method=str(payment.get_method_display()),
             last4=last4 if payment.method == PaymentMethod.ACH else "",
+            pk=payment.pk,
+            has_receipt=payment.pk in with_link,
         )
         for payment in found
     ]

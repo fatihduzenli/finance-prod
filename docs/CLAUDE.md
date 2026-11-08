@@ -431,7 +431,11 @@ only by the sandbox test suites; secret). See `docs/STAX_CLIENT.md`.
 - Trust a webhook body as data (Rule 4).
 - Retry a 4xx (Rule 3).
 - Run against live and sandbox from one deploy (Rule 6).
-- Send email itself for invoices. Stax sends the receipt after a payment. If the business later wants custom email, that is a new decision.
+- Send email itself for invoices **while the company setting "Invoice e-mails sent by" is the processor**
+  (the default). ADR-0020 (2026-11-07): when the owner switches it to the company, the app e-mails the
+  invoice itself with its PDF, the portal pay link and the processor's hosted pay link, and no longer asks
+  the processor to send its own. The processor's receipt e-mail stays for payments made through it; the
+  app e-mails its receipt PDF only for payments recorded outside it (Zelle, wire, check, cash).
 
 ---
 

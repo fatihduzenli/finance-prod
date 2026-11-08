@@ -326,6 +326,8 @@ invoice_patterns = (
         path("drafts/<str:pk>/charge-now/", invoices.draft_charge_now, name="charge_now"),
         path("drafts/<str:pk>/cancel/", invoices.draft_cancel, name="cancel"),
         path("drafts/<str:pk>/delete/", invoices.draft_delete, name="delete_draft"),
+        # PLAN-015c: an invoice's PDF (the invoice's id; a rent-run invoice has no draft).
+        path("<str:pk>.pdf", invoices.invoice_pdf, name="pdf"),
     ],
     "invoices",
 )
@@ -338,6 +340,8 @@ payment_patterns = (
         path("<str:pk>/refund/", payments.payment_refund, name="refund"),
         path("<str:pk>/void/", payments.payment_void, name="void"),
         path("<str:pk>/void-manual/", payments.payment_void_manual, name="void_manual"),
+        # PLAN-015c: a settled payment's receipt PDF.
+        path("<str:pk>/receipt.pdf", payments.payment_receipt, name="receipt"),
     ],
     "payments",
 )

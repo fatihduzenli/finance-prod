@@ -723,7 +723,12 @@ def test_the_header_offers_void_payment_to_billing_on_a_manual_settled_payment(
     assert item in client_for(Role.BILLING)[0].get(detail_path(payment)).content.decode()
     assert item in client_for(Role.ADMIN)[0].get(detail_path(payment)).content.decode()
     viewer = client_for(Role.VIEWER)[0].get(detail_path(payment)).content.decode()
-    assert 'id="void-manual-payment"' not in viewer and 'id="payment-actions"' not in viewer
+    assert 'id="void-manual-payment"' not in viewer
+    # PLAN-015c: the viewer's action bar holds the receipt PDF alone (no More menu).
+    actions = viewer[viewer.index('id="payment-actions"') :]
+    actions = actions[: actions.index("</div>")]
+    assert 'id="receipt-pdf">Receipt PDF</a>' in actions
+    assert 'id="more-menu"' not in actions and "<details" not in actions
 
 
 def test_a_processor_payment_keeps_refund_and_void_for_the_admin_only(fake: FakeProvider) -> None:

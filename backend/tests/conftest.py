@@ -173,3 +173,20 @@ def _support_email_set(request: pytest.FixtureRequest) -> None:
 
     row = CompanySettings.current()
     CompanySettings.objects.filter(pk=row.pk).update(support_email=SUPPORT_EMAIL)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _urlconf_loaded_under_the_default_environment() -> None:
+    """Load the URL configuration once, before any test, under the default (sandbox) environment.
+
+    ``ledger.urls`` registers ``ledger:operators:portal_copy_link`` only when
+    :func:`finance.middleware.sandbox_outside_production` holds at import. A test that sets
+    ``STAX_ENV`` to ``live`` (``test_collections.mail_set_up``) and happens to import the URL
+    configuration first made every later route test (the frozen route list, the page
+    classification, the registry) see one route fewer: an ordering hazard from 2026-10-30,
+    found by a PLAN-015c targeted run. Resolving the root once here pins the import to the
+    default environment, whatever the random order.
+    """
+    from django.urls import get_resolver
+
+    get_resolver().url_patterns  # noqa: B018 - the access is the point

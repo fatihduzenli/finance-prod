@@ -37,6 +37,9 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.themes import DEFAULT_THEME
 from ledger.models import Store
+from ledger.services.pdf import downloads
+from ledger.services.pdf.invoice import pdf_filename, render_invoice
+from ledger.services.pdf.receipt import receipt_filename, render_receipt
 from ledger.views.calendar import client_address
 from portal import auth, invitations, services, tokens
 from portal import payments as portal_payments
@@ -228,6 +231,47 @@ def payments(request: HttpRequest, pk: str) -> HttpResponse:
     if found is None:
         return not_found(request)
     return _page(request, "portal/payments.html", store=found, rows=services.payments(user, found))
+
+
+def _pdf(data: bytes, filename: str) -> HttpResponse:
+    response = HttpResponse(data, content_type=downloads.CONTENT_TYPE)
+    for name, value in downloads.headers(filename, len(data)).items():
+        response[name] = value
+    return response
+
+
+@require_safe
+def invoice_pdf(request: HttpRequest, invoice: str) -> HttpResponse:
+    """``portal:invoice_pdf`` (PLAN-015c): the PDF of an invoice the operator's Invoices page
+    lists, rendered now, audited ``invoice.pdf_downloaded`` with the portal user; any other
+    id is the portal's 404."""
+    user = _user(request)
+    found = services.invoice_of(user, invoice)
+    if found is None:
+        return not_found(request)
+    data = render_invoice(found, today=timezone.localdate())
+    filename = pdf_filename(found)
+    downloads.audit(
+        downloads.INVOICE_DOWNLOADED, "invoice", found.pk, portal_user=user.pk, filename=filename
+    )
+    return _pdf(data, filename)
+
+
+@require_safe
+def receipt_pdf(request: HttpRequest, payment: str) -> HttpResponse:
+    """``portal:receipt_pdf`` (PLAN-015c): the receipt PDF of a settled payment the operator's
+    Payments page lists, rendered now, audited ``payment.receipt_downloaded`` with the portal
+    user; any other id (a pending or returned payment included) is the portal's 404."""
+    user = _user(request)
+    found = services.payment_of(user, payment)
+    if found is None:
+        return not_found(request)
+    data = render_receipt(found, today=timezone.localdate())
+    filename = receipt_filename(found)
+    downloads.audit(
+        downloads.RECEIPT_DOWNLOADED, "payment", found.pk, portal_user=user.pk, filename=filename
+    )
+    return _pdf(data, filename)
 
 
 @require_safe

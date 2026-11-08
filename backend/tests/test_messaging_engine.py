@@ -427,6 +427,10 @@ def test_the_templates_list_order_does_not_follow_the_database_collation() -> No
         # PLAN-014 H2: "H — Portal invitation" and "H — Portal password reset".
         "portal_invite",
         "portal_reset",
+        # PLAN-015c (ledger 0071): "Invoice e-mailed by the company" and "Receipt for a payment
+        # recorded by hand".
+        "invoice_sent",
+        "receipt",
         "internal_day30",
     ]
     inactive = [t for t in message_templates.rows() if not t.active]

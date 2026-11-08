@@ -56,6 +56,8 @@ from ledger.models import (
 from ledger.services import detail_cards, installments, list_filters, one_off_charges, refunds
 from ledger.services import payments_ledger as ledger
 from ledger.services import stores as store_service
+from ledger.services.pdf import downloads
+from ledger.services.pdf.receipt import has_receipt, receipt_filename, render_receipt
 from ledger.services.rent_run import PARTIAL_NOTICE, charge_review_message, partial_marking
 from ledger.validators import PAYMENT_DATA_MESSAGE
 from ledger.views import store_context
@@ -182,6 +184,30 @@ def payment_detail(request: HttpRequest, pk: str) -> HttpResponse:
     return render(request, "ledger/payments/detail.html", _detail_context(request, payment))
 
 
+@role_required
+@require_safe
+def payment_receipt(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:payments:receipt`` (any role; PLAN-015c): the receipt PDF of a settled payment
+    as a download, rendered now, audited ``payment.receipt_downloaded``; 404 for a payment
+    without a receipt (pending, returned, voided, a refund, money paid back)."""
+    payment = _load(pk)
+    if not has_receipt(payment):
+        raise Http404
+    data = render_receipt(payment, today=timezone.localdate())
+    filename = receipt_filename(payment)
+    downloads.audit(
+        downloads.RECEIPT_DOWNLOADED,
+        ENTITY_PAYMENT,
+        payment.pk,
+        actor=_actor(request),
+        filename=filename,
+    )
+    response = HttpResponse(data, content_type=downloads.CONTENT_TYPE)
+    for name, value in downloads.headers(filename, len(data)).items():
+        response[name] = value
+    return response
+
+
 def _detail_context(request: HttpRequest, payment: Payment) -> dict[str, object]:
     """The payment page's context (read only); Refund and Void show over it in their
     dialog (PLAN-012f-b E-4)."""
@@ -211,6 +237,8 @@ def _detail_context(request: HttpRequest, payment: Payment) -> dict[str, object]
             store=row.store,
             record=(ENTITY_PAYMENT, payment.pk),
         ),
+        # PLAN-015c: "Receipt PDF" for a settled payment received.
+        "has_receipt": has_receipt(payment),
         "can_refund": admin and facts.can_refund,
         "can_void": admin and facts.can_void,
         # PLAN-012f-c D6: a payment recorded outside the processor, settled: billing.

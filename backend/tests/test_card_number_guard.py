@@ -396,6 +396,7 @@ GUARD_MODULES = (
     "ledger.migrations.0068_combined_messages_and_lease_line",
     "ledger.migrations.0069_pay_line_and_settings_holds",
     "ledger.migrations.0070_payment_channel_invoice",
+    "ledger.migrations.0071_invoice_pdfs",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0003_webhook_event_processing",
     "payments.migrations.0005_jobs",

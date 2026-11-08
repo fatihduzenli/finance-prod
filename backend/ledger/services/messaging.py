@@ -920,6 +920,12 @@ def _store(
     return message
 
 
+def store_message(message: OutboundMessage, actor: User | None) -> OutboundMessage | None:
+    """Store a message rendered elsewhere (PLAN-015c's invoice and receipt e-mails,
+    ``ledger.services.invoice_messages``) as :func:`queue` stores its own, with its job."""
+    return _store(message, actor)
+
+
 # --- One e-mail per lease and day (owner, 2026-11-02) ----------------------------------------
 
 
@@ -1223,8 +1229,10 @@ def collection_paused(message: OutboundMessage) -> bool:
 def _closed_reason(message: OutboundMessage) -> str:
     """Why what ``message`` is about no longer calls for it (its charge or month closed, its
     statement or link gone); ``""`` when it still does."""
-    from ledger.services import lease_end
+    from ledger.services import invoice_messages, lease_end
 
+    if message.kind in (MessageKind.INVOICE, MessageKind.RECEIPT):
+        return invoice_messages.closed_reason(message)
     if message.kind == MessageKind.PORTAL:
         issuer = ONE_TIME_LINKS.get(message.template.code)
         if issuer is None:
@@ -1293,13 +1301,19 @@ def _finish(message: OutboundMessage, disposition: Disposition, recipients: int 
 def _deliver(message: OutboundMessage, recipients: list[str]) -> Disposition:
     """Hand the stored text to the channel, once per recipient; the first failure, else a
     send, else the first hold, decides the row."""
-    from ledger.services import lease_end
+    from ledger.services import invoice_messages, lease_end
 
     attachments: tuple[mail.Attachment, ...] = ()
     if message.rule == MessageRule.FINAL_STATEMENT:
         try:
             attachments = (lease_end.statement_attachment(message),)
         except Exception as error:  # a storage or permission failure: its class name only
+            return Disposition(MessageStatus.FAILED, error=type(error).__name__)
+    if message.kind in (MessageKind.INVOICE, MessageKind.RECEIPT):
+        # PLAN-015c: the invoice or receipt PDF, rendered now, never stored.
+        try:
+            attachments = (invoice_messages.attachment(message),)
+        except Exception as error:  # a row gone or a render failure: its class name only
             return Disposition(MessageStatus.FAILED, error=type(error).__name__)
     channel = channel_for(message.channel)
     body = message.rendered_body
@@ -1373,10 +1387,12 @@ def send(message_id: uuid.UUID, now: datetime | None = None) -> Outcome:
 
 
 def manual_templates() -> list[MessageTemplate]:
-    """What "Send a message now" offers: the active e-mail templates for operators."""
+    """What "Send a message now" offers: the active e-mail templates for operators (not the
+    final statement, the portal's two, or PLAN-015c's invoice and receipt, each about
+    something a charge is not)."""
     return list(
         MessageTemplate.objects.filter(active=True, internal=False, channel=MessageChannel.EMAIL)
-        .exclude(code__in=(merge.FINAL_STATEMENT_CODE, *merge.PORTAL_CODES))
+        .exclude(code__in=(merge.FINAL_STATEMENT_CODE, *merge.PORTAL_CODES, *merge.PDF_CODES))
         .order_by("name", "code")
     )
 

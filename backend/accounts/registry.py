@@ -92,6 +92,9 @@ PORTAL_ROUTE_NAMES: frozenset[str] = PORTAL_PUBLIC_ROUTE_NAMES | frozenset(
         "portal:bank",
         "portal:account",
         "portal:password",
+        # PLAN-015c: the invoice and receipt PDFs of the operator's own stores.
+        "portal:invoice_pdf",
+        "portal:receipt_pdf",
     }
 )
 
@@ -550,6 +553,10 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:invoices:draft",
         "ledger:invoices:preview",
         "ledger:invoices:print",
+        # PLAN-015c: an invoice's PDF and a settled payment's receipt PDF, rendered on
+        # request as downloads (any role, as the print view); GET only.
+        "ledger:invoices:pdf",
+        "ledger:payments:receipt",
         # PLAN-012f-b D15: the "Invoice saved" dialog over the Invoices tab (billing,
         # checked by the view); GET only, it writes nothing.
         "ledger:invoices:saved",

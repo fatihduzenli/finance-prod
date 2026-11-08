@@ -2598,6 +2598,11 @@ def record_payment(
             return PaymentOutcome(False, PAY_NOTE_PAYMENT_DATA, "note")
         recompute(charge)
         contacts.close_kept_by_payment(payment)
+        # PLAN-015c: a payment recorded outside the processor gets the app's receipt e-mail
+        # (imported here: the messaging engine imports this module).
+        from ledger.services import invoice_messages
+
+        invoice_messages.queue_receipt_if_due(payment, actor)
         _audit(
             actor,
             PAYMENT_ACTION,

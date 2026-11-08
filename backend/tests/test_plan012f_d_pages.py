@@ -412,6 +412,9 @@ NOT_PAGES: dict[str, str] = {
     "ledger:calendar:search": "the calendar entry dialog's link rows (JSON for its script)",
     "ledger:invoices:print": "the invoice document's print page (its own layout)",
     "ledger:lease_ends:pdf": "the statement PDF",
+    # PLAN-015c: rendered on request, downloaded.
+    "ledger:invoices:pdf": "the invoice PDF",
+    "ledger:payments:receipt": "the receipt PDF",
     "ledger:documents:download": "a stored file",
     "ledger:documents:preview": "a stored file in a frame",
     "ledger:stores:schedule_payment": "a redirect to the builder with its choice (PLAN-012e-2 D3)",
@@ -571,6 +574,23 @@ def test_the_routes_that_are_not_pages_answer_as_listed(world: World) -> None:
 PORTAL_NOT_PAGES: dict[str, str] = {
     "portal:manifest": "the portal's PWA manifest (JSON), opening on /portal/",
 }
+
+
+#: PLAN-015c: the portal's routes that are not pages and need a signed-in operator (so not in
+#: the public manifest's test above): files rendered on request. Their isolation and their
+#: answers are tested per route in tests/test_plan014_h_isolation.py.
+PORTAL_PRIVATE_NOT_PAGES: dict[str, str] = {
+    "portal:invoice_pdf": "the invoice PDF",
+    "portal:receipt_pdf": "the receipt PDF",
+}
+
+
+def test_the_portal_private_routes_that_are_not_pages_are_classified() -> None:
+    names = {name for name, _, _ in iter_routes() if name}
+    for name in PORTAL_PRIVATE_NOT_PAGES:
+        assert name in names and name in registry.PORTAL_ROUTE_NAMES, name
+        assert name not in registry.PORTAL_PUBLIC_ROUTE_NAMES, name
+        assert name not in PORTAL_NOT_PAGES, name
 
 
 def test_the_portal_routes_that_are_not_pages_answer_as_listed() -> None:
