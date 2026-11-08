@@ -1300,8 +1300,11 @@ def schedules_tab(
             moves[row.lease_id] = leases.autopay_move(row.lease, now)
         moved = moves[row.lease_id]
         ref = leases.schedule_ref(row)
+        # PLAN-015d: a rent debit is never in a month the free period touches (the floor
+        # its DTSTART was sent with); an insurance schedule's is not rent's.
+        floor = leases.first_debit_floor(row.lease, now) if row.kind == ScheduleKind.RENT else now
         next_run = (
-            leases.next_debit_at(row.debit_day, now)
+            leases.next_debit_at(row.debit_day, floor)
             if row.state == ScheduleState.ACTIVE and row.debit_day is not None
             else None
         )

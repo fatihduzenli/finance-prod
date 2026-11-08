@@ -186,3 +186,47 @@ def test_the_lease_card_names_the_first_rent_debit_after_the_free_period(
     text = page.content.decode()
     assert 'id="header-next-payment">Nov 15, 2026</dd>' in text
     assert "Oct 15, 2026" not in text
+
+
+#: The "Next debit" cell of both tables, as the responsive table renders it.
+NEXT_DEBIT = 'data-label="Next debit">'
+
+
+def _next_runs(
+    lease: Any, moment: datetime, monkeypatch: pytest.MonkeyPatch, user: str
+) -> tuple[date | None, date | None, str, str]:
+    """The Schedules tab's and the lease page's next run (service), and both pages."""
+    from ledger.services import workspace
+
+    [row] = workspace.schedules_tab(lease.store, moment.date(), moment, Role.ADMIN)["schedule_rows"]
+    monkeypatch.setattr("django.utils.timezone.now", lambda: moment)
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: moment.date())
+    client = client_for(Role.ADMIN, user)[0]
+    tab = client.get(f"/stores/{lease.store_id}/?tab=schedules").content.decode()
+    page = client.get(f"/leases/{lease.pk}/")
+    lease_row = page.context["schedules"][0]
+    return row["next_run"].date(), lease_row["next_run"].date(), tab, page.content.decode()
+
+
+def test_the_schedules_tab_and_the_lease_page_name_the_run_after_the_free_period(
+    fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fable's review: both readouts use the same floor as the schedule's DTSTART."""
+    lease = a_lease_on_autopay(fake, 31)  # 1–31 Oct free in full; DTSTART 15 Nov
+    moment = datetime(2026, 10, 5, 15, 0, tzinfo=UTC)
+    tab_run, lease_run, tab, page = _next_runs(lease, moment, monkeypatch, "admin-runs-free")
+    assert (tab_run, lease_run) == (date(2026, 11, 15), date(2026, 11, 15))
+    for text in (tab, page):
+        assert f"{NEXT_DEBIT}Nov 15, 2026</td>" in text
+        assert f"{NEXT_DEBIT}Oct 15, 2026</td>" not in text
+
+
+def test_without_free_rent_both_readouts_name_the_next_debit_day(
+    fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lease = a_lease_on_autopay(fake, 0)
+    moment = datetime(2026, 10, 5, 15, 0, tzinfo=UTC)
+    tab_run, lease_run, tab, page = _next_runs(lease, moment, monkeypatch, "admin-runs-none")
+    assert (tab_run, lease_run) == (date(2026, 10, 15), date(2026, 10, 15))
+    for text in (tab, page):
+        assert f"{NEXT_DEBIT}Oct 15, 2026</td>" in text

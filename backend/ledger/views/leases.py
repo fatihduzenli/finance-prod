@@ -278,12 +278,14 @@ def _detail_context(request: HttpRequest, lease: Lease) -> dict[str, Any]:
     linked_states = set()
     # PLAN-012b-b D13: autopay moved past a split month starts on its new first debit.
     moved = service.autopay_move(lease, now)
+    # PLAN-015d: the next run is never in a month the free period touches (as the schedule).
+    floor = service.first_debit_floor(lease, now)
     for row in live:
         ref = service.schedule_ref(row)
         if ref:
             linked_states.add(row.state)
         next_run = (
-            service.next_debit_at(row.debit_day, now)
+            service.next_debit_at(row.debit_day, floor)
             if row.state == ScheduleState.ACTIVE and row.debit_day is not None
             else None
         )
