@@ -82,14 +82,14 @@ _INTERNAL_BODY = (
 TEMPLATES: tuple[tuple[str, str, bool, str, str], ...] = (
     (
         "credit_returned",
-        "Credit reversed: returned debit (internal)",
+        "F — Credit reversed (internal)",
         True,
         "Credit reversed: #{store_number} {store_name} — {amount}",
         _INTERNAL_BODY,
     ),
     (
         "credit_returned_operator",
-        "Credit reversed: returned debit",
+        "F — Credit reversed (returned debit)",
         False,
         "Your payment for #{store_number} {store_name} was returned",
         _OPERATOR_BODY,

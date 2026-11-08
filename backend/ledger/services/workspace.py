@@ -266,6 +266,9 @@ class Header:
     pause: leases.CollectionPause | None = None
     #: PLAN-015d: Change start date is offered for ``status_lease`` (:func:`changeable_start`).
     start_changeable: bool = False
+    #: PLAN-015e: "Credit of $1,500.00 reversed Nov 6, 2026" while the lease is flagged after
+    #: a returned debit reversed its credit (:func:`ledger.services.credits.reversed_text`).
+    credit_reversed: str = ""
 
 
 #: The Status row's badge tone by collection status (PLAN-015b): Active paid, Paused pending,
@@ -513,6 +516,7 @@ def _header(
         next_insurance=_next_insurance(lease, today),
         collections=detail_cards.lease_collections(lease, today),
         account=detail_cards.lease_account(lease),
+        credit_reversed=credits.reversed_text(lease),
         **_status_fields(lease),
     )
 

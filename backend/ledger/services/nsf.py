@@ -115,6 +115,7 @@ from ledger.models import (
     AuditLog,
     CollectionMethod,
     CollectionStatus,
+    CompanySettings,
     ContactEntry,
     ContactKind,
     FeeType,
@@ -137,7 +138,16 @@ from ledger.models import (
     RetryState,
     ReviewReason,
 )
-from ledger.services import business_days, leases, messaging, numbering, one_off_charges, returns
+from ledger.services import (
+    business_days,
+    credits,
+    leases,
+    messaging,
+    numbering,
+    one_off_charges,
+    receivables,
+    returns,
+)
 from ledger.services.payments_ledger import payment_lease
 from ledger.validators import validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_sentence
@@ -982,6 +992,120 @@ def on_return(payment: Payment, today: date, now: datetime | None = None) -> Ret
             },
         )
     return ReturnOutcome(fee=fee, redebit=redebit, retry=retry, message=message)
+
+
+# --- A debit kept as a credit (PLAN-015e) ----------------------------------------------------
+
+REVIEW_CREDIT = "Returned debit ({code}): credit of {amount} reversed"
+#: ``{charges_owed}`` when the credit had paid nothing, or had been refunded at the lease end.
+NO_CHARGES_OWED = "none"
+REFUNDED_CHARGES_OWED = "none (the credit had been refunded at the lease end; staff decide)"
+CHARGE_OWED = "{name} {amount}"
+CREDIT_MESSAGES: tuple[tuple[str, str], ...] = (
+    (MessageRule.CREDIT_RETURNED, merge.CREDIT_RETURNED_CODE),
+    (MessageRule.CREDIT_RETURNED_OPERATOR, merge.CREDIT_RETURNED_OPERATOR_CODE),
+)
+
+
+def charges_owed_text(reversal: credits.CreditReversal) -> str:
+    """ "Rent November 2026 $900.00; Rent December 2026 $600.00": the charges the reversed
+    credit had paid, owed again (``{charges_owed}``)."""
+    if reversal.refunded:
+        return REFUNDED_CHARGES_OWED
+    parts = []
+    for application in reversal.applications:
+        charge: messaging.Charge | None = (
+            application.rent_charge or application.insurance_charge or application.one_off_charge
+        )
+        name = messaging.charge_name(charge) if charge is not None else "a charge"
+        parts.append(CHARGE_OWED.format(name=name, amount=format_amount(application.amount)))
+    return "; ".join(parts) or NO_CHARGES_OWED
+
+
+def store_balance(lease: Lease, today: date) -> Decimal:
+    """What the operator owes on the lease's store today (the store header's open balance
+    of that operator): ``{balance}`` of the operator's e-mail."""
+    rows = receivables.open_balances(today, operator=lease.operator_id)
+    return receivables.total(row for row in rows if row.store_id == lease.store_id)
+
+
+def _credit_context(
+    rule: str,
+    payment: Payment,
+    reversal: credits.CreditReversal,
+    lease: Lease,
+    today: date,
+    company: CompanySettings,
+) -> dict[str, str]:
+    store = lease.store
+    operator = lease.operator
+    code = (payment.return_code or "").strip().upper()
+    values = {
+        "operator_name": str(operator.display_name) if operator is not None else "",
+        "store_number": str(store.store_number) if store.store_number is not None else "",
+        "store_name": str(store.external_label),
+        "debit_date": day_text(payment.initiated_on) if payment.initiated_on else "",
+        "return_reason": payments.return_reason_words(code),
+    }
+    if rule == MessageRule.CREDIT_RETURNED:
+        return {
+            **values,
+            "lease": messaging.lease_words(lease),
+            "amount": format_amount(Decimal(reversal.credit.amount)),
+            "charges_owed": charges_owed_text(reversal),
+            "store_link": messaging.store_link(lease),
+        }
+    return {
+        **values,
+        "amount": format_amount(transaction_total(payment)),
+        "balance": format_amount(store_balance(lease, today)),
+        "support_email": str(company.support_email or ""),
+        "company_name": str(company.name),
+    }
+
+
+def on_credit_return(
+    payment: Payment, reversals: Iterable[credits.CreditReversal], today: date
+) -> list[OutboundMessage]:
+    """Tell staff and the operator of each credit the returned ``payment`` reversed
+    (PLAN-015e), in the caller's transaction: the credit's lease is flagged Needs review
+    (``credit_returned``, a reason already set kept; audited ``lease.flagged_for_review``),
+    and two messages about the credit are queued through :func:`ledger.services.messaging.queue`
+    (the send window, the holds and the Outbox apply): the managers' (``credit_returned``,
+    internal, to the company settings' managers) and the operator's
+    (``credit_returned_operator``, to the lease's billing e-mail, the owner's wording). Neither
+    names an account number. A replayed event reverses nothing, so queues nothing; a message
+    already queued for the credit is not queued again. The messages queued."""
+    queued: list[OutboundMessage] = []
+    company = CompanySettings.read()
+    for reversal in reversals:
+        lease = Lease.objects.select_related("store", "operator").get(pk=reversal.credit.lease_id)
+        code = shown((payment.return_code or "").strip().upper())
+        amount = format_amount(Decimal(reversal.credit.amount))
+        _flag_lease(
+            lease,
+            ReviewReason.CREDIT_RETURNED,
+            REVIEW_CREDIT.format(code=code, amount=amount),
+            payment,
+        )
+        for rule, template_code in CREDIT_MESSAGES:
+            template = MessageTemplate.objects.filter(code=template_code, active=True).first()
+            if template is None:
+                logger.warning("Template %s inactive: no message for %s", template_code, payment.pk)
+                continue
+            context = _credit_context(rule, payment, reversal, lease, today, company)
+            try:
+                message = messaging.queue(rule, lease, reversal.credit, template, context)
+            except (messaging.ChannelUnavailable, merge.TemplateRefused, ValueError) as error:
+                logger.warning(
+                    "Reversed-credit message not queued for payment %s: %s",
+                    payment.pk,
+                    type(error).__name__,
+                )
+                continue
+            if message is not None:
+                queued.append(message)
+    return queued
 
 
 def on_settled(payment: Payment, now: datetime | None = None) -> None:

@@ -7,12 +7,16 @@ the refused reverse). Task 2: the return reaches the credit through real webhook
 :class:`~payments.fake.FakeProvider` (whole and split rows, unapplied, partly and fully applied,
 refunded at the lease end, replays, a row split before ledger 0077), the P&L's credits held.
 Task 3: the NSF step of such a return (the credit's lease, one fee, no re-debit, no template F,
-the transaction's total).
+the transaction's total). Task 4: the lease flagged ``credit_returned``, the dashboard's item,
+the managers' and the operator's e-mails (held in the Outbox while mail is not set up, once per
+credit, no account number), the LEASE card, the Payments tab, the timeline and the templates'
+preview.
 """
 
 from __future__ import annotations
 
 import functools
+import importlib
 import uuid
 from dataclasses import replace
 from datetime import date
@@ -22,15 +26,25 @@ from typing import Any
 import pytest
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
+from django.urls import reverse
 from django.utils import timezone
 
+from accounts.roles import Role
 from ledger.models import (
     AuditLog,
+    ChargeEntityType,
+    CompanySettings,
+    HeldReason,
+    Lease,
+    LeaseBilling,
     LeaseCredit,
+    MessageKind,
     MessageRule,
+    MessageStatus,
     MessageTemplate,
     OneOffCategory,
     OneOffCharge,
+    Operator,
     OutboundMessage,
     Payment,
     PaymentKind,
@@ -38,13 +52,28 @@ from ledger.models import (
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
+    ReviewReason,
 )
-from ledger.services import credits, leases, nsf, receivables, rent_run, returns, start_date
+from ledger.services import (
+    attention,
+    credits,
+    leases,
+    message_templates,
+    messaging,
+    nsf,
+    receivables,
+    rent_run,
+    returns,
+    start_date,
+    timeline,
+)
 from payments.fake import FakeProvider
 from payments.models import ExternalRef, Job, JobKind
 from payments.webhooks.handlers import transaction as transaction_handler
 from tests import test_returns_nsf as nsf_tests
+from tests.job_helpers import run_queued_jobs
 from tests.test_lease_services import make_lease
+from tests.test_operator_views import client_for
 from tests.test_plan015d_change_start import an_active_lease, apply, november, pay
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 from tests.test_returns_nsf import NOTICE, Clock, a_world
@@ -678,3 +707,256 @@ def test_a_debit_not_kept_as_a_credit_is_still_redebited(fake: FakeProvider) -> 
     assert audit.after["retry"] == nsf.RETRY_AUTO
     assert audit.after["credit_reversed"] == [] and audit.after["transaction_total"] == "1500.00"
     assert OneOffCharge.objects.filter(category=OneOffCategory.REDEBIT).count() == 1
+
+
+# --- Task 4: staff and the operator are told ------------------------------------------------
+
+MANAGERS = "managers@example.com"
+LAST4 = "4821"
+
+
+@pytest.fixture
+def told(fake: FakeProvider) -> FakeProvider:
+    """The company settings the two e-mails need (a support e-mail and a manager list), the
+    two seeded templates (a flush by an earlier transactional test removes seeded rows), and
+    a bank's last four on the lease's billing that no message may name."""
+    migration = importlib.import_module("ledger.migrations.0077_credit_return")
+    for code, name, internal, subject, body in migration.TEMPLATES:
+        MessageTemplate.objects.get_or_create(
+            code=code,
+            defaults={"name": name, "internal": internal, "subject": subject, "body": body},
+        )
+    row = CompanySettings.current()
+    CompanySettings.objects.filter(pk=row.pk).update(
+        support_email="support@example.com", manager_emails=MANAGERS
+    )
+    return fake
+
+
+def credit_messages() -> dict[str, OutboundMessage]:
+    return {
+        message.rule: message
+        for message in OutboundMessage.objects.filter(kind=MessageKind.CREDIT_RETURNED)
+    }
+
+
+def with_last4(world: World) -> None:
+    LeaseBilling.objects.filter(lease=world.lease).update(bank_last4=LAST4)
+
+
+def test_the_lease_is_flagged_with_its_own_reason(told: FakeProvider) -> None:
+    world, held, credit = kept_whole(told)
+    assert bank_returns(told) == "processed"
+    lease = Lease.objects.get(pk=world.lease.pk)
+    assert (lease.needs_review, lease.review_reason) == (True, ReviewReason.CREDIT_RETURNED)
+    flag = AuditLog.objects.get(action=nsf.FLAGGED_ACTION, entity_id=str(lease.pk))
+    assert flag.after["reason"] == "Returned debit (R01): credit of $1,500.00 reversed"
+    assert flag.after["payment"] == str(held.pk)
+    assert not AuditLog.objects.filter(
+        action=nsf.FLAGGED_ACTION, after__review_reason=ReviewReason.RETURNED_DEBIT
+    ).exists()
+
+
+def test_a_reason_already_set_on_the_lease_is_kept(told: FakeProvider) -> None:
+    world, _, _ = kept_whole(told)
+    Lease.objects.filter(pk=world.lease.pk).update(
+        needs_review=True, review_reason=ReviewReason.WIRE
+    )
+    assert bank_returns(told) == "processed"
+    lease = Lease.objects.get(pk=world.lease.pk)
+    assert (lease.needs_review, lease.review_reason) == (True, ReviewReason.WIRE)
+
+
+def test_the_attention_item_is_high_and_clears_with_the_leases_flag(told: FakeProvider) -> None:
+    world, _, credit = kept_whole(told)
+    with_last4(world)
+    november = a_rent(world, date(2026, 11, 1), "900.00")
+    december = a_rent(world, date(2026, 12, 1), "600.00")
+    apply_credit(world, november, "900.00")
+    apply_credit(world, december, "600.00")
+    assert bank_returns(told) == "processed"
+    found = attention.attention(NOTICE).items
+    [item] = [row for row in found if row.kind == attention.CREDIT_RETURNED]
+    assert item.severity == attention.HIGH
+    assert item.text == (
+        "Credit of $1,500.00 reversed: the bank debit of Oct 15, 2026 was returned "
+        "(Insufficient funds); 2 charges owed again"
+    )
+    assert item.why == "Credit of $1,500.00 reversed"
+    assert item.url == reverse("ledger:stores:detail", kwargs={"pk": world.lease.store_id})
+    assert (item.store_id, item.operator_id, item.amount) == (
+        world.lease.store_id,
+        world.operator.pk,
+        D("1500.00"),
+    )
+    assert LAST4 not in item.text
+    assert [row.kind for row in attention.attention(NOTICE, operator=world.operator.pk).items]
+    other = Operator.objects.create(display_name="Someone else")
+    assert not [
+        row
+        for row in attention.attention(NOTICE, operator=other.pk).items
+        if row.kind == attention.CREDIT_RETURNED
+    ]
+    # Staff clear the lease's Needs review: the item goes.
+    Lease.objects.filter(pk=world.lease.pk).update(needs_review=False, review_reason="")
+    assert not [
+        row for row in attention.attention(NOTICE).items if row.kind == attention.CREDIT_RETURNED
+    ]
+
+
+def test_the_managers_email_names_the_credit_the_lease_and_the_charges_owed_again(
+    told: FakeProvider,
+) -> None:
+    world, _, credit = kept_whole(told)
+    with_last4(world)
+    november = a_rent(world, date(2026, 11, 1), "900.00")
+    apply_credit(world, november, "900.00")
+    assert bank_returns(told) == "processed"
+    message = credit_messages()[MessageRule.CREDIT_RETURNED]
+    assert message.template.internal and message.to_address == MANAGERS
+    assert (message.charge_entity_type, message.charge_entity_id) == (
+        ChargeEntityType.LEASE_CREDIT,
+        credit.pk,
+    )
+    assert message.lease_id == world.lease.pk
+    assert message.rendered_subject == "Credit reversed: #101 Store 0101 — $1,500.00"
+    assert message.rendered_body == (
+        "The bank returned the debit of Oct 15, 2026 (reason: Insufficient funds) from "
+        "Northwind Stores for store #101 Store 0101. It had been kept as a credit of $1,500.00 "
+        "on the lease from Jan 1, 2026; that credit is reversed.\n"
+        "Charges owed again: Rent November 2026 $900.00\n"
+        "The lease is flagged Needs review. Open the store: "
+        f"{messaging.store_link(world.lease)}"
+    )
+    assert LAST4 not in message.rendered_body and LAST4 not in message.rendered_subject
+
+
+def test_the_operators_email_has_the_owners_wording_and_the_balance_after_the_reversal(
+    told: FakeProvider,
+) -> None:
+    world, _, credit = kept_whole(told)
+    with_last4(world)
+    november = a_rent(world, date(2026, 11, 1), "900.00")
+    apply_credit(world, november, "900.00")
+    assert bank_returns(told) == "processed"
+    message = credit_messages()[MessageRule.CREDIT_RETURNED_OPERATOR]
+    assert not message.template.internal and message.to_address == "ops@example.com"
+    # Owed on the store now: November again ($900.00) and the NSF fee ($100.00).
+    assert nsf.store_balance(world.lease, NOTICE) == D("1000.00")
+    assert message.rendered_subject == "Your payment for #101 Store 0101 was returned"
+    assert message.rendered_body == (
+        "Hello Northwind Stores,\n\n"
+        "Your bank returned your payment of $1,500.00 made on Oct 15, 2026 (reason: "
+        "Insufficient funds). It had been kept as a credit on store #101 Store 0101; that "
+        "credit is reversed and your balance is now $1,000.00. Please contact us at "
+        "support@example.com.\n\n"
+        f"{CompanySettings.read().name}"
+    )
+    assert LAST4 not in message.rendered_body
+
+
+def test_the_outbox_holds_both_while_mail_is_not_set_up(told: FakeProvider) -> None:
+    kept_whole(told)
+    assert bank_returns(told) == "processed"
+    run_queued_jobs()
+    messages = credit_messages()
+    assert set(messages) == {MessageRule.CREDIT_RETURNED, MessageRule.CREDIT_RETURNED_OPERATOR}
+    for message in messages.values():
+        message.refresh_from_db()
+        assert (message.status, message.held_reason) == (
+            MessageStatus.HELD,
+            HeldReason.NOT_SET_UP,
+        )
+    client = client_for(Role.ADMIN)[0]
+    page = client.get(reverse("ledger:outbox:page")).content.decode()
+    assert "Credit reversed: #101 Store 0101" in page
+    assert "Your payment for #101 Store 0101 was returned" in page
+
+
+def test_a_replayed_return_queues_one_of_each_message(told: FakeProvider) -> None:
+    kept_whole(told)
+    assert bank_returns(told) == "processed"
+    replay_all()
+    assert bank_returns(told) == "processed"
+    replay_all()
+    assert OutboundMessage.objects.filter(kind=MessageKind.CREDIT_RETURNED).count() == 2
+    assert AuditLog.objects.filter(action=nsf.FLAGGED_ACTION).count() == 1
+
+
+def test_an_unapplied_credits_email_says_no_charge_is_owed_again(told: FakeProvider) -> None:
+    kept_whole(told)
+    assert bank_returns(told) == "processed"
+    body = credit_messages()[MessageRule.CREDIT_RETURNED].rendered_body
+    assert "Charges owed again: none\n" in body
+
+
+def test_the_lease_card_reads_the_reversal_while_flagged(told: FakeProvider) -> None:
+    world, _, _ = kept_whole(told)
+    client = client_for(Role.VIEWER)[0]
+    store_page = reverse("ledger:stores:detail", kwargs={"pk": world.lease.store_id})
+    assert 'id="header-credit">$1,500.00<' in client.get(store_page).content.decode()
+    assert bank_returns(told) == "processed"
+    page = client.get(store_page).content.decode()
+    assert 'id="header-credit">$0.00<br>' in page
+    assert (
+        '<span class="muted" id="header-credit-reversed">Credit of $1,500.00 reversed '
+        "Nov 6, 2026</span>"
+    ) in page
+    Lease.objects.filter(pk=world.lease.pk).update(needs_review=False, review_reason="")
+    page = client.get(store_page).content.decode()
+    assert 'id="header-credit"' not in page and "header-credit-reversed" not in page
+
+
+def test_the_payments_tab_shows_the_held_row_the_reversal_and_the_returned_application(
+    told: FakeProvider,
+) -> None:
+    world, _, _ = kept_whole(told)
+    november = a_rent(world, date(2026, 11, 1), "900.00")
+    apply_credit(world, november, "900.00")
+    assert bank_returns(told) == "processed"
+    client = client_for(Role.VIEWER)[0]
+    tab = client.get(
+        reverse("ledger:stores:detail", kwargs={"pk": world.lease.store_id}) + "?tab=payments"
+    ).content.decode()
+    credits_table = tab[tab.index('id="store-credits"') :]
+    assert "Reversed: the bank debit was returned (R01: Bank text)" in credits_table
+    # The bank debit the credit held, and the credit payment returned with it.
+    assert "$1,500.00</a> received (returned)" in credits_table
+    assert "Rent Nov 2026, debit 1</a> (returned)" in credits_table
+    assert "Not used yet" not in credits_table
+    # The ledger lists the credit payment as a return.
+    ledger = tab[: tab.index('id="store-credits"')]
+    assert ledger.count("Returned</span>") == 1 and "Credit</td>" in ledger
+
+
+def test_the_timeline_lists_the_reversal_as_a_status_change(told: FakeProvider) -> None:
+    world, _, _ = kept_whole(told)
+    november = a_rent(world, date(2026, 11, 1), "900.00")
+    apply_credit(world, november, "900.00")
+    assert bank_returns(told) == "processed"
+    [entry] = timeline.entries(world.lease.store, timeline.SHOW_STATUS)
+    words = timeline.status_words(entry.payload)
+    assert words.text == (
+        "Credit of $1,500.00 reversed — the bank debit of Oct 15, 2026 was returned "
+        "(Insufficient funds); 1 charge owed again"
+    )
+    assert (words.label, words.tone, words.by) == ("Needs review", "returned", "The bank's return")
+    client = client_for(Role.VIEWER)[0]
+    page = client.get(
+        reverse("ledger:stores:detail", kwargs={"pk": world.lease.store_id})
+        + "?tab=contacts&show=status"
+    ).content.decode()
+    assert "Credit of $1,500.00 reversed" in page and "The bank&#x27;s return" in page
+
+
+def test_the_two_templates_preview_and_are_not_offered_by_hand(told: FakeProvider) -> None:
+    world, _, _ = kept_whole(told)
+    for code in SEEDED:
+        template = MessageTemplate.objects.get(code=code)
+        shown = message_templates.preview(
+            template, world.lease.store_id, template.subject, template.body, NOTICE
+        )
+        assert shown.ok, shown.message
+        assert "{" not in shown.body and "{" not in shown.subject
+    offered = {row.code for row in messaging.manual_templates()}
+    assert not offered & set(SEEDED)

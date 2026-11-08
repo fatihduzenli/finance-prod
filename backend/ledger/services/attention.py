@@ -10,6 +10,11 @@ page that deals with it and ``since``, the day it began:
   ``"Returned debit not rescheduled: <store>, <amount>, returned <date>"``: every return
   the returns queue still holds (``status = returned``, ``resolved_at`` null) but those
   whose automatic re-debit is still to be tried (PLAN-014 F5);
+- ``credit_returned`` (PLAN-015e, ``high``): one item per credit reversed because the bank
+  debit it held was returned (a ``lease_credit.reversed`` audit row), while its lease is still
+  flagged Needs review: ``"Credit of <amount> reversed: the bank debit of <date> was returned
+  (<reason>); <n> charges owed again"``, linking to the store; cleared once staff clear the
+  lease's Needs review;
 - ``redebit_pending`` (PLAN-014 F5, ``low``): one item per automatic re-debit still to be
   tried (``auto_pending`` or ``scheduled``, not voided), ``"Automatic re-debit: <store>,
   <amount> on <date>"``, since the return, linking to the re-debit's charge (where staff
@@ -102,6 +107,7 @@ from django.db.models import Count, F, Min, Q, Sum
 from django.urls import reverse
 from django.utils import timezone
 
+import payments
 from accounts.display import staff_name
 from finance.dates import day_text
 from ledger.models import (
@@ -118,6 +124,7 @@ from ledger.models import (
     InsurancePremium,
     Invoice,
     Lease,
+    LeaseCredit,
     LeaseEnd,
     LeaseEndStatus,
     OneOffCategory,
@@ -135,6 +142,7 @@ from ledger.models import (
 from ledger.services import (
     calendar,
     contacts,
+    credits,
     installments,
     insurance,
     nsf,
@@ -156,6 +164,7 @@ _SEVERITY_RANK = {HIGH: 0, MEDIUM: 1, LOW: 2}
 
 OVERDUE = "overdue"
 RETURNED_DEBIT = "returned_debit"
+CREDIT_RETURNED = "credit_returned"
 REDEBIT_PENDING = "redebit_pending"
 INVOICE_MARKED_PAID_VOID = "invoice_marked_paid_void"
 INSTALLMENT_RETURNED = "installment_returned"
@@ -180,6 +189,7 @@ CALENDAR_TODAY = "calendar_today"
 KINDS: tuple[str, ...] = (
     OVERDUE,
     RETURNED_DEBIT,
+    CREDIT_RETURNED,
     INVOICE_MARKED_PAID_VOID,
     INSTALLMENT_RETURNED,
     SPLIT_CHARGE_PAID,
@@ -204,6 +214,7 @@ KINDS: tuple[str, ...] = (
 KIND_LABELS: dict[str, str] = {
     OVERDUE: "overdue charges",
     RETURNED_DEBIT: "returned debits",
+    CREDIT_RETURNED: "credits reversed by a returned debit",
     REDEBIT_PENDING: "automatic re-debits coming up",
     INVOICE_MARKED_PAID_VOID: provider_sentence(
         "invoices marked paid in {provider} for a voided payment"
@@ -235,6 +246,7 @@ KIND_LABELS: dict[str, str] = {
 WHY_BADGES: dict[str, str] = {
     OVERDUE: "overdue",
     RETURNED_DEBIT: "returned",
+    CREDIT_RETURNED: "returned",
     REDEBIT_PENDING: "pending",
     INVOICE_MARKED_PAID_VOID: "attention",
     INSTALLMENT_RETURNED: "returned",
@@ -269,6 +281,10 @@ PLAN_PAUSED_DAYS = 30
 KIND_LIMIT = 25
 RETURNED_TEXT = "Returned debit not rescheduled: {store}, {amount}, returned {date}"
 REDEBIT_PENDING_TEXT = "Automatic re-debit: {store}, {amount} on {date}"
+CREDIT_RETURNED_TEXT = (
+    "Credit of {amount} reversed: the bank debit of {date} was returned ({reason}); "
+    "{count} charge{plural} owed again"
+)
 INSTALLMENT_RETURNED_TEXT = "Installment returned: {store}, {parent}, plan {paid} of {count} paid"
 SPLIT_CHARGE_PAID_TEXT = (
     "Payment on a split charge: {store}, {parent}, {amount} paid before its invoice was "
@@ -408,6 +424,58 @@ def _returned(today: date, operator: uuid.UUID | None) -> list[Item]:
                 store_id=row.store.pk if row.store is not None else None,
                 operator_name=row.operator.display_name if row.operator is not None else "",
                 amount=row.amount,
+            )
+        )
+    return found
+
+
+def _credits_returned(operator: uuid.UUID | None) -> list[Item]:
+    """PLAN-015e: one item per credit a returned bank debit reversed, while its lease is
+    flagged Needs review, earliest reversal first (two queries): the reversals' audit rows,
+    then their credits with their leases still flagged."""
+    rows = (
+        AuditLog.objects.filter(action=credits.REVERSED_ACTION, entity_type=credits.ENTITY)
+        .order_by("at", "id")
+        .values_list("entity_id", "after", "at")
+    )
+    reversed_: dict[str, tuple[dict[str, Any], datetime]] = {}
+    for entity_id, after, at in rows:
+        reversed_.setdefault(entity_id, (after or {}, at))
+    if not reversed_:
+        return []
+    found_credits = LeaseCredit.objects.filter(
+        pk__in=list(reversed_), lease__needs_review=True
+    ).select_related("lease__store", "lease__operator")
+    if operator is not None:
+        found_credits = found_credits.filter(lease__operator=operator)
+    by_pk = {str(credit.pk): credit for credit in found_credits}
+    found = []
+    for key, (after, at) in reversed_.items():
+        credit = by_pk.get(key)
+        if credit is None:
+            continue
+        lease = credit.lease
+        count = len(after.get("applications") or [])
+        debit = after.get("debit_date")
+        code = str(after.get("return_code") or "").strip().upper()
+        found.append(
+            Item(
+                kind=CREDIT_RETURNED,
+                severity=HIGH,
+                text=CREDIT_RETURNED_TEXT.format(
+                    amount=format_amount(credit.amount),
+                    date=_day(date.fromisoformat(debit)) if debit else "unknown",
+                    reason=payments.return_reason_words(code),
+                    count=count,
+                    plural="" if count == 1 else "s",
+                ),
+                url=reverse("ledger:stores:detail", kwargs={"pk": lease.store_id}),
+                since=timezone.localdate(at),
+                operator_id=lease.operator_id,
+                store=lease.store.external_label,
+                store_id=lease.store_id,
+                operator_name=lease.operator.display_name if lease.operator else "",
+                amount=credit.amount,
             )
         )
     return found
@@ -1191,6 +1259,7 @@ def attention(
     sources: list[Callable[[], list[Item]]] = [
         lambda: _overdue(today, balances),
         lambda: _returned(today, operator),
+        lambda: _credits_returned(operator),
         lambda: _redebits_pending(operator),
         lambda: _marked_paid_voids(operator),
         lambda: _installments_returned(operator),

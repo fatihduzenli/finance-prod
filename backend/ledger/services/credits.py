@@ -44,6 +44,7 @@ from django.contrib.auth.models import User
 from django.db.models import Q, QuerySet, Sum
 from django.utils import timezone
 
+from finance.dates import day_text
 from ledger.models import (
     ZERO,
     AuditLog,
@@ -58,6 +59,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services.rent_run import PaymentOutcome
+from ledger.wording import format_amount
 
 ENTITY = "lease_credit"
 CREATED_ACTION = "lease_credit.created"
@@ -382,6 +384,27 @@ def reverse_from_return(
         },
     )
     return CreditReversal(credit, payment, unapplied, applications, refunded)
+
+
+REVERSED_TEXT = "Credit of {amount} reversed {date}"
+
+
+def reversed_text(lease: Lease) -> str:
+    """ "Credit of $1,500.00 reversed Nov 6, 2026": the lease's latest credit a returned debit
+    reversed, while the lease is flagged Needs review (the LEASE card's Credit row,
+    PLAN-015e); ``""`` otherwise (one query when flagged)."""
+    if not lease.needs_review:
+        return ""
+    credit = (
+        LeaseCredit.objects.filter(lease=lease, reversed_at__isnull=False)
+        .order_by("-reversed_at", "-id")
+        .first()
+    )
+    if credit is None or credit.reversed_at is None:
+        return ""
+    return REVERSED_TEXT.format(
+        amount=format_amount(credit.amount), date=day_text(timezone.localdate(credit.reversed_at))
+    )
 
 
 def _return_application(application: Payment, source: Payment, moment: datetime) -> None:

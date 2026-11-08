@@ -369,7 +369,11 @@ def _transition(payment: Payment, record: TransactionRecord, *, settle: bool) ->
     target = _target(payment, record, settle=settle)
     if target is None:
         if record.returned and payment.status == PaymentStatus.RETURNED:
-            _return_missed(payment, record)
+            missed = _return_missed(payment, record)
+            if missed:
+                from ledger.services import nsf
+
+                nsf.on_credit_return(payment, missed, timezone.localdate())
         not_yet = (
             settle
             and payment.status == PaymentStatus.PENDING
@@ -393,15 +397,18 @@ def _transition(payment: Payment, record: TransactionRecord, *, settle: bool) ->
         before,
         {**_state(payment), "provider_transaction": mask_identifier(record.external_id)},
     )
-    _refresh_charge(payment, returned=target == PaymentStatus.RETURNED)
+    reversal = _refresh_charge(payment, returned=target == PaymentStatus.RETURNED)
     # Imported here: nsf reaches the messaging engine, whose imports reach this module.
     from ledger.services import nsf
 
     if target == PaymentStatus.RETURNED:
         # PLAN-015e: the rows split off it are the same bank debit.
-        _return_split_rows(payment, record)
+        reversals = [reversal] if reversal is not None else []
+        reversals += _return_split_rows(payment, record)
         # PLAN-014 F2: the NSF fee, the automatic re-debit or Needs review, and template F.
         nsf.on_return(payment, timezone.localdate())
+        # PLAN-015e: the credit's lease flagged, the managers and the operator told.
+        nsf.on_credit_return(payment, reversals, timezone.localdate())
     if target == PaymentStatus.SETTLED:
         contacts.close_kept_by_payment(payment)
         nsf.on_settled(payment)
