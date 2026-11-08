@@ -2613,6 +2613,16 @@ def cancel(draft_id: uuid.UUID, actor: User | None, *, note: str = "") -> Outcom
     return Outcome(outcome.ok, outcome.message, outcome.field, draft=draft, job=outcome.job)
 
 
+def discard_draft(draft: InvoiceDraft, actor: User | None, context: dict[str, Any]) -> None:
+    """Delete a never-sent draft for a rebuild (PLAN-015d: the move-in draft made again for
+    a new start date), audited as :func:`delete_draft` audits, with ``context``. The caller
+    holds the transaction; no role check (the caller's is the rebuild's)."""
+    if draft.status != InvoiceDraftStatus.DRAFT:
+        raise ValueError(NOT_A_DRAFT)
+    _audit(actor, DELETED_ACTION, draft, {**draft_state(draft), **context}, None)
+    draft.delete()
+
+
 def delete_draft(draft_id: uuid.UUID, actor: User | None) -> Outcome:
     """Delete a never-sent draft outright (billing; PLAN-012d D3): its lines go with it,
     audited ``invoice_draft.deleted`` with the draft as it was. A sent invoice keeps its

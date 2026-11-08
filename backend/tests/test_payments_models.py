@@ -502,10 +502,13 @@ def test_migration_0020_adds_the_switch_kind_and_reverses_only_without_switch_jo
 
     migration = importlib.import_module("payments.migrations.0020_lease_account_switch")
     assert migration.KINDS[-1] == SWITCH_KIND
-    # PLAN-014 H4's 0022 adds portal_pay after it: the closed list is 0022's now.
-    later = importlib.import_module("payments.migrations.0022_portal_pay_job")
+    # PLAN-014 H4's 0022 adds portal_pay after it, and PLAN-015d's 0023 invoice_void: the
+    # closed list is 0023's now.
+    portal = importlib.import_module("payments.migrations.0022_portal_pay_job")
+    later = importlib.import_module("payments.migrations.0023_invoice_void_job")
     assert set(later.KINDS) == set(provider.JobKind.values)
-    assert set(migration.KINDS) == set(later.KINDS) - set(later.NEW_KINDS)
+    assert set(portal.KINDS) == set(later.KINDS) - set(later.NEW_KINDS)
+    assert set(migration.KINDS) == set(portal.KINDS) - set(portal.NEW_KINDS)
     leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
     try:
         assert _switch_job_saves()

@@ -267,6 +267,10 @@ class JobKind(models.TextChoices):
     #: PLAN-014 H4: a portal user's own payment of one charge, the single pay-an-invoice
     #: attempt (``payments.jobs.runners.portal_pay_job``).
     PORTAL_PAY = "portal_pay", "Paying from the portal"
+    #: PLAN-015d §3 (1): the void of a sent, unpaid invoice of the invoice builder (rent
+    #: alone included) at the provider, for Change start date
+    #: (``payments.one_off_invoices.void``).
+    INVOICE_VOID = "invoice_void", "Voiding the invoice"
 
 
 class JobEntity(models.TextChoices):

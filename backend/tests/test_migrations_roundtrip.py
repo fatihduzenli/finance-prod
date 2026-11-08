@@ -98,6 +98,7 @@ GUARD_MODULES = (
     "payments.migrations.0020_lease_account_switch",
     "payments.migrations.0021_job_run_after",
     "payments.migrations.0022_portal_pay_job",
+    "payments.migrations.0023_invoice_void_job",
     "portal.migrations.0001_initial",
     "banking.migrations.0001_initial",
     "portal.migrations.0002_portal_payments",
@@ -190,6 +191,7 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0020_lease_account_switch",
                 "[ ] 0021_job_run_after",
                 "[ ] 0022_portal_pay_job",
+                "[ ] 0023_invoice_void_job",
             ]
         if step == len(ROUND_TRIP) - 1:
             # PLAN-014 H1, I1: the portal's and the bank deposits' migrations come back with the

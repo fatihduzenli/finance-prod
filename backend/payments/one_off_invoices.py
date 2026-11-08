@@ -1631,3 +1631,74 @@ def _create_for_schedule(
                 {"invoice_number": invoice.invoice_number, "provider_total": str(total)},
             )
     return WebhookOutcome.PROCESSED, invoice
+
+
+# --- The void of a sent, unpaid invoice (PLAN-015d §3 (1)) -------------------------------------
+
+#: The ``invoice_void`` job's parameters: the invoice, what becomes of its rent charges
+#: (:data:`ledger.services.move_in.RENT_VOID` or ``RENT_FOLLOW_START``) and whether a new
+#: move-in draft is prepared after it.
+VOID_INVOICE_PARAM = "invoice"
+VOID_RENT_PARAM = "rent"
+VOID_REDRAFT_PARAM = "redraft"
+NO_INVOICE = "The invoice no longer exists."
+VOID_PAID = "Something was paid on this invoice, so it was not voided."
+
+
+def void(invoice_id: uuid.UUID, actor: User | None, *, rent: str, redraft: bool) -> Result:
+    """The ``invoice_void`` job: the invoice deleted at the provider as :func:`delete` deletes
+    it (a paid one never; a 404 counts as deleted; re-fetched after), then, in one
+    transaction, the provider's state copied, the invoice ``void`` and its lines released by
+    :func:`ledger.services.move_in.after_void`. Refused, with nothing sent, once anything was
+    paid or is pending on its charges; a second run of a void invoice does nothing more."""
+    from ledger.services import move_in
+
+    invoice = Invoice.objects.filter(pk=invoice_id).first()
+    if invoice is None:
+        return False, NO_INVOICE
+    if invoice.internal_status == InvoiceStatus.VOID:
+        return True, move_in.VOIDED
+    if move_in.invoice_paid(invoice):
+        return False, VOID_PAID
+    ref = _ref(invoice)
+    record = None
+    if ref:
+        provider = payments.get_provider()
+        try:
+            record = _fetch(provider.get_invoice, ref)
+            if record is not None and invoice_sync.shows_paid(record):
+                return False, str(DELETE_PAID)
+            if record is not None and not invoice_sync.shows_deleted(record):
+                try:
+                    provider.delete_invoice(ref)
+                except ProviderRejected as error:
+                    if error.status != NOT_FOUND:
+                        raise
+                record = _fetch(provider.get_invoice, ref)
+        except ProviderError as error:
+            _audit(
+                actor,
+                "invoice.void_failed",
+                ENTITY_INVOICE,
+                invoice.pk,
+                {"invoice_number": invoice.invoice_number, "failure": _failure(error)},
+            )
+            return False, f"{DELETE_FAILED}: {_failure(error)}."
+        if record is not None and not invoice_sync.shows_deleted(record):
+            return False, str(DELETE_NOT_CONFIRMED)
+    with transaction.atomic():
+        if record is not None:
+            invoice_sync.record_provider_state(invoice.pk, record)
+        elif ref:
+            invoice_sync.record_provider_status(invoice.pk, invoice_sync.PROVIDER_DELETED)
+        outcome = move_in.after_void(
+            invoice,
+            actor,
+            rent=rent,
+            redraft=redraft,
+            context={
+                "provider_invoice": mask_identifier(ref) if ref else None,
+                "provider_status": record.raw_status if record is not None else None,
+            },
+        )
+    return outcome.ok, outcome.message

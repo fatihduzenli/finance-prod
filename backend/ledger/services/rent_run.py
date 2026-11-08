@@ -765,6 +765,119 @@ def create_month(
     return charge, made
 
 
+#: PLAN-015d §3 (1): a charge that never fell due (Change start date moved the start past it).
+VOIDED_ACTION = "rent_charge.voided"
+#: PLAN-015d §3 (1): the start month's charge re-priced for a new start date.
+REAMOUNTED_ACTION = "rent_charge.reamounted"
+VOID_HAS_MONEY = "This charge has money paid or pending on it, so it cannot be void."
+
+
+def can_void(charge: RentCharge) -> bool:
+    """Whether ``charge`` may become void: nothing paid and no payment pending or settled."""
+    return (
+        charge.status not in NOT_BILLED_RENT
+        and Decimal(charge.amount_paid) == 0
+        and not Payment.objects.filter(
+            rent_charge=charge,
+            is_refund=False,
+            status__in=[PaymentStatus.PENDING, PaymentStatus.SETTLED],
+        ).exists()
+    )
+
+
+def void_charge(charge: RentCharge, actor: User | None, context: dict[str, Any]) -> bool:
+    """Make ``charge`` void (PLAN-015d §3: never due; its balance is zero, it is not a bill)
+    under its row lock, audited :data:`VOIDED_ACTION` with ``context``; ``billed_by_invoice``
+    is kept as history. ``False``, nothing written, when it has money on it."""
+    with transaction.atomic():
+        locked = RentCharge.objects.select_for_update().get(pk=charge.pk)
+        if locked.status == RentChargeStatus.VOID:
+            return True
+        if not can_void(locked):
+            return False
+        before = _charge(locked)
+        locked.status = RentChargeStatus.VOID
+        locked.save(update_fields=["status", "updated_at"])
+        _audit(
+            actor, VOIDED_ACTION, ENTITY_CHARGE, locked.pk, before, {**_charge(locked), **context}
+        )
+    return True
+
+
+def reamount_start_month(
+    charge: RentCharge, actor: User | None, context: dict[str, Any]
+) -> RentCharge:
+    """Re-price the start month's ``charge`` for the lease's start date as it is now
+    (PLAN-015d §3 (1), §9.3): the due date (:func:`debit_date`), the amount
+    (:func:`first_month`, split as :func:`create_month` splits it), the proration text and the
+    free rent. The status follows what was paid (:func:`recompute_charge`). Audited
+    :data:`REAMOUNTED_ACTION` when anything changed. ``ValueError`` without a debit or rent."""
+    from ledger.services import free_rent  # free_rent reads this module's amounts
+
+    with transaction.atomic():
+        locked = RentCharge.objects.select_for_update().select_related("lease").get(pk=charge.pk)
+        lease = locked.lease
+        days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+        if not 1 <= locked.seq <= len(days):
+            raise ValueError(NO_SUCH_DEBIT)
+        due = debit_date(lease, locked.period_month, days[locked.seq - 1])
+        rent = rent_on(lease, due)
+        if rent is None:
+            raise ValueError(SKIP_NO_RENT)
+        month = first_month(lease, locked.period_month, rent.amount)
+        amount = debit_amounts(month.amount, twice_monthly=len(days) == 2)[locked.seq - 1]
+        concession, words = free_rent.concession_for(
+            lease, locked.period_month, amount, seq=locked.seq
+        )
+        before = _charge(locked)
+        changed = (
+            locked.due_on,
+            locked.amount_due,
+            locked.proration_text or "",
+            locked.concession,
+        ) != (
+            due,
+            amount,
+            month.text,
+            concession,
+        )
+        if not changed:
+            return locked
+        locked.due_on = due
+        locked.amount_due = amount
+        locked.proration_text = month.text or None
+        locked.concession = concession
+        locked.concession_text = words
+        if Decimal(locked.amount_paid) == 0 and locked.status in (
+            RentChargeStatus.DUE,
+            RentChargeStatus.PAID,
+            RentChargeStatus.UNPAID,
+        ):
+            locked.status = free_rent.status_for(amount, concession)
+        locked.save(
+            update_fields=[
+                "due_on",
+                "amount_due",
+                "proration_text",
+                "concession",
+                "concession_text",
+                "status",
+                "updated_at",
+            ]
+        )
+        if Decimal(locked.amount_paid) > 0:
+            recompute_charge(locked)
+        _audit(
+            actor,
+            REAMOUNTED_ACTION,
+            ENTITY_CHARGE,
+            locked.pk,
+            before,
+            {**_charge(locked), **context},
+        )
+    return locked
+
+
 def _months_back(period: date, months: int) -> date:
     index = period.year * 12 + period.month - 1 - months
     return date(index // 12, index % 12 + 1, 1)
