@@ -1024,9 +1024,13 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             if price is None:
                 continue
             due = data.get(f"{name}_due_date") or started
+            dated = False
             if fee_type == self.deposit_type:
-                # PLAN-015d §3 (3): a deposit off the move-in invoice is due on its own date.
-                due = self.deposit_timing().due_date or due
+                # PLAN-015d §3 (3): a deposit off the move-in invoice is due on its own date;
+                # "On a date" marks it so (the reminders, the portal and the LEASE card).
+                timing = self.deposit_timing()
+                due = timing.due_date or due
+                dated = timing.when == deposits.DepositWhen.ON_DATE
             if due is None:  # refused by clean()
                 continue
             items.append(
@@ -1036,6 +1040,7 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
                     cost=data.get(f"{name}_cost"),
                     vendor=data.get(f"{name}_vendor") or "",
                     due_date=due,
+                    dated=dated,
                 )
             )
         return items

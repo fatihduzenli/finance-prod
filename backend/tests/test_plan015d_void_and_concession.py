@@ -15,9 +15,11 @@ from django.db.migrations.executor import MigrationExecutor
 
 from ledger.models import (
     NOT_BILLED_RENT,
+    FeeType,
     FreeRentFrom,
     InstallmentOrigin,
     Lease,
+    OneOffCharge,
     RentCharge,
     RentChargeStatus,
 )
@@ -233,11 +235,71 @@ def test_0074_reverse_is_refused_while_a_deposit_plan_exists() -> None:
         InstallmentPlan.objects.filter(pk=plan.pk).delete()
 
 
+@pytest.mark.django_db(transaction=True)
+def test_0076_marks_no_charge_dated_and_reverses_while_none_is() -> None:
+    """Fable's run-3 finding: every charge saved before is not dated (a deposit of before
+    rides its invoice as it did); the reverse drops the column while no charge is dated."""
+    from tests.receivables_helpers import a_one_off_charge
+
+    leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
+    lease = a_lease(a_store("Store 9713"))
+    assert lease.operator is not None
+    deposit = a_one_off_charge(lease.operator, "3000.00", MAY, lease=lease)
+    try:
+        old = _migrate(("ledger", "0075_payment_held_as_credit"))
+        assert "dated" not in {f.name for f in old.get_model("ledger", "OneOffCharge")._meta.fields}
+        new = _migrate(("ledger", "0076_one_off_charge_dated"))
+        assert new.get_model("ledger", "OneOffCharge").objects.get(pk=deposit.pk).dated is False
+    finally:
+        _migrate(*leaves)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_0076_reverse_is_refused_while_a_deposit_is_dated() -> None:
+    from tests.receivables_helpers import a_one_off_charge
+
+    leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
+    lease = a_lease(a_store("Store 9714"))
+    assert lease.operator is not None
+    deposit = a_one_off_charge(
+        lease.operator,
+        "3000.00",
+        MAY,
+        lease=lease,
+        category="setup",
+        fee_type=FeeType.objects.create(code="deposit-0076", name="Deposit", refundable=True),
+        collection="none",
+        description="",
+    )
+    OneOffCharge.objects.filter(pk=deposit.pk).update(dated=True)
+    try:
+        with pytest.raises(RuntimeError, match="refuses to reverse"):
+            _migrate(("ledger", "0075_payment_held_as_credit"))
+        assert OneOffCharge.objects.filter(pk=deposit.pk, dated=True).exists()
+    finally:
+        _migrate(*leaves)
+        OneOffCharge.objects.filter(pk=deposit.pk).delete()
+
+
+def test_only_a_setup_charge_collected_by_none_may_be_dated() -> None:
+    from tests.receivables_helpers import a_one_off_charge
+
+    lease = a_lease(a_store("Store 9715"))
+    assert lease.operator is not None
+    fee = a_one_off_charge(lease.operator, "80.00", MAY, lease=lease)  # damage, manual
+    with pytest.raises(IntegrityError), transaction.atomic():
+        OneOffCharge.objects.filter(pk=fee.pk).update(dated=True)
+
+
 def test_the_new_migrations_declare_their_guarded_columns() -> None:
     m72 = importlib.import_module("ledger.migrations.0072_rent_charge_void_and_concession")
     m34 = importlib.import_module("ledger.migrations.0034_proration")
     assert m72.GUARDED_COLUMNS == {
         "rent_charges": (*m34.GUARDED_COLUMNS["rent_charges"], "concession_text")
     }
-    for name in ("0073_lease_free_rent", "0074_installment_origin_deposit"):
+    for name in (
+        "0073_lease_free_rent",
+        "0074_installment_origin_deposit",
+        "0076_one_off_charge_dated",
+    ):
         assert importlib.import_module(f"ledger.migrations.{name}").GUARDED_COLUMNS == {}

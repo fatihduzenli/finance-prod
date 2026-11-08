@@ -13,6 +13,7 @@ import pytest
 from django.test import Client
 
 from ledger.models import (
+    AuditLog,
     InstallmentCollection,
     InstallmentOrigin,
     InstallmentPlan,
@@ -91,17 +92,73 @@ def test_due_on_a_date_is_its_own_charge_off_the_move_in_invoice(
     assert text == "$3,000.00 · due Dec 1"
 
 
-def test_a_deposit_of_a_lease_without_a_move_in_invoice_keeps_the_usual_words(
+def _portal_charge_ids(lease: Lease, day: date) -> list[Any]:
+    """The charge ids the portal offers the lease's operator (its open charges, Pay)."""
+    from portal import services as portal_services
+
+    class User:
+        operator_id = lease.operator_id
+
+    return [row.charge_id for row in portal_services._open_rows(User(), day)]  # type: ignore[arg-type]
+
+
+def test_a_legacy_deposit_off_any_invoice_gets_no_reminder_no_portal_pay_and_its_usual_words(
     admin: Client, today: date
 ) -> None:
-    """Fable's run-2 finding (d): "due <date>" is for a dated deposit only — one the New lease
-    page kept off the lease's move-in invoice. A deposit on no invoice of a lease that has no
-    move-in invoice (saved before PLAN-014b decision 6) reads as before."""
+    """Fable's run-3 finding: a deposit saved "with the invoice" (every deposit before
+    PLAN-015d) is not dated, even on no invoice at all (its draft gone): no B to E, no Pay on
+    the portal, the LEASE card's usual words; the card, the reminders and the portal agree."""
+    lease = save(admin)
+    assert lease is not None
+    InvoiceDraft.objects.filter(lease=lease).delete()
+    deposit = the_deposit(lease)
+    assert deposit.dated is False
+    assert deposit.due_date == date(2026, 11, 15)
+    for day in (date(2026, 11, 12), date(2026, 11, 15), date(2026, 11, 20), date(2026, 11, 25)):
+        assert _rules_for(deposit, day) == [], day
+    assert deposit.pk not in _portal_charge_ids(lease, today)
+    assert all(row.charge_id != deposit.pk for row in receivables.dated_deposits())
+    assert deposits.card_text(lease) == ""
+    assert workspace._deposit_text(lease) == ("$3,000.00 · not collected", detail_cards.UNCOLLECTED)
+
+
+def test_a_deposit_set_on_a_date_is_marked_so_and_the_card_reminders_and_portal_agree(
+    admin: Client, today: date
+) -> None:
+    """The marker is set at creation and read everywhere, whatever becomes of the move-in
+    draft (no inference from it)."""
     lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
     assert lease is not None
     InvoiceDraft.objects.filter(lease=lease).delete()
-    assert deposits.card_text(lease) == ""
-    assert workspace._deposit_text(lease) == ("$3,000.00 · not collected", detail_cards.UNCOLLECTED)
+    deposit = the_deposit(lease)
+    assert deposit.dated is True
+    assert _rules_for(deposit, date(2026, 11, 28)) == [MessageRule.B]
+    assert deposit.pk in _portal_charge_ids(lease, today)
+    assert [row.charge_id for row in receivables.dated_deposits()].count(deposit.pk) == 1
+    assert deposits.card_text(lease) == "$3,000.00 · due Dec 1"
+    created = AuditLog.objects.get(action=one_off_charges.CREATED_ACTION, entity_id=str(deposit.pk))
+    assert created.after["dated"] is True
+
+
+@pytest.mark.parametrize(
+    "timing",
+    [
+        {},
+        {
+            "deposit_when": "installments",
+            "deposit_count": "2",
+            "deposit_first_due": "2026-11-20",
+            "deposit_cadence": "monthly",
+        },
+    ],
+    ids=["with_invoice", "installments"],
+)
+def test_with_the_invoice_or_in_installments_the_deposit_is_not_dated(
+    admin: Client, today: date, timing: dict[str, str]
+) -> None:
+    lease = save(admin, **timing)
+    assert lease is not None
+    assert the_deposit(lease).dated is False
 
 
 def test_the_lease_cards_deposit_row_reads_its_deposits_in_one_query(

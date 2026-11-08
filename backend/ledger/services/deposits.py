@@ -60,7 +60,6 @@ from ledger.models import (
     InstallmentPlan,
     InstallmentPlanStatus,
     Invoice,
-    InvoiceDraft,
     InvoiceDraftLine,
     InvoiceDraftStatus,
     InvoiceLineItem,
@@ -564,10 +563,7 @@ def _held() -> Coalesce:
 def _read(rows: QuerySet[OneOffCharge]) -> QuerySet[OneOffCharge]:
     """``rows`` with what the LEASE card's deposit row reads of each, in the same query:
     ``held`` (:func:`collected`), ``on_line``/``on_invoice``/``on_draft``
-    (:func:`riding_invoice`), ``plan_pk`` (its deposit plan not cancelled, the first) and
-    ``move_in_drafted`` (its lease has a move-in invoice, PLAN-014b decision 6)."""
-    from ledger.services import move_in
-
+    (:func:`riding_invoice`) and ``plan_pk`` (its deposit plan not cancelled, the first)."""
     return rows.annotate(
         held=_held(),
         on_line=Exists(InvoiceLineItem.objects.filter(one_off_charge=OuterRef("pk"))),
@@ -584,9 +580,6 @@ def _read(rows: QuerySet[OneOffCharge]) -> QuerySet[OneOffCharge]:
             .exclude(status=InstallmentPlanStatus.CANCELLED)
             .order_by("pk")
             .values("pk")[:1]
-        ),
-        move_in_drafted=Exists(
-            InvoiceDraft.objects.filter(lease=OuterRef("lease"), memo=move_in.MEMO)
         ),
     )
 
@@ -741,10 +734,9 @@ def card_text(lease: Lease, found: list[OneOffCharge] | None = None) -> str:
     collected · 1 of 3 installments paid", once something is); ``""`` otherwise (the row's
     usual words apply). ``found``: :func:`lease_deposits` when the caller read them.
 
-    A dated deposit is one the New lease page kept off the lease's move-in invoice: owed, on
-    no invoice or draft, on a lease that has a move-in invoice. A deposit of a lease with no
-    move-in invoice (one saved before PLAN-014b decision 6, or whose draft was refused) keeps
-    the usual words (Fable's run-2 finding (d))."""
+    A dated deposit is one the New lease page set "On a date" (``OneOffCharge.dated``, set at
+    creation), owed and on no invoice or draft; every other deposit, one saved before
+    PLAN-015d included, keeps the usual words (Fable's run-2 finding (d), run-3)."""
     from finance.dates import day_short_text
     from ledger.services import installments
 
@@ -759,11 +751,6 @@ def card_text(lease: Lease, found: list[OneOffCharge] | None = None) -> str:
         progress = installments.progress(InstallmentPlan.objects.get(pk=plan_pk))
         so_far = f" · {format_amount(held)} collected" if held > 0 else ""
         return f"{price}{so_far} · {progress.paid_count} of {progress.count} installments paid"
-    if (
-        _riding(deposit)
-        or not deposit.move_in_drafted  # type: ignore[attr-defined]
-        or deposit.balance <= 0
-        or held > 0
-    ):
+    if _riding(deposit) or not deposit.dated or deposit.balance <= 0 or held > 0:
         return ""
     return f"{price} · due {day_short_text(deposit.due_date)}"

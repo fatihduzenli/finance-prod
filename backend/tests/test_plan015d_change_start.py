@@ -416,9 +416,10 @@ def test_the_deposit_moves_only_when_ticked_and_only_its_future_installments(
 ) -> None:
     lease, _draft = a_prospective(fake)
     deposit = OneOffCharge.objects.get(lease=lease, fee_type__refundable=True)
-    # Take it off the draft: due on a date of its own.
+    # Take it off the draft: due on a date of its own (re-pinned, Fable's run-3 finding: the
+    # deposit is marked dated, as the New lease page's "On a date" marks it).
     move_in.current_draft(lease).delete()  # type: ignore[union-attr]
-    OneOffCharge.objects.filter(pk=deposit.pk).update(due_date=date(2026, 10, 20))
+    OneOffCharge.objects.filter(pk=deposit.pk).update(due_date=date(2026, 10, 20), dated=True)
     apply(lease, date(2026, 10, 20), actor=user(Role.BILLING), today=date(2026, 10, 6))
     assert fresh(deposit).due_date == date(2026, 10, 20)
     apply(

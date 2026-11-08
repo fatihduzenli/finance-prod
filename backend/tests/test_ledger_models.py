@@ -1174,6 +1174,13 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_setup_charge(collection="none"),
         lambda: new_one_off_charge(collection="none"),
     ),
+    # PLAN-015d §3 (3), Fable's run-3 finding: only a deposit (setup, collection none) is
+    # dated.
+    ConstraintCase(
+        "one_off_charges_dated_only_setup",
+        lambda: new_setup_charge(collection="none", dated=True),
+        lambda: new_one_off_charge(dated=True),
+    ),
     ConstraintCase(
         "one_off_charges_has_operator",
         lambda: new_setup_charge(operator=None),

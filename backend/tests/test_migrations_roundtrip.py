@@ -92,6 +92,7 @@ GUARD_MODULES = (
     "ledger.migrations.0073_lease_free_rent",
     "ledger.migrations.0074_installment_origin_deposit",
     "ledger.migrations.0075_payment_held_as_credit",
+    "ledger.migrations.0076_one_off_charge_dated",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",

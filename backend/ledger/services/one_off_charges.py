@@ -498,6 +498,8 @@ class ChargeInput:
     #: ``autopay_plan`` and collection ``autopay_due`` only.
     autopay_plan: AutopayPlan | None = None
     period_no: int | None = None
+    #: PLAN-015d §3 (3): the New lease page's deposit set "On a date" (setup only).
+    dated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -943,6 +945,7 @@ def _create_setup(lease: Lease, item: ChargeInput, actor: User | None) -> Outcom
         due_date=item.due_date,
         note=item.note.strip(),
         status=OneOffChargeStatus.OWED,
+        dated=item.dated,
     )
     try:
         with transaction.atomic():
@@ -3441,6 +3444,8 @@ def charge_state(charge: OneOffCharge) -> dict[str, Any]:
         "amount_paid": str(charge.amount_paid),
         "status": charge.status,
         "needs_review": charge.needs_review,
+        # PLAN-015d §3 (3): named only on a deposit due on a date.
+        **({"dated": True} if charge.dated else {}),
     }
 
 

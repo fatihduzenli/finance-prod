@@ -560,7 +560,7 @@ def _move_deposit(lease: Lease, days: int, actor: User | None, today: date) -> b
             return False
         first = max(moving[0].due_date + timedelta(days=days), today)
         return installments.reschedule(plan, first, plan.cadence, actor, today=today).ok
-    if deposits.riding_invoice(deposit) or deposit.balance <= 0:
+    if not deposit.dated or deposits.riding_invoice(deposit) or deposit.balance <= 0:
         return False
     before = deposit.due_date
     deposit.due_date = max(before + timedelta(days=days), today)

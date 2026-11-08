@@ -1277,6 +1277,10 @@ class OneOffCharge(GuardedModel):
     #: notice) and its state; both empty on every other charge.
     retry_date = models.DateField(null=True, blank=True)
     retry_state = _choice(RetryState, blank=True, default="")
+    #: PLAN-015d §3 (3): a deposit the New lease page set "On a date": collected by its own
+    #: due date, off the move-in invoice (the reminders, the portal's Pay and the LEASE card
+    #: read it). Set at creation; every other charge, and every deposit saved before, is not.
+    dated = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1315,6 +1319,10 @@ class OneOffCharge(GuardedModel):
             models.CheckConstraint(
                 condition=~Q(collection="none", category__in=NON_SETUP_CATEGORIES),
                 name="one_off_charges_collection_none_only_setup",
+            ),
+            models.CheckConstraint(
+                condition=Q(dated=False) | Q(category="setup", collection="none"),
+                name="one_off_charges_dated_only_setup",
             ),
             models.CheckConstraint(
                 condition=Q(operator__isnull=False)
