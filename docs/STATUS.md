@@ -1922,3 +1922,31 @@ and address.
 `wt-lease-status`, `wt-invoice-pdfs`, `wt-qa-tools` (branch docs/qa-tools-wait), `wt-baseline-timeout` (merged,
 removable), plus older ones. The main checkout stays on `step-14/checkpoint-2` with untracked design files that
 are already committed on their branches.
+
+## Round of 2026-11-06 to 2026-11-08 — Design v2 follow-ups, invoice PDFs, lease terms
+
+**Live on staging (main `27a5d82`, verified 2026-11-08 17:21 UTC):**
+- PR #54 the QA gate scripts in `docs/qa/tools/` (both gate classes, the PostgreSQL rerun, the read-only staging
+  check, the Section 6 merge chain); PR #56 the stalled-runner test fix.
+- PR #55 PLAN-015a: the Edit lease page in the New lease family (four cards and the Changes card; store, operator,
+  start date and status read-only; a pre-existing crash on a lease without a debit day fixed).
+- PR #57 PLAN-015b: a future-start lease saves as Prospective and the daily job activates it on its start date
+  ("Activate now" for an early start); Pause and Resume collection (admin, a reason, the months billed on resume
+  stated first); the stale autopay job check; Notes & follow-ups lists the status changes; the history cap.
+- PR #58 PLAN-015c: one invoice PDF and receipt PDFs rendered on request; downloads for staff and on the portal
+  (the operator's own stores only); "Invoice e-mails sent by" (the processor by default; ADR-0020); the company
+  address; "Partly paid" on the portal.
+- PR #59 PLAN-015d: Change start date (billing on a prospective lease, admin on an active one; voids, credits or
+  refunds; the deposit moved when ticked); free rent by days with concessions (P&L, Revenue, the invoice's
+  discount line, the processor's discount rate); deposit timing (with the invoice, on a date, in installments).
+
+**Gates:** every PR through the full class (PLAN-015a–d) with the QA entries in `docs/qa/15/QA-015.md`; the
+findings fixed before each merge are listed there (notably: refund rows never written for a credit; autopay never
+debiting a free month; a deposit collected by installments counted everywhere; the new selects never echoing a
+posted value; a receipt's lines in the invoice's order on every database).
+
+**For the owner:** TODO-VERIFY-074 (the hosted pay link) and TODO-VERIFY-075 (Stax's `discountRate` as a fraction
+with net totals) need one sandbox invoice each; the company address and the invoice sender on staging; the Gmail
+delegation before the sender is switched to the company; Design v2 Batches 2–6 wait for the dashboard review.
+
+**Queue:** empty after this round.
