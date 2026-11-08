@@ -727,8 +727,14 @@ def total_of(lines: Sequence[InvoiceDraftLine | CleanLine]) -> Decimal:
     return sum((Decimal(line.line_total) for line in lines), ZERO)
 
 
-def preview(draft: InvoiceDraft, today: date | None = None) -> Preview:
-    """The preview of ``draft`` (D7): its invoice's figures once sent."""
+def preview(
+    draft: InvoiceDraft,
+    today: date | None = None,
+    *,
+    company: CompanySettings | None = None,
+) -> Preview:
+    """The preview of ``draft`` (D7): its invoice's figures once sent. ``company``: the
+    company settings row the page has read already (else it is read here)."""
     day = today or timezone.localdate()
     lines = lines_of(draft)
     invoice = draft.sent_invoice
@@ -738,7 +744,7 @@ def preview(draft: InvoiceDraft, today: date | None = None) -> Preview:
         lines=lines,
         total=invoice.total if invoice is not None else total_of(lines),
         # PLAN-015c, the owner's decision 4: the company settings' name (as the PDFs').
-        company=str(CompanySettings.current().name),
+        company=str((company if company is not None else CompanySettings.read()).name),
         operator=draft.operator,
         lease=lease,
         store=lease.store if lease is not None else None,

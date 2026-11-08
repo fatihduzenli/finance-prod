@@ -69,6 +69,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from finance.context_processors import company_settings
 from ledger.forms import (
     ITEMS_LIST_ID,
     RENT_ITEM,
@@ -827,7 +828,7 @@ def _draft_page_context(
     sent = _sent_context(draft) if draft.status == InvoiceDraftStatus.SENT else {}
     if sent:
         sent.update(_sent_detail(request, draft, sent))
-    preview = invoice_builder.preview(draft)
+    preview = invoice_builder.preview(draft, company=company_settings(request))
     preview_total = _lines_total(formset) if formset is not None else preview.total
     return {
         **sent,
@@ -1206,7 +1207,7 @@ def draft_preview(request: HttpRequest, pk: str) -> HttpResponse:
         "ledger/invoices/preview.html",
         {
             "draft": draft,
-            "preview": invoice_builder.preview(draft),
+            "preview": invoice_builder.preview(draft, company=company_settings(request)),
             "billing": meets(_role(request), Role.BILLING),
         },
     )
@@ -1241,5 +1242,7 @@ def draft_print(request: HttpRequest, pk: str) -> HttpResponse:
     and no navigation, to save as PDF from the browser's print dialog."""
     draft = _load(pk)
     return render(
-        request, "ledger/invoices/print.html", {"preview": invoice_builder.preview(draft)}
+        request,
+        "ledger/invoices/print.html",
+        {"preview": invoice_builder.preview(draft, company=company_settings(request))},
     )
