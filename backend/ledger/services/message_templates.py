@@ -205,6 +205,8 @@ def sample_context(template: MessageTemplate, lease: Lease, today: date) -> dict
         }
     store = lease.store
     due = today + timedelta(days=3)
+    if template.code in merge.PDF_CODES:
+        return _pdf_sample(template.code, lease, company, today, due)
     values = {
         "operator_name": str(operator.display_name) if operator is not None else "",
         "store_number": str(store.store_number) if store.store_number is not None else "",
@@ -226,6 +228,38 @@ def sample_context(template: MessageTemplate, lease: Lease, today: date) -> dict
     }
     values["pay_line"] = messaging.pay_line(lease, today, values)
     return values
+
+
+#: PLAN-015c: the sample invoice number and hosted page of the invoice e-mail's preview.
+SAMPLE_INVOICE_NUMBER = "INV-{year}-0001"
+SAMPLE_PROVIDER_PAY_LINK = "https://pay.example.com/invoice"
+
+
+def _pdf_sample(
+    code: str, lease: Lease, company: CompanySettings, today: date, due: date
+) -> dict[str, str]:
+    """The preview's values of the invoice e-mail or the receipt (PLAN-015c): the lease's
+    real names and pay link, a sample number, amount, dates and hosted page."""
+    store = lease.store
+    operator = lease.operator
+    number = SAMPLE_INVOICE_NUMBER.format(year=today.year)
+    values = {
+        "operator_name": str(operator.display_name) if operator is not None else "",
+        "store_number": str(store.store_number) if store.store_number is not None else "",
+        "store_name": str(store.external_label),
+        "amount": SAMPLE_AMOUNT,
+        "support_email": str(company.support_email or ""),
+        "company_name": str(company.name),
+    }
+    if code == merge.RECEIPT_CODE:
+        return {**values, "paid_on": day_text(today), "applied_to": number}
+    return {
+        **values,
+        "invoice_number": number,
+        "due_date": day_text(due),
+        "pay_link": messaging.pay_link(operator, store.pk),
+        "provider_pay_link": SAMPLE_PROVIDER_PAY_LINK,
+    }
 
 
 def preview(

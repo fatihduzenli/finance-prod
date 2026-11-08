@@ -269,6 +269,8 @@ def test_the_ledger_routes_are_read_only_for_every_role(book: dict[str, Any]) ->
         "ledger:payments:void",
         # PLAN-012f-c D5: billing's void of a payment recorded outside the processor.
         "ledger:payments:void_manual",
+        # PLAN-015c: a settled payment's receipt PDF (read only, any role).
+        "ledger:payments:receipt",
     }
     unsafe = {"ledger:payments:refund", "ledger:payments:void", "ledger:payments:void_manual"}
     assert names - unsafe <= (registry.READ_ONLY_ROUTE_NAMES)

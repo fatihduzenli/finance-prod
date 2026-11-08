@@ -7,13 +7,16 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
 
 import pytest
+from django.test import override_settings
 
 from accounts.roles import Role
 from ledger.services import grid, receivables
+from ledger.views.reports import TOO_SLOW
 from tests.fixtures.baseline_aug_2026 import (
     AS_OF,
     COLLECTED_COUNT,
@@ -36,9 +39,16 @@ D = Decimal
 
 
 @pytest.fixture
-def baseline(monkeypatch: pytest.MonkeyPatch) -> Baseline:
+def baseline(monkeypatch: pytest.MonkeyPatch) -> Iterator[Baseline]:
     monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: AS_OF)
-    return build_baseline()
+    # The page tests below render the dashboard, the grid and the arrears list inside the
+    # reports' statement timeout (PLAN-010c D11). On a stalled CI runner PostgreSQL cancelled
+    # a statement at the 15-second default and the dashboard answered with its sentence instead
+    # of the figures (main run of 2026-11-06, c86450c). The timeout has its own tests in
+    # test_report_timeout.py; here it is the configured maximum, so the runner's speed never
+    # decides these figures.
+    with override_settings(REPORT_STATEMENT_TIMEOUT_MS=120_000):
+        yield build_baseline()
 
 
 def test_the_amounts_follow_the_rule_and_are_not_uniform() -> None:
@@ -103,6 +113,7 @@ def test_the_dashboard_figures(baseline: Baseline) -> None:
     assert data.paid_this_month == COLLECTED_TOTAL
     client, _ = client_for(Role.VIEWER)
     html = client.get("/").content.decode()
+    assert TOO_SLOW not in html
     assert "$1,466,000.00" in html and "$228,116.93" in html
 
 

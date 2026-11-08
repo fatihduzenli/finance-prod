@@ -54,10 +54,12 @@ from django.db.models import CharField, Exists, F, OuterRef, Q, QuerySet, Sum
 from django.db.models.functions import Cast, Coalesce
 
 from ledger.models import (
+    NOT_BILLED_RENT,
     ZERO,
     ChargeNote,
     DepositResolution,
     DepositResolutionKind,
+    InstallmentOrigin,
     InvoiceLineItem,
     Lease,
     OneOffChargeStatus,
@@ -66,7 +68,6 @@ from ledger.models import (
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
-    RentChargeStatus,
     Store,
 )
 from ledger.services import installments, search
@@ -162,6 +163,9 @@ class LedgerRow:
     #: The provider's transaction ID, masked; empty when there is none.
     transaction: str
     has_note: bool
+    #: PLAN-015c: whether the row carries its entry's "Receipt PDF" (the first row of the
+    #: entry in the list, ``ledger.services.pdf.receipt.first_of_entries``).
+    has_receipt: bool = False
 
 
 def _date(value: str | None) -> date | None:
@@ -378,7 +382,7 @@ def invoice_line_parts(payments: QuerySet[Payment]) -> dict[uuid.UUID, list[Line
         InvoiceLineItem.objects.filter(
             invoice__one_off_charge__in=charges, rent_charge__isnull=False
         )
-        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
+        .exclude(rent_charge__status__in=NOT_BILLED_RENT)
         .values(
             "rent_charge",
             "position",
@@ -435,6 +439,15 @@ def invoice_line_parts(payments: QuerySet[Payment]) -> dict[uuid.UUID, list[Line
     return parts
 
 
+def deposit_installment() -> Q:
+    """A payment (or its refund) on an installment of a deposit plan (PLAN-015d: a deposit
+    collected by installments): money held, as a payment on the deposit itself is."""
+    return Q(
+        one_off_charge__plan__origin=InstallmentOrigin.DEPOSIT,
+        one_off_charge__plan__one_off_charge__fee_type__refundable=True,
+    )
+
+
 def totals(rows: QuerySet[Payment]) -> Totals:
     """Settled (collected), pending, returned and refunded totals, kept apart, and the
     deposits held.
@@ -445,9 +458,14 @@ def totals(rows: QuerySet[Payment]) -> Totals:
     released (:func:`deposits_released`), whatever the resolution's date. A settled
     payment on a multi-line invoice counts by the lines it paid
     (:func:`invoice_line_parts`): its part on a deposit line is held, the rest collected
-    (refunded, for a refund).
+    (refunded, for a refund). A payment on an installment of a deposit plan is a deposit
+    row (:func:`deposit_installment`), held as the P&L footer holds it.
     """
-    deposit = Q(one_off_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
+    deposit = (
+        Q(one_off_charge__fee_type__refundable=True)
+        | Q(kind=PaymentKind.REFUND_DEPOSIT)
+        | deposit_installment()
+    )
     split = on_multi_line_invoice()
     # A credit paid back at the lease end (PLAN-012d D6b) is money held going out: in none
     # of the four.
@@ -485,6 +503,12 @@ def totals(rows: QuerySet[Payment]) -> Totals:
     released = deposits_released(
         DepositResolution.objects.filter(
             Q(setup_charge__in=rows.filter(held_in).order_by().values("one_off_charge_id"))
+            # A deposit collected by installments is resolved on the deposit, the plan's parent.
+            | Q(
+                setup_charge__in=rows.filter(held_in & deposit_installment())
+                .order_by()
+                .values("one_off_charge__plan__one_off_charge_id")
+            )
             | Q(setup_charge__in=held_charges)
         )
     )
@@ -533,8 +557,11 @@ def _transactions(payment_ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, str]:
 
 def rows_for(payments: Iterable[Payment]) -> list[LedgerRow]:
     """What the ledger shows of each payment (one query for the transaction IDs)."""
+    from ledger.services.pdf.receipt import first_of_entries
+
     items = list(payments)
     refs = _transactions(item.pk for item in items)
+    with_link = first_of_entries(items)
     result = []
     for item in items:
         lease = charge_lease(item)
@@ -551,6 +578,7 @@ def rows_for(payments: Iterable[Payment]) -> list[LedgerRow]:
                 store=lease.store if lease is not None else None,
                 transaction=mask_identifier(ref) if ref else "",
                 has_note=bool(getattr(item, "has_note", False)),
+                has_receipt=item.pk in with_link,
             )
         )
     return result

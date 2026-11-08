@@ -359,8 +359,9 @@ def headings(body: str) -> list[str]:
         text(found)
         for found in re.findall(
             r'<(?:section|fieldset)\b[^>]*class="card form-card[^"]*"[^>]*>'
-            # PLAN-014b item 1: a numbered card's head (its number, then its title).
-            r'\s*(?:<div class="step-head"><span class="step-number"[^>]*>\d</span>'
+            # PLAN-014b item 1: a numbered card's head (its number, then its title); PLAN-015a:
+            # Edit lease's cards have the same head without the number.
+            r'\s*(?:<div class="step-head">(?:<span class="step-number"[^>]*>\d</span>)?'
             r'<div class="step-title">)?'
             r'<(?:h2|legend)(?: id="[^"]*")?>(.*?)</',
             form,
@@ -388,7 +389,13 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
             ["Operator", "Terms", "Collection", "Billing details", "Move-in charges", "Documents"],
             "save-lease",
         ),
-        (reverse("ledger:leases:edit", kwargs={"pk": lease.pk}), ["Lease", "Debits"], "save-lease"),
+        # Re-pinned (Opus, PLAN-015a): Edit lease's four cards in the New lease family; PLAN-015d
+        # §3 (2): the Free rent card after Rent.
+        (
+            reverse("ledger:leases:edit", kwargs={"pk": lease.pk}),
+            ["Lease", "Rent", "Free rent", "Collection", "Billing details"],
+            "save-lease",
+        ),
         (
             reverse("ledger:stores:record_payment", kwargs={"pk": lease.store_id}),
             ["Payment", "Allocation"],
@@ -418,9 +425,9 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
         assert summary in form, path  # the button submits its form
 
 
-def test_the_lease_form_keeps_its_fields_in_lease_and_debits() -> None:
-    # Re-pinned (Opus, PLAN-014b item 1): New lease's fields in its numbered cards (no Status);
-    # the Edit lease form keeps Lease and Debits.
+def test_the_lease_forms_keep_their_fields_in_their_cards() -> None:
+    # Re-pinned (Opus, PLAN-014b item 1): New lease's fields in its numbered cards (no Status).
+    # Re-pinned (Opus, PLAN-015a): Edit lease's fields in its four cards, below.
     body = get(Role.ADMIN, reverse("ledger:leases:create"))
     cards = {
         name: element(
@@ -438,6 +445,30 @@ def test_the_lease_form_keeps_its_fields_in_lease_and_debits() -> None:
     assert 'id="setup-checklist"' in cards["setup-card"]
     summary = summary_of(body)
     assert 'id="setup-total"' in summary and 'id="summary-total"' in summary
+
+    lease = a_world()
+    body = get(Role.ADMIN, reverse("ledger:leases:edit", kwargs={"pk": lease.pk}))
+    edit = {
+        name: element(
+            body, f'<section class="card form-card edit-lease-card" id="{name}"', "section"
+        )
+        for name in ("lease-card", "rent-card", "collection-card", "billing-card")
+    }
+    # The lease's identity is text, never a field.
+    for name in ("store", "operator", "started_on", "collection_status"):
+        assert f'name="{name}"' not in body, name
+    assert "Fatih Co" in edit["lease-card"] and "Jan 13, 2026" in edit["lease-card"]
+    assert 'id="transfer-lease"' in edit["lease-card"] and 'id="end-lease"' in edit["lease-card"]
+    for name in ("rent", "rent_effective_from", "prorate_first_month"):
+        assert f'name="{name}"' in edit["rent-card"], name
+    assert 'id="change-rent"' in edit["rent-card"] and 'id="rent-history"' in edit["rent-card"]
+    for name in ("debit_day", "second_debit_day", "payment_channel"):
+        assert f'name="{name}"' in edit["collection-card"], name
+    assert 'id="twice-monthly-field"' in edit["collection-card"]
+    assert "<input" not in edit["billing-card"] and 'id="edit-billing"' in edit["billing-card"]
+    summary = summary_of(body)
+    assert 'id="changes-list"' in summary and 'id="cancel-lease"' in summary
+    assert "Change a field above to see it here." in summary
 
 
 def test_the_payment_form_has_the_allocation_in_lines_style_and_the_unallocated_line_aside() -> (

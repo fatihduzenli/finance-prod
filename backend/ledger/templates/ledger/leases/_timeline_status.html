@@ -1,0 +1,7 @@
+{% load components dates people %}{% comment %}One status change of a lease of the store on the Notes & follow-ups list (docs/qa/15/PLAN-015b-lease-status.md §3 B): the round "S" (amber for a pause), the badge of the status it left the lease in, the words ("Collection paused — <reason>", "Collection resumed", "Lease activated (start date)" or "(by staff)"), the staff member and the time. ``row``: a ledger.views.contact_log.StatusRow.{% endcomment %}{% with change=row.change words=row.words %}<li class="contact-entry status-change" id="status-{{ change.pk }}">
+    {% if words.tone == "pending" %}{% avatar "S" "pending" %}{% else %}{% avatar "S" "neutral" %}{% endif %}
+    <div class="contact-body">
+      <p class="contact-text">{% status_badge words.label words.tone %} {{ words.text }}</p>
+      <p class="contact-meta">{{ change.actor|staff|default:"The daily job" }} · {{ change.at|moment }}</p>
+    </div>
+  </li>{% endwith %}

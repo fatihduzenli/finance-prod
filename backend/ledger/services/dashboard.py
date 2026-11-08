@@ -30,6 +30,7 @@ from django.urls import reverse
 from finance.dates import day_short_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     ContactEntry,
     ContactKind,
@@ -45,7 +46,6 @@ from ledger.models import (
     PaymentKind,
     PaymentStatus,
     RentCharge,
-    RentChargeStatus,
     Store,
 )
 from ledger.services import calendar, pnl, receivables, rent_run, stores
@@ -463,7 +463,7 @@ def _debit_amounts(debits: Sequence[calendar.CalendarItem]) -> dict[str, Decimal
     found: dict[str, Decimal] = {}
     missing = {uid: key for uid, key in keys.items() if key not in charges}
     for uid, key in keys.items():
-        if key in charges and charges[key][0] != RentChargeStatus.WAIVED:
+        if key in charges and charges[key][0] not in NOT_BILLED_RENT:
             found[uid] = Decimal(charges[key][1])
     if not missing:
         return found

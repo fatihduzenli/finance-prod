@@ -1227,3 +1227,29 @@ The specification (read 2026-11-01, Rule 7):
   real listing (TODO-VERIFY-074); until then many cards may keep "Bank ····4821".
 - A name the processor returns that looks like payment data, or is too long, is dropped to `""`;
   the PostgreSQL trigger refuses a card number in `lease_billing.bank_name` whatever the path.
+
+## ADR-0020 — Invoice and receipt e-mails sent by the app, behind a company setting
+
+**Status:** Accepted (the owner, 2026-11-07). **Plan:** `docs/qa/15/PLAN-015c-invoice-pdfs.md`.
+
+**Context.** Until now the processor e-mailed every invoice and every payment receipt, and the app
+deliberately sent neither (`docs/CLAUDE.md` §5). The owner wants one invoice PDF of the company's own
+design on every invoice that is saved, e-mailed or downloaded, and a matching receipt PDF, with the
+portal's bank-debit link in the e-mail. Mail is not yet live (the Gmail delegation is pending), so the
+processor must keep sending until it is.
+
+**Decision.** A company setting, "Invoice e-mails sent by", with the processor as the default and
+the company as the other value. While it is the processor, nothing changes. When the owner switches it
+to the company, the app queues the invoice e-mail itself through the messaging engine (held by the
+Outbox while mail is off) with the invoice PDF attached, the portal pay link and the processor's
+hosted pay link, and no longer asks the processor to send its own e-mail. Receipts: the processor's
+receipt stays for payments made through it; the app e-mails its receipt PDF only for payments recorded
+outside the processor. Receipt and invoice PDFs are downloadable on the portal (the operator's own
+stores only) and on the staff pages whatever the setting. PDFs are rendered on request from stored
+data and never stored (ADR-0008's streaming and audit rules apply to the downloads).
+
+**Consequences.** `docs/CLAUDE.md` §5 is amended. The messaging engine gains two kinds whose
+attachment is rendered at delivery. The company settings gain an address and a PNG copy of the logo
+the renderer can read. The PDF renderer is reportlab (as the lease-end statement, ADR-0012) with the
+Inter font embedded. A switch back to the processor stops the app's invoice e-mails at once; messages
+already queued are delivered or held as any other.

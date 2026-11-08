@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
@@ -47,12 +48,14 @@ from banking.models import ALIAS_MAX_LENGTH
 from finance.dates import day_text
 from ledger.forms import (
     SHOWN_WHEN,
+    ChangeStartDateForm,
     EnrolForm,
     LeaseBillingForm,
     LeaseCreateForm,
-    LeaseForm,
+    LeaseEditForm,
     LinkForm,
     OperatorCreateForm,
+    PauseCollectionForm,
 )
 from ledger.models import (
     ChargeNote,
@@ -67,17 +70,21 @@ from ledger.models import (
     NoteEntityType,
     Operator,
     PaymentChannel,
+    RentCharge,
     ScheduleState,
     Store,
     SyncStatus,
 )
 from ledger.services import (
     csv_export,
+    deposits,
     detail_cards,
+    free_rent,
     insurance,
     list_filters,
-    one_off_charges,
+    rent_run,
     search,
+    start_date,
     workspace,
 )
 from ledger.services import lease_end as lease_end_service
@@ -121,12 +128,6 @@ def _load(pk: str) -> Lease:
     except ValueError:
         raise Http404 from None
     return get_object_or_404(Lease.objects.select_related("store", "operator"), pk=key)
-
-
-def _initial(lease: Lease) -> dict[str, Any]:
-    """The latest rent row, which an edit compares against (it may start later)."""
-    rent = service.open_rent(lease)
-    return {"rent": rent.amount if rent is not None else None}
 
 
 # --- Read ---------------------------------------------------------------------------
@@ -277,12 +278,14 @@ def _detail_context(request: HttpRequest, lease: Lease) -> dict[str, Any]:
     linked_states = set()
     # PLAN-012b-b D13: autopay moved past a split month starts on its new first debit.
     moved = service.autopay_move(lease, now)
+    # PLAN-015d: the next run is never in a month the free period touches (as the schedule).
+    floor = service.first_debit_floor(lease, now)
     for row in live:
         ref = service.schedule_ref(row)
         if ref:
             linked_states.add(row.state)
         next_run = (
-            service.next_debit_at(row.debit_day, now)
+            service.next_debit_at(row.debit_day, floor)
             if row.state == ScheduleState.ACTIVE and row.debit_day is not None
             else None
         )
@@ -488,12 +491,14 @@ def lease_create(request: HttpRequest) -> HttpResponse:
             has_operator = form.cleaned_data.get("operator") is not None
             account = form.cleaned_data["account"] if has_operator else service.ACCOUNT_LATER
             try:
-                lease, created, charges = one_off_charges.create_lease_with_checklist(
+                timing = form.deposit_timing()
+                lease, created, charges = deposits.create_lease_with_deposit(
                     form.cleaned_data,
                     rent=form.cleaned_data["rent"],
                     creation_key=form.cleaned_data["creation_key"],
                     items=form.setup_items(),
                     actor=_actor(request),
+                    timing=timing,
                     billing=form.billing_values() if has_operator else None,
                     account=account,
                 )
@@ -512,7 +517,13 @@ def lease_create(request: HttpRequest) -> HttpResponse:
                 # Decision 6: the move-in invoice, a draft; the lease stays saved without one.
                 move_in = move_in_service.create_draft(
                     lease,
-                    charges,
+                    # PLAN-015d §3 (3): a deposit due on a date or in installments is not a
+                    # move-in line.
+                    [
+                        charge
+                        for charge in charges
+                        if timing.on_invoice or not deposits.is_deposit(charge)
+                    ],
                     creation_key=form.cleaned_data["creation_key"],
                     actor=_actor(request),
                 )
@@ -620,50 +631,99 @@ def _checklist_refusal(refusal: SetupRefused) -> str:
     return f"{name}: {refusal.message} The lease was not saved."
 
 
-def _edit_form(lease: Lease, data: Any, context: store_context.StoreContext | None) -> LeaseForm:
-    form = LeaseForm(data, instance=lease, initial=None if data is not None else _initial(lease))
-    if context is not None:
-        _lock_known(form, ("store", "operator"))
-    return form
+def _edit_form(lease: Lease, data: Any, *, billed: bool, today: date) -> LeaseEditForm:
+    """The Edit lease form (PLAN-015a) of ``lease``: "Prorate the first month" only while the
+    first month is not ``billed``; a rent change defaults to the next rent due date."""
+    open_row = service.open_rent(lease)
+    return LeaseEditForm(
+        data,
+        instance=lease,
+        first_month_billed=billed,
+        open_rent=open_row.amount if open_row is not None else None,
+        rent_default=service.next_rent_due(lease, today),
+    )
 
 
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def lease_edit(request: HttpRequest, pk: str) -> HttpResponse:
-    """Edit a lease; opened from the store page (``?store=&lease=``, PLAN-012d D2) the
-    store and operator are hidden and the save returns to the store page (D8)."""
+    """Edit a lease (PLAN-015a): the debit days, the channel, the proration until the first
+    month is billed, and a rent change from a date (empty: the next rent due date). The
+    store, operator, start and status are read-only here. Opened from the store page
+    (``?store=&lease=``, PLAN-012d D2) the save returns to the store page (D8)."""
     refused = _admin_only(request)
     if refused is not None:
         return refused
     lease = _load(pk)
     context = store_context.for_lease(request, lease)
     target = f"lease-edit:{lease.pk}"
+    today = timezone.localdate()
+    first_charge = service.first_month_charge(lease)
+    billed = first_charge is not None
     if request.method == "POST":
-        form = _edit_form(lease, request.POST, context)
+        form = _edit_form(lease, request.POST, billed=billed, today=today)
         if form.is_valid():
             try:
                 service.update_lease(
                     lease.pk,
                     form.cleaned_data,
                     rent=form.cleaned_data["rent"],
-                    rent_effective_from=form.cleaned_data.get("rent_effective_from"),
+                    rent_effective_from=form.cleaned_data["rent_effective_from"],
                     actor=_actor(request),
                 )
             except LeaseRefused as refusal:
                 form.add_error(refusal.field, str(refusal))
             else:
                 messages.success(request, "Lease saved.")
+                # PLAN-015d §3 (2): months already billed keep their free rent; say which.
+                kept = free_rent.kept(Lease.objects.get(pk=lease.pk))
+                if kept:
+                    messages.warning(request, free_rent.Recomputed((), kept).warning)
                 return redirect(_saved_url(request, lease, context))
         _hold(request, target, form)
         return redirect(request.get_full_path())
-    form = _held(request, target, lambda data: _edit_form(lease, data, context)) or _edit_form(
-        lease, None, context
-    )
+    form = _held(
+        request, target, lambda data: _edit_form(lease, data, billed=billed, today=today)
+    ) or _edit_form(lease, None, billed=billed, today=today)
     return render(
         request,
         "ledger/leases/form.html",
-        {"form": form, "lease": lease, "store_context": context},
+        {
+            "form": form,
+            "lease": lease,
+            "store_context": context,
+            **_edit_context(lease, today, first_charge),
+        },
     )
+
+
+def _edit_context(lease: Lease, today: date, first_charge: RentCharge | None) -> dict[str, Any]:
+    """The Edit lease page's read-only parts (PLAN-015a §3): the rent in effect (or the latest
+    row) and the next one, the history newest first, the rent change's default date, the
+    billing summary (the cached last four only, Rule 1), whether a schedule with a provider
+    reference would be marked Needs review (the rows ``update_lease`` flags), and the day the
+    first month was billed."""
+    now = service.current_rent(lease, today) or service.open_rent(lease)
+    upcoming = service.upcoming_rent(lease, today)
+    account = detail_cards.lease_account(lease)
+    return {
+        "rent_now": now,
+        "rent_next": upcoming if upcoming is not None and upcoming != now else None,
+        "rent_history": list(lease.rent_history.order_by("-effective_from")),
+        "rent_default_date": service.next_rent_due(lease, today),
+        "billing_summary": [part for part in (account.company, account.email) if part]
+        + [account.bank],
+        "has_live_schedule": any(
+            not row.needs_review and service.schedule_ref(row)
+            for row in service.live_schedules(lease)
+        ),
+        "first_month_billed": first_charge is not None,
+        "first_month_billed_on": first_charge.created_at if first_charge else None,
+        "can_change_holder": lease.ended_on is None
+        and lease.collection_status != CollectionStatus.ENDED,
+        # PLAN-015d: the free rent in force ("30 days, Dec 10 – Jan 8"), or "".
+        "free_rent_text": free_rent.card_text(lease),
+    }
 
 
 @role_required
@@ -1155,3 +1215,258 @@ def lease_insurance_bill(request: HttpRequest, pk: str) -> HttpResponse:
         outcome = insurance.bill_now(lease, timezone.localdate(), actor=_actor(request))
         (messages.success if outcome.ok else messages.error)(request, outcome.message)
     return redirect("ledger:stores:detail", pk=lease.store_id)
+
+
+# --- Pause / Resume collection and Activate now (PLAN-015b) ------------------------------
+
+COLLECTION_PAUSED = "Collection paused."
+COLLECTION_PAUSED_AUTOPAY = "Collection paused. Autopay is being paused."
+COLLECTION_RESUMED = "Collection resumed."
+COLLECTION_RESUMED_AUTOPAY = "Collection resumed. Autopay is being resumed."
+LEASE_ACTIVATED = "Lease activated."
+#: The Resume dialog's first line (PLAN-015b §9.2).
+RESUME_BILLS = "Resuming will bill {count} paused {months}: {amount}."
+RESUME_BILLS_NOTHING = "Resuming will bill nothing."
+
+
+def _store_dialog(request: HttpRequest, lease: Lease, extra: dict[str, Any]) -> dict[str, Any]:
+    """The store page's context with a dialog's own names (``extra``): the dialog opens over
+    the lease's store page, as Stop plan does (PLAN-012f-b E-4)."""
+    from ledger.views.stores import _detail_context as store_page  # stores imports this module
+
+    return {**store_page(request, lease.store), **extra, "status_lease": lease}
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_pause_collection(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:pause_collection`` (admin; PLAN-015b §3 B, §9.3): GET is the dialog over
+    the store page (what will happen, the required reason); POST pauses collection
+    (:func:`ledger.services.leases.pause_collection`) and, when the lease's autopay was on,
+    queues its pause (``autopay_pause``, the worker's job; the view never calls the provider).
+    A form with errors or a refusal is held for the dialog's next GET (a reason holding a card
+    or account number is dropped, never shown again: :func:`ledger.views.operators._hold`);
+    done, it returns to the store page."""
+    refused = _admin_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    target = f"lease-pause-collection:{lease.pk}"
+    if request.method == "POST":
+        form = PauseCollectionForm(request.POST)
+        if form.is_valid():
+            try:
+                outcome = service.pause_collection(
+                    lease.pk, reason=form.cleaned_data["reason"], actor=_actor(request)
+                )
+            except LeaseRefused as error:
+                form.add_error(error.field if error.field in form.fields else None, str(error))
+            else:
+                if outcome.autopay_paused:
+                    # PLAN-015b §9.5: the job does nothing if collection is resumed first.
+                    submit(
+                        request,
+                        JobKind.AUTOPAY_PAUSE,
+                        lease,
+                        {service.EXPECTED_STATUS_PARAM: CollectionStatus.PAUSED.value},
+                    )
+                    messages.success(request, COLLECTION_PAUSED_AUTOPAY)
+                else:
+                    messages.success(request, COLLECTION_PAUSED)
+                return redirect("ledger:stores:detail", pk=lease.store_id)
+        _hold(request, target, form)
+        return redirect("ledger:leases:pause_collection", pk=lease.pk)
+    form = _held(request, target, PauseCollectionForm) or PauseCollectionForm()
+    refusal = "" if lease.collection_status == CollectionStatus.ACTIVE else service.PAUSE_NOT_ACTIVE
+    return render(
+        request,
+        "ledger/leases/pause_collection.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "pause_form": form,
+                "pause_refusal": refusal,
+                "pause_autopay": service.autopay_on(lease),
+            },
+        ),
+    )
+
+
+def resume_bills(lease: Lease, today: date) -> str:
+    """The Resume dialog's first line (PLAN-015b §9.2): what resuming ``lease`` on ``today``
+    bills, from the rent run's preview (:func:`ledger.services.rent_run.months_resume_would_create`;
+    a month is counted once when debited twice)."""
+    planned = rent_run.months_resume_would_create(lease, today)
+    if not planned:
+        return RESUME_BILLS_NOTHING
+    count = len({plan.period_month for plan in planned})
+    return RESUME_BILLS.format(
+        count=count,
+        months="month" if count == 1 else "months",
+        amount=format_amount(sum((plan.amount for plan in planned), Decimal("0.00"))),
+    )
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_resume_collection(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:resume_collection`` (admin; PLAN-015b §3 B, §9.2, §9.3): GET is the Resume
+    dialog over the store page, its first line what resuming bills (:func:`resume_bills`);
+    POST resumes collection (:func:`ledger.services.leases.resume_collection`, which charges
+    those months) and, when the pause paused autopay, queues its resume (``autopay_resume``).
+    A refusal re-renders the dialog with its sentence; done, it returns to the store page."""
+    refused = _admin_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    today = timezone.localdate()
+    refusal = ""
+    if lease.collection_status != CollectionStatus.PAUSED or lease.ended_on is not None:
+        refusal = service.RESUME_NOT_PAUSED
+    elif blockers := service.activation_blockers(lease):
+        refusal = blockers[0]
+    if request.method == "POST" and not refusal:
+        try:
+            outcome = service.resume_collection(lease.pk, actor=_actor(request), today=today)
+        except LeaseRefused as error:
+            refusal = str(error)
+        else:
+            if outcome.autopay_resume:
+                # PLAN-015b §9.5: the job does nothing if collection is paused again first.
+                submit(
+                    request,
+                    JobKind.AUTOPAY_RESUME,
+                    lease,
+                    {service.EXPECTED_STATUS_PARAM: CollectionStatus.ACTIVE.value},
+                )
+                messages.success(request, COLLECTION_RESUMED_AUTOPAY)
+            else:
+                messages.success(request, COLLECTION_RESUMED)
+            return redirect("ledger:stores:detail", pk=lease.store_id)
+    return render(
+        request,
+        "ledger/leases/resume_collection.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "resume_refusal": refusal,
+                "resume_bills": "" if refusal else resume_bills(lease, today),
+            },
+        ),
+    )
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_activate(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:activate`` (billing; PLAN-015b §3 A): GET is the "Activate now" dialog
+    over the store page (the start date becomes today when it is later; the first month is
+    billed); POST activates the lease (:func:`ledger.services.leases.activate`). A refusal
+    re-renders the dialog with its sentence; done, it returns to the store page."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    today = timezone.localdate()
+    refusal = ""
+    if lease.collection_status != CollectionStatus.PROSPECTIVE or lease.ended_on is not None:
+        refusal = service.NOT_PROSPECTIVE
+    elif blockers := service.activation_blockers(lease):
+        refusal = blockers[0]
+    if request.method == "POST" and not refusal:
+        try:
+            service.activate(lease.pk, actor=_actor(request), today=today)
+        except LeaseRefused as error:
+            refusal = str(error)
+        else:
+            messages.success(request, LEASE_ACTIVATED)
+            return redirect("ledger:stores:detail", pk=lease.store_id)
+    return render(
+        request,
+        "ledger/leases/activate.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "activate_refusal": refusal,
+                "activate_today": today,
+                "activate_moves_start": lease.started_on is None or lease.started_on > today,
+            },
+        ),
+    )
+
+
+#: PLAN-015d §3 (1): Change start date.
+START_CHANGED = "Start date changed to {date}."
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_change_start(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:change_start`` (PLAN-015d §3 (1), §9.1): billing on a prospective lease,
+    admin on an active one. GET is the dialog over the store page: the new date (``?date=``
+    re-renders it with that date's effects, from :func:`ledger.services.start_date.preview`,
+    no script needed), the reason, the money's choice when rent paid moves, the deposit's
+    tick and the extra days' confirmation; POST applies it
+    (:func:`ledger.services.start_date.apply`, which queues the provider's work as jobs). A
+    refusal re-renders the dialog with its sentence; done, it returns to the store page."""
+    lease = _load(pk)
+    needed = Role.ADMIN if lease.collection_status == CollectionStatus.ACTIVE else Role.BILLING
+    if not meets(_role(request), needed):
+        return forbidden(request)
+    today = timezone.localdate()
+    refusal = "" if workspace.changeable_start(lease, today) else start_date.NOT_CHANGEABLE
+    form = ChangeStartDateForm(request.POST if request.method == "POST" else None)
+    wanted: date | None = None
+    if request.method == "POST":
+        valid = form.is_valid()
+        wanted = form.cleaned_data.get("new_start")
+        if valid and wanted is not None:
+            if not refusal:
+                try:
+                    start_date.apply_change(
+                        lease.pk,
+                        wanted,
+                        reason=form.cleaned_data["reason"],
+                        choice=form.cleaned_data["choice"] or None,
+                        move_deposit=form.cleaned_data["move_deposit"],
+                        actor=_actor(request),
+                        today=today,
+                        confirmed=form.cleaned_data["confirm"],
+                    )
+                except start_date.StartDateRefused as error:
+                    form.add_error(
+                        error.field if error.field in form.fields else None, error.message
+                    )
+                else:
+                    messages.success(request, START_CHANGED.format(date=day_text(wanted)))
+                    return redirect("ledger:stores:detail", pk=lease.store_id)
+    else:
+        raw = request.GET.get("date", "")
+        try:
+            wanted = date.fromisoformat(raw) if raw else None
+        except ValueError:
+            wanted = None
+        if wanted is not None:
+            form = ChangeStartDateForm(initial={"new_start": wanted})
+    change = (
+        start_date.preview(lease, wanted, today=today)
+        if wanted is not None and not refusal
+        else None
+    )
+    return render(
+        request,
+        "ledger/leases/change_start.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "start_form": form,
+                "start_refusal": refusal,
+                "start_change": change,
+                "start_today": today,
+            },
+        ),
+    )

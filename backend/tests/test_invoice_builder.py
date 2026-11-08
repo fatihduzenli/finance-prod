@@ -32,6 +32,7 @@ from ledger.models import (
     NSF_FEE_FIRST,
     AuditLog,
     CollectionMethod,
+    CompanySettings,
     FeeType,
     Invoice,
     InvoiceDraft,
@@ -1035,6 +1036,8 @@ def test_a_viewer_cannot_send_and_billing_cannot_charge_now(
 
 
 def test_the_preview_and_the_print_view_render_for_a_viewer(fake: FakeProvider) -> None:
+    # PLAN-015c, the owner's decision 4: the company is the company settings' name.
+    CompanySettings.objects.filter(pk=CompanySettings.current().pk).update(name="Acme Storage Co")
     operator, lease = a_world(fake)
     draft = a_draft(operator, lease, [line("Poster", "33.33", quantity="3")])
     viewer, _ = client_for(Role.VIEWER)
@@ -1045,7 +1048,7 @@ def test_the_preview_and_the_print_view_render_for_a_viewer(fake: FakeProvider) 
     billing_email = LeaseBilling.objects.get(lease=lease).email
     assert billing_email
     for text in (preview.content.decode(), printed.content.decode()):
-        assert draft.number in text and settings.COMPANY_NAME in text
+        assert draft.number in text and "Acme Storage Co" in text
         assert operator.display_name in text and lease.store.external_label in text
         assert f'<span id="bill-to-name">{operator.display_name}</span>' in text
         assert f'<span id="bill-to-email">{billing_email}</span>' in text

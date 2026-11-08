@@ -44,7 +44,7 @@ from ledger.models import (
     OneOffChargeStatus,
     RetryState,
 )
-from ledger.services import messaging, reminders
+from ledger.services import messaging, receivables, reminders
 
 #: The page's window, in days from today (today included).
 DAYS = 30
@@ -320,10 +320,12 @@ def preview(today: date, days: int = DAYS) -> Preview:
     seen: set[tuple[object, ...]] = set()
     with transaction.atomic():
         grouper = _Grouper(today)
+        # The dated deposits do not depend on the day: read once for the whole window.
+        dated = receivables.dated_deposits()
         for offset in range(days):
             day = today + timedelta(days=offset)
             fresh: list[reminders.Planned] = []
-            for item in reminders.plan(day):
+            for item in reminders.plan(day, deposits=dated):
                 if item.key in seen:
                     continue
                 seen.add(item.key)

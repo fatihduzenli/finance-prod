@@ -70,6 +70,7 @@ from finance.templatetags.components import (
     badge_family,
 )
 from ledger.models import (
+    NOT_BILLED_RENT,
     ZERO,
     ContactEntry,
     ContactKind,
@@ -320,7 +321,7 @@ def _next_due(selected: Window, today: date) -> date | None:
     """The period's rent due day from ``today``, else its first (one query)."""
     found = (
         RentCharge.objects.filter(due_on__gte=selected.start, due_on__lte=selected.end)
-        .exclude(status=RentChargeStatus.WAIVED)
+        .exclude(status__in=NOT_BILLED_RENT)
         .aggregate(next=Min("due_on", filter=Q(due_on__gte=today)), first=Min("due_on"))
     )
     day = found["next"] or found["first"]

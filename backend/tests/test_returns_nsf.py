@@ -29,6 +29,7 @@ from ledger.models import (
     NSF_FEE_FIRST,
     AuditLog,
     CollectionMethod,
+    CollectionStatus,
     ContactKind,
     FeeType,
     Lease,
@@ -1065,3 +1066,28 @@ def test_migration_0063_activates_the_fee_and_reverses_only_without_its_rows() -
         executor = MigrationExecutor(connection)
         executor.loader.build_graph()
         executor.migrate(leaves)
+
+
+# --- PLAN-015b §3 B: a re-debit waits while the lease's collection is paused -----------------
+
+
+def test_a_paused_leases_re_debit_waits_and_is_scheduled_once_collection_resumes(
+    fake: FakeProvider,
+) -> None:
+    world = a_world(fake)
+    payment = returned(fake, "R01")
+    redebit = redebit_of(payment)
+    Lease.objects.filter(pk=world.lease.pk).update(collection_status=CollectionStatus.PAUSED)
+    # Neither on its eve nor after its day: no schedule, no re-dating; the retry waits.
+    assert nsf.create_due_redebits(date(2026, 11, 10)) == 0
+    assert nsf.create_due_redebits(LATE) == 0
+    redebit.refresh_from_db()
+    assert (redebit.retry_state, redebit.retry_date) == (RetryState.AUTO_PENDING, RETRY)
+    assert not Job.objects.filter(kind=JobKind.SCHEDULE_CREATE).exists()
+    assert not AuditLog.objects.filter(action=nsf.RESCHEDULED_ACTION).exists()
+    Lease.objects.filter(pk=world.lease.pk).update(collection_status=CollectionStatus.ACTIVE)
+    assert nsf.create_due_redebits(LATE) == 1
+    redebit.refresh_from_db()
+    assert (redebit.retry_state, redebit.retry_date) == (RetryState.SCHEDULED, REDATED)
+    [job] = Job.objects.filter(kind=JobKind.SCHEDULE_CREATE)
+    assert job.entity_id == redebit.pk

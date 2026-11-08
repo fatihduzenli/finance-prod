@@ -18,7 +18,10 @@ with no rent in force on the day gets no charge from the rent run and no message
 
 **Which charges.** The open balances (:func:`ledger.services.receivables.open_balances`):
 rent, insurance and one-off charges with something owed, an installment plan's rows each on
-its own due date (its parent is not open while the plan is live), deposits never. A charge
+its own due date (its parent is not open while the plan is live), a deposit with an invoice
+never (it rides the invoice) but a deposit due on a date by that date
+(:func:`ledger.services.receivables.dated_deposits`, PLAN-015d §3 (3)), and a deposit plan's
+installments each on its own date, as any plan's. A charge
 whose status closes it to messages (rent ``pending``, ``paid`` or ``waived``; one-off
 ``paid``, ``waived`` or ``voided``, :data:`ledger.services.messaging.CLOSED_RENT` and
 ``CLOSED_ONE_OFF``) gets nothing.
@@ -47,6 +50,11 @@ on no store of the same operator, pauses B to E (:data:`PAUSED_BY_PROMISE`) for 
 of that lease and for its month's B; A still goes, since the debit will happen anyway. A
 promise past its date is broken and pauses nothing: the rules resume from the next rule day,
 without catching up the days paused.
+
+**Collection paused** (PLAN-015b §3 B). A lease whose collection is paused gets no A or B for
+its months (only active leases are listed) and no B to E for the charges it bills (skipped,
+"collection is paused"); a message queued before the pause is suppressed at the send
+(``LeasePaused``). Once collection resumes the rules go again from the next rule day.
 
 **Plan, then queue** (:func:`plan`, :func:`queue_due`). :func:`plan` reads what the day's rules
 would queue, writing nothing: per lease month and open charge its rule, template, lease (and
@@ -126,7 +134,7 @@ from ledger.models import (
     ScheduleKind,
     ScheduleState,
 )
-from ledger.services import contacts, leases, messaging, receivables, rent_run
+from ledger.services import contacts, free_rent, leases, messaging, receivables, rent_run
 from ledger.services.messaging import RentMonth
 
 logger = logging.getLogger(__name__)
@@ -215,7 +223,8 @@ def _closed(row: receivables.OpenBalance) -> bool:
 
 def on_autopay(rows: Iterable[receivables.OpenBalance]) -> set[uuid.UUID]:
     """The rent charges among ``rows`` that are collected by autopay: their lease has an
-    active rent collection schedule and no payment of the charge was returned. One query."""
+    active rent collection schedule, no payment of the charge was returned and its month is
+    one the schedule debits (not one the free period touches, PLAN-015d). One query."""
     ids = [row.charge_id for row in rows if row.kind == receivables.KIND_RENT]
     if not ids:
         return set()
@@ -223,12 +232,14 @@ def on_autopay(rows: Iterable[receivables.OpenBalance]) -> set[uuid.UUID]:
         lease=OuterRef("lease"), kind=ScheduleKind.RENT, state=ScheduleState.ACTIVE
     )
     returned = Payment.objects.filter(rent_charge=OuterRef("pk"), status=PaymentStatus.RETURNED)
-    return set(
-        RentCharge.objects.filter(pk__in=ids)
+    return {
+        charge.pk
+        for charge in RentCharge.objects.filter(pk__in=ids)
         .filter(Exists(schedule))
         .exclude(Exists(returned))
-        .values_list("pk", flat=True)
-    )
+        .select_related("lease")
+        if free_rent.debited_by_autopay(charge.lease, charge.period_month)
+    }
 
 
 def _d_occurrence(late: int) -> int | None:
@@ -318,14 +329,21 @@ def rent_months_due(today: date) -> list[tuple[RentMonth, Rule]]:
     schedules = _active_rent_schedules(lease.pk for lease in due)
     found: list[tuple[RentMonth, Rule]] = []
     for lease in due:
-        if lease.pk in schedules:
+        # PLAN-015d: a month the free period touches is not debited by autopay; its net is
+        # invoiced and announced by B, as for a lease not on autopay.
+        if lease.pk in schedules and free_rent.debited_by_autopay(lease, month):
             found.append(
                 (RentMonth(lease, month, debit, schedules[lease.pk]), _rule(MessageRule.A))
             )
             continue
         amount = rent_run.first_debit_amount(lease, month)
-        if amount is not None:
-            found.append((RentMonth(lease, month, debit, amount), _rule(MessageRule.B)))
+        if amount is None:
+            continue
+        concession, _words = free_rent.concession_for(lease, month, amount)
+        if amount - concession > 0:
+            found.append(
+                (RentMonth(lease, month, debit, amount - concession), _rule(MessageRule.B))
+            )
     return found
 
 
@@ -370,6 +388,8 @@ NO_LEASE = "no_lease"
 NO_TEMPLATE = "no_template"
 MONTH_SETTLED = "month_settled"
 ALREADY_QUEUED = "already_queued"
+#: PLAN-015b §3 B: the lease that bills the charge has its collection paused.
+COLLECTION_PAUSED = "collection_paused"
 OUTCOME_TEXT: Mapping[str, str] = {
     QUEUE: "Would queue",
     PAUSED: "Paused by a promise",
@@ -377,6 +397,7 @@ OUTCOME_TEXT: Mapping[str, str] = {
     NO_TEMPLATE: "Skipped: no active template",
     MONTH_SETTLED: "Skipped: the month is settled",
     ALREADY_QUEUED: "Skipped: already queued",
+    COLLECTION_PAUSED: "Skipped: collection is paused",
 }
 #: Added to "Would queue" when the lease has no billing e-mail: the send holds it.
 HELD_NO_EMAIL = "held: no billing e-mail"
@@ -497,12 +518,18 @@ def _billing_emails(items: list[Planned]) -> dict[uuid.UUID, str]:
     return dict(LeaseBilling.objects.filter(lease_id__in=ids).values_list("lease_id", "email"))
 
 
-def plan(today: date) -> list[Planned]:
+def plan(
+    today: date, *, deposits: Sequence[receivables.OpenBalance] | None = None
+) -> list[Planned]:
     """What the rules due ``today`` would queue (the module docstring), writing nothing: the
     lease months first (:func:`rent_months_due`), then the open charges, each with its
-    outcome. :func:`queue_due` queues exactly the items that :attr:`Planned.queues`."""
+    outcome. :func:`queue_due` queues exactly the items that :attr:`Planned.queues`.
+    ``deposits`` are the dated deposits (:func:`ledger.services.receivables.dated_deposits`,
+    which do not depend on the day), read here when not given: the Outbox preview reads them
+    once for all its days."""
     months = rent_months_due(today)
-    rows = receivables.open_balances(today)
+    dated = list(deposits) if deposits is not None else receivables.dated_deposits()
+    rows = receivables.open_balances(today) + dated
     autopay = on_autopay(rows)
     due = [
         (row, rule)
@@ -545,6 +572,8 @@ def plan(today: date) -> list[Planned]:
         template = templates.get(rule.template)
         if charge is None or billed is None or operator is None:
             outcome = NO_LEASE
+        elif billed.collection_status == CollectionStatus.PAUSED:
+            outcome = COLLECTION_PAUSED
         elif template is None:
             outcome = NO_TEMPLATE
         elif rule.code in PAUSED_BY_PROMISE and _paused(billed, operator.pk, pending):

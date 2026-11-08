@@ -47,7 +47,7 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
-from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Subquery, Sum
+from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Subquery, Sum
 from django.urls import reverse
 from django.utils import timezone
 
@@ -56,12 +56,14 @@ from finance.dates import day_text, month_text
 from ledger.models import (
     LIVE_AUTOPAY_STATES,
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     AutopayEndRule,
     AutopayPlan,
     AutopayPlanState,
     CollectionMethod,
     CollectionSchedule,
+    CollectionStatus,
     ContactEntry,
     DepositResolution,
     DepositResolutionKind,
@@ -92,7 +94,9 @@ from ledger.services import (
     audit,
     contacts,
     credits,
+    deposits,
     detail_cards,
+    free_rent,
     installments,
     lease_end,
     leases,
@@ -242,12 +246,36 @@ class Header:
     #: The Deposit row's colour (PLAN-014 I-b: ``paid``, ``partial`` or ``unpaid``, as the
     #: Sign fee row's), "" without a deposit.
     deposit_tone: str = ""
+    #: PLAN-015d: the lease's free rent, "30 days, Dec 10 – Jan 8", or "".
+    free_rent_text: str = ""
+    #: PLAN-015d: "Free rent: no autopay debit this month; the net is invoiced", or "".
+    free_rent_note: str = ""
     next_rent: date | None = None
     next_insurance: date | None = None
     #: The Sign fee and Insurance rows under Deposit (PLAN-014 B3), with a lease.
     collections: detail_cards.LeaseCollections | None = None
     #: The billing lines (PLAN-014 C3: company, e-mail, bank), with a lease.
     account: detail_cards.LeaseAccount | None = None
+    #: The LEASE card's Status row (PLAN-015b): its lease (the current one, else on the store
+    #: page the store's upcoming prospective lease, :func:`upcoming_lease`), that lease's
+    #: collection status, its badge's tone (:data:`STATUS_TONES`) and, while paused, the
+    #: pause in force (when, why).
+    status_lease: Lease | None = None
+    status_label: str = ""
+    status_tone: str = ""
+    pause: leases.CollectionPause | None = None
+    #: PLAN-015d: Change start date is offered for ``status_lease`` (:func:`changeable_start`).
+    start_changeable: bool = False
+
+
+#: The Status row's badge tone by collection status (PLAN-015b): Active paid, Paused pending,
+#: Prospective and Ended neutral.
+STATUS_TONES: dict[str, str] = {
+    CollectionStatus.ACTIVE: "paid",
+    CollectionStatus.PAUSED: "pending",
+    CollectionStatus.PROSPECTIVE: "neutral",
+    CollectionStatus.ENDED: "neutral",
+}
 
 
 def _autopay_state(schedules: list[CollectionSchedule]) -> str:
@@ -259,13 +287,20 @@ def _autopay_state(schedules: list[CollectionSchedule]) -> str:
 
 
 def _next_rent(
-    schedules: list[CollectionSchedule], moved: leases.AutopayMove | None, now: datetime
+    lease: Lease,
+    schedules: list[CollectionSchedule],
+    moved: leases.AutopayMove | None,
+    now: datetime,
 ) -> date | None:
+    """The next rent debit of the lease's active schedules: never in a month the free
+    period touches (PLAN-015d, :func:`ledger.services.leases.first_debit_floor`, the floor
+    the schedule's ``DTSTART`` was sent with)."""
     found: list[date] = []
+    floor = leases.first_debit_floor(lease, now)
     for row in schedules:
         if row.state != ScheduleState.ACTIVE or row.debit_day is None:
             continue
-        run = leases.next_debit_at(row.debit_day, now)
+        run = leases.next_debit_at(row.debit_day, floor)
         if moved is not None and str(row.pk) in moved.starts:
             run = moved.starts[str(row.pk)]
         found.append(run.date())
@@ -311,7 +346,7 @@ def _next_payment(
     now: datetime,
 ) -> NextPayment | None:
     found: list[NextPayment] = []
-    rent = _next_rent(schedules, moved, now)
+    rent = _next_rent(lease, schedules, moved, now)
     if rent is not None:
         found.append(NextPayment(rent, NEXT_RENT))
     one_off = _next_one_off(lease, today)
@@ -384,26 +419,26 @@ def _debit_day_text(lease: Lease) -> str:
 
 
 def _deposit_text(lease: Lease) -> tuple[str, str]:
-    """The lease's deposit (its refundable one-off charges, not waived or voided; one
-    query): ``$3,000.00 · not collected``, ``· collected``, or what was collected so far,
+    """The lease's deposit (its refundable one-off charges, not waived or voided): what was
+    collected of it (:func:`ledger.services.deposits.collected`, its deposit plan's
+    installments included): ``$3,000.00 · not collected``, ``· collected``, or what so far,
     with its state's code (:data:`ledger.services.detail_cards.COLLECTED`, ``PARTIAL`` or
     ``UNCOLLECTED``; PLAN-014 I-b: the LEASE card colours the row by it); ``("", "")``
     without a deposit."""
-    found = (
-        OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True)
-        .exclude(status__in=_CLOSED_ONE_OFF)
-        .aggregate(price=Sum("price"), paid=Sum("amount_paid"))
-    )
-    if found["price"] is None:
+    found = deposits.lease_deposits(lease)
+    if not found:
         return "", ""
-    price, paid = _money(found["price"]), _money(found["paid"])
+    price = sum((Decimal(charge.price) for charge in found), ZERO)
+    paid = sum((Decimal(charge.held) for charge in found), ZERO)  # type: ignore[attr-defined]
     if paid >= price:
         state, code = "collected", detail_cards.COLLECTED
     elif paid <= 0:
         state, code = "not collected", detail_cards.UNCOLLECTED
     else:
         state, code = f"{format_amount(paid)} collected", detail_cards.PARTIAL
-    return f"{format_amount(price)} · {state}", code
+    # PLAN-015d §3 (3): a deposit due on a date or in installments says so while owed.
+    timed = deposits.card_text(lease, found) if code != detail_cards.COLLECTED else ""
+    return timed or f"{format_amount(price)} · {state}", code
 
 
 def _next_debit_day(lease: Lease, today: date) -> date | None:
@@ -470,10 +505,53 @@ def _header(
         debit_day_text=_debit_day_text(lease),
         deposit_text=deposit_text,
         deposit_tone=detail_cards.TONES[deposit_code] if deposit_code else "",
-        next_rent=_next_rent(schedules, moved, now) or _next_debit_day(lease, today),
+        free_rent_text=free_rent.card_text(lease),
+        free_rent_note=free_rent.card_note(
+            lease, today, autopay=any(row.state == ScheduleState.ACTIVE for row in schedules)
+        ),
+        next_rent=_next_rent(lease, schedules, moved, now) or _next_debit_day(lease, today),
         next_insurance=_next_insurance(lease, today),
         collections=detail_cards.lease_collections(lease, today),
         account=detail_cards.lease_account(lease),
+        **_status_fields(lease),
+    )
+
+
+def _status_fields(lease: Lease) -> dict[str, Any]:
+    """The Status row's fields of :class:`Header` for ``lease`` (one query while paused)."""
+    return {
+        "status_lease": lease,
+        "status_label": lease.get_collection_status_display(),
+        "status_tone": STATUS_TONES.get(lease.collection_status, "neutral"),
+        "pause": leases.collection_pause(lease),
+        # PLAN-015d: whether the LEASE card offers Change start date (the role is the page's).
+        "start_changeable": changeable_start(lease, timezone.localdate()),
+    }
+
+
+def changeable_start(lease: Lease, today: date) -> bool:
+    """Whether a lease's start date may be changed (PLAN-015d §3 (1)): a prospective lease,
+    or an active one while ``today`` is in its start month; never an ended one."""
+    if lease.ended_on is not None or lease.started_on is None:
+        return False
+    if lease.collection_status == CollectionStatus.PROSPECTIVE:
+        return True
+    return lease.collection_status == CollectionStatus.ACTIVE and lease.started_on.replace(
+        day=1
+    ) == today.replace(day=1)
+
+
+def upcoming_lease(store: Store) -> Lease | None:
+    """The store's prospective lease not ended, the earliest start first (none last): what
+    the LEASE card's Status row shows, with "Activate now", while the store has no current
+    lease (PLAN-015b)."""
+    return (
+        Lease.objects.filter(
+            store=store, collection_status=CollectionStatus.PROSPECTIVE, ended_on__isnull=True
+        )
+        .select_related("store", "operator")
+        .order_by(F("started_on").asc(nulls_last=True), "created_at", "id")
+        .first()
     )
 
 
@@ -646,7 +724,7 @@ def _rent_rows(owner: Owner, chosen: str) -> QuerySet[RentCharge]:
         on_plan=_on_live_plan("rent_charge"), plan_origin=_live_plan_origin("rent_charge")
     )
     if chosen == FILTER_OPEN:
-        rows = rows.filter(balance__gt=0).exclude(status=RentChargeStatus.WAIVED)
+        rows = rows.filter(balance__gt=0).exclude(status__in=NOT_BILLED_RENT)
     elif chosen == FILTER_PAID:
         rows = rows.filter(status=RentChargeStatus.PAID)
     return rows.select_related("lease__operator", "lease__store").order_by("-due_on", "-seq", "id")
@@ -1218,8 +1296,11 @@ def schedules_tab(
             moves[row.lease_id] = leases.autopay_move(row.lease, now)
         moved = moves[row.lease_id]
         ref = leases.schedule_ref(row)
+        # PLAN-015d: a rent debit is never in a month the free period touches (the floor
+        # its DTSTART was sent with); an insurance schedule's is not rent's.
+        floor = leases.first_debit_floor(row.lease, now) if row.kind == ScheduleKind.RENT else now
         next_run = (
-            leases.next_debit_at(row.debit_day, now)
+            leases.next_debit_at(row.debit_day, floor)
             if row.state == ScheduleState.ACTIVE and row.debit_day is not None
             else None
         )
@@ -1372,6 +1453,8 @@ def store_workspace(
         balances.total,
         len(balances.owed),
     )
+    if header.lease is None and (upcoming := upcoming_lease(store)) is not None:
+        header = replace(header, **_status_fields(upcoming))
     return Workspace(
         store=store,
         header=header,

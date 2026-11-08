@@ -63,14 +63,25 @@ class LineItem:
     quantity: Decimal
     unit_price: Decimal
     details: str = ""
+    #: PLAN-015d §9.2: an amount taken off the line (a free-rent concession), at most the
+    #: line's own amount; the line's total is net of it.
+    discount: Decimal = Decimal(0)
 
     def __post_init__(self) -> None:
         require_money("quantity", self.quantity)
         require_money("unit_price", self.unit_price)
+        require_money("discount", self.discount)
+        if self.discount < 0 or self.discount > self.quantity * self.unit_price:
+            raise ValidationFailed("discount must lie between zero and the line's amount")
+
+    @property
+    def gross(self) -> Decimal:
+        """The line's amount before its discount."""
+        return self.quantity * self.unit_price
 
     @property
     def total(self) -> Decimal:
-        return self.quantity * self.unit_price
+        return self.gross - self.discount
 
 
 @dataclass(frozen=True, slots=True)

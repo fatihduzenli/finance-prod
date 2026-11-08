@@ -5,8 +5,10 @@ A template's subject and body may name exactly the placeholders of its code's li
 ``{pay_line}`` since 2026-11-02) for every message about a charge,
 :data:`FINAL_STATEMENT_FIELDS` for the template ``final_statement``, and for the two portal
 messages of PLAN-014 H2 :data:`PORTAL_INVITE_FIELDS` (``portal_invite``, whose own placeholder
-``{set_password_link}`` no other template may use) and :data:`PORTAL_RESET_FIELDS`
-(``portal_reset``, with ``{reset_link}``) (:func:`fields_for`); :data:`MERGE_FIELDS` is every
+``{set_password_link}`` no other template may use), :data:`PORTAL_RESET_FIELDS`
+(``portal_reset``, with ``{reset_link}``) and, for the two messages of PLAN-015c that carry a
+PDF, :data:`INVOICE_FIELDS` (``invoice_sent``) and :data:`RECEIPT_FIELDS` (``receipt``)
+(:func:`fields_for`); :data:`MERGE_FIELDS` is every
 placeholder of any list. ``{{`` and ``}}`` write a literal
 brace. Nothing else is accepted: no attribute or index access (``{operator_name.__dict__}``,
 ``{amount[0]}``), no conversion (``{amount!r}``), no format specification
@@ -78,13 +80,54 @@ PORTAL_RESET_FIELDS: tuple[str, ...] = (
     "reset_link",
 )
 PORTAL_CODES: frozenset[str] = frozenset({PORTAL_INVITE_CODE, PORTAL_RESET_CODE})
+#: PLAN-015c (ADR-0020): the invoice e-mailed by the company (``invoice_sent``) and the
+#: receipt of a payment recorded outside the processor (``receipt``), each with its PDF.
+#: ``{provider_pay_link}`` is the processor's hosted invoice page; a line naming it is left
+#: out when the invoice has none. ``{applied_to}`` is the invoice number the payment paid, or
+#: the charge's words ("Rent — November 2026") when it paid no invoice.
+INVOICE_CODE = "invoice_sent"
+RECEIPT_CODE = "receipt"
+INVOICE_FIELDS: tuple[str, ...] = (
+    "operator_name",
+    "store_number",
+    "store_name",
+    "invoice_number",
+    "amount",
+    "due_date",
+    "pay_link",
+    "provider_pay_link",
+    "support_email",
+    "company_name",
+)
+RECEIPT_FIELDS: tuple[str, ...] = (
+    "operator_name",
+    "store_number",
+    "store_name",
+    "amount",
+    "paid_on",
+    "applied_to",
+    "support_email",
+    "company_name",
+)
+PDF_CODES: frozenset[str] = frozenset({INVOICE_CODE, RECEIPT_CODE})
 _CODE_FIELDS: dict[str, tuple[str, ...]] = {
     FINAL_STATEMENT_CODE: FINAL_STATEMENT_FIELDS,
     PORTAL_INVITE_CODE: PORTAL_INVITE_FIELDS,
     PORTAL_RESET_CODE: PORTAL_RESET_FIELDS,
+    INVOICE_CODE: INVOICE_FIELDS,
+    RECEIPT_CODE: RECEIPT_FIELDS,
 }
 MERGE_FIELDS: tuple[str, ...] = tuple(
-    dict.fromkeys((*FIELDS, *FINAL_STATEMENT_FIELDS, *PORTAL_INVITE_FIELDS, *PORTAL_RESET_FIELDS))
+    dict.fromkeys(
+        (
+            *FIELDS,
+            *FINAL_STATEMENT_FIELDS,
+            *PORTAL_INVITE_FIELDS,
+            *PORTAL_RESET_FIELDS,
+            *INVOICE_FIELDS,
+            *RECEIPT_FIELDS,
+        )
+    )
 )
 _ALLOWED = frozenset(MERGE_FIELDS)
 #: The exact sets of values :func:`render` accepts.
@@ -93,6 +136,8 @@ _VALUE_SETS = (
     frozenset(FINAL_STATEMENT_FIELDS),
     frozenset(PORTAL_INVITE_FIELDS),
     frozenset(PORTAL_RESET_FIELDS),
+    frozenset(INVOICE_FIELDS),
+    frozenset(RECEIPT_FIELDS),
     _ALLOWED,
 )
 UNREADABLE = "Braces must pair: write {{ and }} for a literal brace."

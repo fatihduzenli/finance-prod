@@ -45,9 +45,12 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     # rent month (rules A and B before the month's charge).
     "ChargeEntityType": [
         "insurance_charge",
+        # PLAN-015c: an invoice and a payment, what the invoice and receipt e-mails are about.
+        "invoice",
         "lease_end",
         "lease_month",
         "one_off_charge",
+        "payment",
         # PLAN-014 H2: a portal account, what a portal message is about.
         "portal_user",
         "rent_charge",
@@ -88,21 +91,27 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     ],
     "DocumentSource": ["docusign", "upload"],
     "EnrolmentStatus": ["enrolled", "not_enrolled"],
+    # PLAN-015d (ledger 0073): where a lease's free-rent days start.
+    "FreeRentFrom": ["move_in", "next_month"],
     # "yearly" added by PLAN-012f-b Batch D (settlements).
     "InstallmentCadence": ["biweekly", "monthly", "weekly", "yearly"],
-    "InstallmentOrigin": ["settlement", "split"],  # PLAN-012f-b Batch D
+    # "deposit" added by ledger 0074 (PLAN-015d: the New lease page's deposit installments).
+    "InstallmentOrigin": ["deposit", "settlement", "split"],  # PLAN-012f-b Batch D
     "InstallmentCollection": ["autopay_due", "email", "manual"],
     # "paused" added by PLAN-012f-b Batch D (D-3).
     "InstallmentPlanStatus": ["active", "attention", "cancelled", "completed", "paused"],
     "InvoiceDraftStatus": ["cancelled", "draft", "sent"],
     "InvoiceLineKind": ["charge", "discount", "fee", "surcharge", "tax"],
+    # PLAN-015c (ADR-0020): who e-mails the invoices.
+    "InvoiceSender": ["company", "processor"],
     "InvoiceStatus": ["closed", "draft", "ready", "sent", "void"],
     "LeaseEndReason": ["moved_out", "other", "terminated", "transfer"],
     "LeaseEndStatus": ["confirmed", "draft"],
     "LeaseTransferStatus": ["confirmed", "draft"],
     "LegacyStatus": ["paid", "unpaid"],
     # PLAN-014 H2: the portal's invitation and reset ("portal").
-    "MessageKind": ["final_statement", "ladder", "portal"],
+    # "invoice" and "receipt" added by ledger 0071 (PLAN-015c).
+    "MessageKind": ["final_statement", "invoice", "ladder", "portal", "receipt"],
     # PLAN-014 D2: held in the Outbox; D3: the message's channel, rule and held reason.
     # "combined" and "waiting" added for one e-mail per lease and day (owner, 2026-11-02).
     "MessageStatus": [
@@ -124,9 +133,12 @@ FROZEN_CHOICES: dict[str, list[str]] = {
         "E",
         "F",
         "final_statement",
+        # PLAN-015c (ledger 0071): the invoice and receipt e-mails.
+        "invoice",
         "ladder",
         "manual",
         "portal",
+        "receipt",
     ],
     # "missing_value" and "settings_incomplete" added by ledger 0069 (owner, 2026-11-02).
     "HeldReason": [
@@ -169,7 +181,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "PaymentMethod": ["ach", "cash", "check", "credit", "other", "wire", "zelle"],
     "PaymentStatus": ["pending", "returned", "settled", "voided"],
     "RefundMethod": ["check", "wire", "zelle"],
-    "RentChargeStatus": ["due", "paid", "partial", "pending", "unpaid", "waived"],
+    # "void" added by ledger 0072 (PLAN-015d: a charge that never fell due).
+    "RentChargeStatus": ["due", "paid", "partial", "pending", "unpaid", "void", "waived"],
     "RentSource": ["sheet_current", "sheet_inferred", "staff"],
     "ResolutionKind": ["note", "rescheduled"],
     "RetryState": ["auto_pending", "done", "scheduled", "stopped"],
@@ -232,8 +245,13 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: portal's own web app manifest (portal:manifest, opening on /portal/), owner, 2026-11-05;
 #: 319 since the dashboard's "Download spreadsheet" (ledger:dashboard_export), PLAN-015 Batch 1;
 #: 320 since the New calendar entry dialog's link type-ahead (ledger:calendar:search), owner,
-#: 2026-11-06.
-FROZEN_ROUTES = (320, "56dde6ddaa674d1dc8ad54fcd6c28f4fecefc69b461d48e2fb3cec588f066489")
+#: 2026-11-06; 323 since the LEASE card's Pause / Resume collection and Activate now
+#: (ledger:leases:pause_collection, resume_collection and activate), PLAN-015b; 325 since the
+#: invoice PDF and the receipt PDF on the staff pages (ledger:invoices:pdf,
+#: ledger:payments:receipt), PLAN-015c; 327 since the portal's (portal:invoice_pdf,
+#: portal:receipt_pdf), PLAN-015c; 328 since the LEASE card's Change start date
+#: (ledger:leases:change_start), PLAN-015d.
+FROZEN_ROUTES = (328, "82a98b5db0a724d7e63af80760921656d2ab0586794b6771d35f26b3b8ecceaf")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

@@ -32,7 +32,16 @@ from django.test import Client, override_settings
 from django.utils import timezone
 
 from accounts.roles import Role
-from ledger.models import AuditLog, Invoice, Lease, Operator, RentCharge, SyncStatus
+from ledger.models import (
+    AuditLog,
+    CollectionStatus,
+    Invoice,
+    Lease,
+    Operator,
+    RentCharge,
+    ScheduleState,
+    SyncStatus,
+)
 from ledger.services import leases, refunds, rent_run
 from ledger.views.jobs import BUSY, REPLAY_REFUSED
 from ledger.views.leases import REFRESH_QUEUED
@@ -1831,3 +1840,104 @@ def test_an_update_that_succeeds_at_once_is_not_retried(tmp_path: Path) -> None:
         "az containerapp update --name worker-app --resource-group group "
         f"--image registry.azurecr.io/finance-web:{'0' * 40}"
     ]
+
+
+# --- PLAN-015b §9.5: a stale autopay pause / resume job does nothing -----------------------
+
+
+def collection_path(lease: Lease, action: str) -> str:
+    return f"/leases/{lease.pk}/{action}-collection/"
+
+
+def schedule_states(lease: Lease) -> set[str]:
+    return {row.state for row in leases.live_schedules(lease)}
+
+
+def schedule_updates(fake: FakeProvider) -> list[tuple[object, ...]]:
+    return [args for name, args in fake.calls if name == "update_scheduled_invoice"]
+
+
+def stale_rows(lease: Lease, action: str) -> list[AuditLog]:
+    return list(AuditLog.objects.filter(entity_id=str(lease.pk), action=action))
+
+
+def test_a_pause_job_overtaken_by_resume_collection_calls_nothing_and_is_audited(
+    fake: FakeProvider,
+) -> None:
+    lease, _ = enrolled(fake)
+    admin = client_for(Role.ADMIN, "jobs-stale-pause")[0]
+    admin.post(collection_path(lease, "pause"), {"reason": "Owner asked."})
+    [job] = Job.objects.filter(kind=JobKind.AUTOPAY_PAUSE)
+    assert job.params == {leases.EXPECTED_STATUS_PARAM: "paused"}
+    # Resumed before the worker ran the pause: the schedules are still active, so the resume
+    # queues nothing.
+    admin.post(collection_path(lease, "resume"))
+    assert not Job.objects.filter(kind=JobKind.AUTOPAY_RESUME).exists()
+    calls_before = len(fake.calls)
+    [ran] = run_queued_jobs()
+    assert (ran.pk, ran.status, ran.result) == (job.pk, JobStatus.DONE, leases.STALE_JOB)
+    assert schedule_updates(fake) == [] and len(fake.calls) == calls_before
+    assert schedule_states(lease) == {ScheduleState.ACTIVE}
+    [row] = stale_rows(lease, leases.AUTOPAY_PAUSE_STALE_ACTION)
+    assert row.before is not None and row.after is not None
+    assert row.before["collection_status"] == CollectionStatus.ACTIVE
+    assert (row.after["expected"], row.after["found"]) == ("paused", "active")
+    assert not stale_rows(lease, "lease.autopay_paused")
+
+
+def test_a_resume_job_overtaken_by_pause_collection_calls_nothing_and_is_audited(
+    fake: FakeProvider,
+) -> None:
+    lease, _ = enrolled(fake)
+    admin = client_for(Role.ADMIN, "jobs-stale-resume")[0]
+    admin.post(collection_path(lease, "pause"), {"reason": "Owner asked."})
+    # The pause job still matches the lease (paused): it pauses the schedules.
+    [paused] = run_queued_jobs()
+    assert paused.status == JobStatus.DONE and paused.result != leases.STALE_JOB
+    assert len(schedule_updates(fake)) == 1
+    assert schedule_states(lease) == {ScheduleState.PAUSED}
+    admin.post(collection_path(lease, "resume"))
+    [job] = Job.objects.filter(kind=JobKind.AUTOPAY_RESUME)
+    assert job.params == {leases.EXPECTED_STATUS_PARAM: "active"}
+    # Paused again before the worker ran the resume: the schedules are paused, so the pause
+    # queues nothing.
+    admin.post(collection_path(lease, "pause"), {"reason": "Owner asked again."})
+    assert Job.objects.filter(kind=JobKind.AUTOPAY_PAUSE).count() == 1
+    [ran] = run_queued_jobs()
+    assert (ran.pk, ran.status, ran.result) == (job.pk, JobStatus.DONE, leases.STALE_JOB)
+    assert len(schedule_updates(fake)) == 1
+    assert schedule_states(lease) == {ScheduleState.PAUSED}
+    [row] = stale_rows(lease, leases.AUTOPAY_RESUME_STALE_ACTION)
+    assert row.after is not None
+    assert (row.after["expected"], row.after["found"]) == ("active", "paused")
+    assert not stale_rows(lease, "lease.autopay_resumed")
+
+
+def test_a_pause_job_without_an_expectation_still_pauses(fake: FakeProvider) -> None:
+    # The admin autopay routes queue no expectation: the job runs whatever the status.
+    lease, _ = enrolled(fake)
+    Lease.objects.filter(pk=lease.pk).update(collection_status=CollectionStatus.PAUSED)
+    jobs.enqueue(JobKind.AUTOPAY_PAUSE, lease, None, None)
+    [ran] = run_queued_jobs()
+    assert ran.status == JobStatus.DONE and ran.result == "Autopay paused."
+    assert len(schedule_updates(fake)) == 1
+    assert schedule_states(lease) == {ScheduleState.PAUSED}
+    assert not stale_rows(lease, leases.AUTOPAY_PAUSE_STALE_ACTION)
+
+
+def test_a_resume_job_without_an_expectation_still_resumes(fake: FakeProvider) -> None:
+    lease, _ = enrolled(fake)
+    leases.pause_autopay(lease.pk, actor=None)
+    jobs.enqueue(JobKind.AUTOPAY_RESUME, lease, None, None)
+    [ran] = run_queued_jobs()
+    assert ran.status == JobStatus.DONE and ran.result != leases.STALE_JOB
+    assert len(schedule_updates(fake)) == 2
+    assert schedule_states(lease) == {ScheduleState.ACTIVE}
+    assert not stale_rows(lease, leases.AUTOPAY_RESUME_STALE_ACTION)
+
+
+def test_the_runner_reads_the_expectation_from_the_params() -> None:
+    assert runners._expected_status(Job(params={})) is None
+    assert runners._expected_status(Job(params={leases.EXPECTED_STATUS_PARAM: "paused"})) == (
+        "paused"
+    )

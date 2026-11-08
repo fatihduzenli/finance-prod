@@ -185,9 +185,10 @@ def template_id(code: str = "overdue_day5") -> str:
 def test_the_seven_templates_are_seeded_and_the_ladder_is_retired() -> None:
     active = {
         row.code: (row.name, row.internal)
-        # PLAN-014 H2's two portal templates are pinned in tests/test_portal.py.
+        # PLAN-014 H2's two portal templates are pinned in tests/test_portal.py; PLAN-015c's
+        # invoice and receipt templates in tests/test_plan015c_settings.py.
         for row in MessageTemplate.objects.filter(active=True).exclude(
-            code__in=("final_statement", "portal_invite", "portal_reset")
+            code__in=("final_statement", "portal_invite", "portal_reset", "invoice_sent", "receipt")
         )
     }
     assert active == {

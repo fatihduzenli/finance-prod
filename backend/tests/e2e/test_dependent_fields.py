@@ -91,7 +91,7 @@ def test_the_second_debit_day_follows_the_twice_monthly_tick(
     assert not second.is_visible() and second.is_disabled()
     tick.check()
     assert second.is_visible() and second.is_enabled()
-    second.fill("15")
+    second.select_option("15")  # Re-pinned (Opus, PLAN-015a): a select of the 1st to the 28th
     page.locator("#save-lease").click()
     page.wait_for_url(f"{live_server.url}/leases/{lease.pk}/")
     lease.refresh_from_db()

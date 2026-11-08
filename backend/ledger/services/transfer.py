@@ -315,7 +315,9 @@ def setup_types() -> list[FeeType]:
 
 
 def default_deposit(transfer: LeaseTransfer) -> Decimal | None:
-    """The catalogue's deposit price, else the outgoing lease's deposit price."""
+    """The catalogue's deposit price, else what was collected of the outgoing lease's
+    deposit (:func:`ledger.services.deposits.collected`, its deposit plan's installments
+    included: only the deposit actually collected moves, PLAN-015d)."""
     found = deposit_type()
     if found is not None and found.default_price is not None:
         return Decimal(found.default_price)
@@ -324,7 +326,7 @@ def default_deposit(transfer: LeaseTransfer) -> Decimal | None:
         .order_by("due_date", "created_at")
         .first()
     )
-    return Decimal(outgoing.price) if outgoing is not None else None
+    return deposits.collected(outgoing) if outgoing is not None else None
 
 
 def setup_lines(transfer: LeaseTransfer) -> list[SetupLine]:

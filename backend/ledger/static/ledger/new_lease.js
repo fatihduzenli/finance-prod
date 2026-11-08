@@ -16,7 +16,13 @@
 //   data-extra, hidden here; without the script every row shows).
 // - The Summary (aside#lease-summary): operator, start, rent, who collects ("Autopay · 1st"),
 //   the first month (prorated or the rent), the move-in charges (every priced row, the deposit
-//   included) and the first invoice's total.
+//   included) and the first invoice's total; its last line #summary-after reads "Starts Nov 15,
+//   2026, activated on that day." for a start after the aside's data-today (PLAN-015b §9.1:
+//   the lease saves prospective), else its data-default. The first month's free rent
+//   (#summary-free-rent, PLAN-015d: ledger/services/free_rent.first_month_concession) is the
+//   free days of the days the first month bills over those days times its amount, rounded half
+//   up to the cent, the whole amount when every billed day is free, none when the days start
+//   the month after; the total is net of it.
 (function () {
   "use strict";
   var form = document.getElementById("lease-form");
@@ -134,6 +140,7 @@
   }
 
   var start = byId("id_started_on");
+  var summary = byId("lease-summary");
   var rent = byId("id_rent");
   var prorate = byId("id_prorate_first_month");
   var line = byId("prorate-line");
@@ -141,6 +148,20 @@
   var deposit = mirror ? byId(mirror.getAttribute("for")) : null;
   var debitDay = byId("id_debit_day");
   var secondDay = byId("id_second_debit_day");
+  var freeDays = byId("id_free_rent_days");
+  var freeFrom = byId("id_free_rent_from");
+
+  function freeRent(first) {
+    if (first.amount === null || !freeDays || !freeFrom) { return 0; }
+    var days = /^\d+$/.test(freeDays.value.trim()) ? Number(freeDays.value.trim()) : 0;
+    var day = parseDay(start && start.value);
+    if (!day || days <= 0 || freeFrom.value === "next_month") { return 0; }
+    var billedFrom = prorate && prorate.checked && day.day > 1 ? day.day : 1;
+    var billed = day.last - billedFrom + 1;
+    var free = Math.min(day.day + days - 1, day.last) - day.day + 1;
+    if (free >= billed) { return first.amount; }
+    return prorated(first.amount, free, billed);
+  }
 
   function firstMonth() {
     var amount = cents(rent && rent.value);
@@ -155,11 +176,14 @@
       text: MONTHS[day.month - 1] + " " + span + ": " + used + " of " + day.last + " days = " + money(value)
     };
   }
+  // PLAN-015d: a deposit due on a date or in installments is not on the first invoice.
+  var depositWhen = byId("id_deposit_when");
   function moveIn() {
     var sum = 0;
     form.querySelectorAll("input.js-total").forEach(function (input) {
       var row = input.closest(".movein-row");
       if (input.disabled || (row && row.hidden)) { return; }
+      if (input === deposit && depositWhen && depositWhen.value && depositWhen.value !== "with_invoice") { return; }
       var value = cents(input.value);
       if (value !== null) { sum += value; }
     });
@@ -191,14 +215,25 @@
     setText("summary-operator", option ? option.textContent.trim() : NONE);
     var day = parseDay(start && start.value);
     setText("summary-starts", day ? MONTHS[day.month - 1] + " " + day.day + ", " + day.year : NONE);
+    var after = byId("summary-after");
+    if (after) {
+      var later = day && summary && start.value > summary.getAttribute("data-today");
+      after.textContent = later
+        ? "Starts " + MONTHS[day.month - 1] + " " + day.day + ", " + day.year + ", activated on that day."
+        : after.getAttribute("data-default");
+    }
     var monthly = cents(rent && rent.value);
     setText("summary-rent", monthly === null ? NONE : money(monthly));
     setText("summary-collected", collectedBy());
     setText("summary-first-month-label", first.text ? "First month (prorated)" : "First month");
     setText("summary-first-month", first.amount === null ? NONE : money(first.amount));
     var charges = moveIn();
+    var free = freeRent(first);
+    var freeRow = byId("summary-free-rent-row");
+    if (freeRow) { freeRow.hidden = free <= 0; freeRow.style.display = free > 0 ? "" : "none"; }
+    setText("summary-free-rent", free > 0 ? "-" + money(free) : "");
     setText("setup-total", money(charges));
-    setText("summary-total", first.amount === null ? NONE : money(first.amount + charges));
+    setText("summary-total", first.amount === null ? NONE : money(first.amount - free + charges));
   }
   form.addEventListener("input", update);
   form.addEventListener("change", update);

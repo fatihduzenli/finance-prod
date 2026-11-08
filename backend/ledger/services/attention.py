@@ -106,6 +106,7 @@ from accounts.display import staff_name
 from finance.dates import day_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     AuditLog,
     CollectionSchedule,
@@ -126,7 +127,6 @@ from ledger.models import (
     Payment,
     PaymentStatus,
     RentCharge,
-    RentChargeStatus,
     ScheduleState,
     Store,
     StoreCost,
@@ -599,9 +599,13 @@ def _split_charges_paid(operator: uuid.UUID | None) -> list[Item]:
     )
     rent = (
         InstallmentPlan.objects.filter(status__in=LIVE_PLAN_STATUSES, rent_charge__isnull=False)
-        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
+        .exclude(rent_charge__status__in=NOT_BILLED_RENT)
         .annotate(total=total)
-        .filter(total__gt=F("rent_charge__amount_due") - F("rent_charge__amount_paid"))
+        .filter(
+            total__gt=F("rent_charge__amount_due")
+            - F("rent_charge__concession")
+            - F("rent_charge__amount_paid")
+        )
         .select_related("rent_charge__lease__store")
     )
     if operator is not None:
@@ -647,7 +651,7 @@ def _split_item(
 ) -> tuple[datetime, uuid.UUID, Item]:
     """A ``split_charge_paid`` item with the plan's last change and key, to order by."""
     if isinstance(parent, RentCharge):
-        price = Decimal(parent.amount_due)
+        price = parent.net_due
     else:
         price = Decimal(parent.price)
     paid = Decimal(total) - (price - min(Decimal(parent.amount_paid), price))

@@ -101,13 +101,14 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Sum
+from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Sum
 from django.utils import timezone
 
 import payments
 from finance.dates import month_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     AuditLog,
     CollectionSchedule,
@@ -224,6 +225,7 @@ PAY_FUTURE = "The payment date cannot be in the future."
 PAY_NOTE_REQUIRED = "A note is required: say what was received."
 PAY_NOTE_PAYMENT_DATA = "This text may not contain card or account numbers."
 PAY_WAIVED = "This charge is waived. Nothing was recorded."
+PAY_VOID = "This charge is void: it never fell due. Nothing was recorded."
 PAY_NOTHING_DUE = "Nothing is due on this charge. Nothing was recorded."
 PAY_ALREADY = "This payment was already recorded. Nothing was changed."
 PAY_RECORDED = "Payment recorded."
@@ -734,6 +736,9 @@ def create_month(
         month = first_month(lease, period, rent.amount)
         amount = debit_amounts(month.amount, twice_monthly=len(days) == 2)[seq - 1]
         proration_text = month.text
+    from ledger.services import free_rent  # free_rent reads this module's amounts
+
+    concession, concession_text = free_rent.concession_for(lease, period, amount, seq=seq)
     with transaction.atomic():
         charge, made = RentCharge.objects.get_or_create(
             lease=lease,
@@ -742,8 +747,10 @@ def create_month(
             defaults={
                 "due_on": due_on,
                 "amount_due": amount,
-                "status": RentChargeStatus.DUE,
+                "status": free_rent.status_for(amount, concession),
                 "proration_text": proration_text or None,
+                "concession": concession,
+                "concession_text": concession_text,
             },
         )
         if made:
@@ -756,6 +763,119 @@ def create_month(
                 {**_charge(charge), **(context or {})},
             )
     return charge, made
+
+
+#: PLAN-015d §3 (1): a charge that never fell due (Change start date moved the start past it).
+VOIDED_ACTION = "rent_charge.voided"
+#: PLAN-015d §3 (1): the start month's charge re-priced for a new start date.
+REAMOUNTED_ACTION = "rent_charge.reamounted"
+VOID_HAS_MONEY = "This charge has money paid or pending on it, so it cannot be void."
+
+
+def can_void(charge: RentCharge) -> bool:
+    """Whether ``charge`` may become void: nothing paid and no payment pending or settled."""
+    return (
+        charge.status not in NOT_BILLED_RENT
+        and Decimal(charge.amount_paid) == 0
+        and not Payment.objects.filter(
+            rent_charge=charge,
+            is_refund=False,
+            status__in=[PaymentStatus.PENDING, PaymentStatus.SETTLED],
+        ).exists()
+    )
+
+
+def void_charge(charge: RentCharge, actor: User | None, context: dict[str, Any]) -> bool:
+    """Make ``charge`` void (PLAN-015d §3: never due; its balance is zero, it is not a bill)
+    under its row lock, audited :data:`VOIDED_ACTION` with ``context``; ``billed_by_invoice``
+    is kept as history. ``False``, nothing written, when it has money on it."""
+    with transaction.atomic():
+        locked = RentCharge.objects.select_for_update().get(pk=charge.pk)
+        if locked.status == RentChargeStatus.VOID:
+            return True
+        if not can_void(locked):
+            return False
+        before = _charge(locked)
+        locked.status = RentChargeStatus.VOID
+        locked.save(update_fields=["status", "updated_at"])
+        _audit(
+            actor, VOIDED_ACTION, ENTITY_CHARGE, locked.pk, before, {**_charge(locked), **context}
+        )
+    return True
+
+
+def reamount_start_month(
+    charge: RentCharge, actor: User | None, context: dict[str, Any]
+) -> RentCharge:
+    """Re-price the start month's ``charge`` for the lease's start date as it is now
+    (PLAN-015d §3 (1), §9.3): the due date (:func:`debit_date`), the amount
+    (:func:`first_month`, split as :func:`create_month` splits it), the proration text and the
+    free rent. The status follows what was paid (:func:`recompute_charge`). Audited
+    :data:`REAMOUNTED_ACTION` when anything changed. ``ValueError`` without a debit or rent."""
+    from ledger.services import free_rent  # free_rent reads this module's amounts
+
+    with transaction.atomic():
+        locked = RentCharge.objects.select_for_update().select_related("lease").get(pk=charge.pk)
+        lease = locked.lease
+        days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+        if not 1 <= locked.seq <= len(days):
+            raise ValueError(NO_SUCH_DEBIT)
+        due = debit_date(lease, locked.period_month, days[locked.seq - 1])
+        rent = rent_on(lease, due)
+        if rent is None:
+            raise ValueError(SKIP_NO_RENT)
+        month = first_month(lease, locked.period_month, rent.amount)
+        amount = debit_amounts(month.amount, twice_monthly=len(days) == 2)[locked.seq - 1]
+        concession, words = free_rent.concession_for(
+            lease, locked.period_month, amount, seq=locked.seq
+        )
+        before = _charge(locked)
+        changed = (
+            locked.due_on,
+            locked.amount_due,
+            locked.proration_text or "",
+            locked.concession,
+        ) != (
+            due,
+            amount,
+            month.text,
+            concession,
+        )
+        if not changed:
+            return locked
+        locked.due_on = due
+        locked.amount_due = amount
+        locked.proration_text = month.text or None
+        locked.concession = concession
+        locked.concession_text = words
+        if Decimal(locked.amount_paid) == 0 and locked.status in (
+            RentChargeStatus.DUE,
+            RentChargeStatus.PAID,
+            RentChargeStatus.UNPAID,
+        ):
+            locked.status = free_rent.status_for(amount, concession)
+        locked.save(
+            update_fields=[
+                "due_on",
+                "amount_due",
+                "proration_text",
+                "concession",
+                "concession_text",
+                "status",
+                "updated_at",
+            ]
+        )
+        if Decimal(locked.amount_paid) > 0:
+            recompute_charge(locked)
+        _audit(
+            actor,
+            REAMOUNTED_ACTION,
+            ENTITY_CHARGE,
+            locked.pk,
+            before,
+            {**_charge(locked), **context},
+        )
+    return locked
 
 
 def _months_back(period: date, months: int) -> date:
@@ -817,10 +937,26 @@ def months_catch_up_would_create(lease: Lease, day: date) -> list[Planned]:
     first month prorated. Months after the month of ``ended_on`` and months before
     :data:`CATCH_UP_MONTHS` are never looked at; a month with the debit's charge (paid,
     waived or not) is left as it is."""
+    if lease.collection_status != CollectionStatus.ACTIVE:
+        return []
+    return _missing_months(lease, day)
+
+
+def months_resume_would_create(lease: Lease, day: date) -> list[Planned]:
+    """The charges resuming the paused ``lease`` on ``day`` would create (PLAN-015b §9.2,
+    the Resume dialog's first line), without writing anything: the charges
+    :func:`months_catch_up_would_create` plans for it once it is active again, under the
+    same rules. Nothing for a lease that is not paused."""
+    if lease.collection_status != CollectionStatus.PAUSED:
+        return []
+    return _missing_months(lease, day)
+
+
+def _missing_months(lease: Lease, day: date) -> list[Planned]:
+    """:func:`months_catch_up_would_create` past its status check."""
     start = lease.started_on
     if (
-        lease.collection_status != CollectionStatus.ACTIVE
-        or lease.payment_channel == PaymentChannel.UNKNOWN
+        lease.payment_channel == PaymentChannel.UNKNOWN
         or lease.debit_day is None
         or start is None
         or start > day
@@ -1222,7 +1358,7 @@ def _match_one(
                     "schedule": mask_identifier(ref),
                 },
             )
-            if total != charge.amount_due:
+            if total != charge.net_due:
                 _flag(
                     charge,
                     actor,
@@ -1255,7 +1391,7 @@ def charge_review_message(charge: RentCharge, *, with_partial: bool = True) -> s
         return ""
     partial = partial_marking(charge)
     parts = []
-    if charge.invoices.exclude(total=charge.amount_due).exists():
+    if charge.invoices.exclude(total=charge.net_due).exists():
         parts.append(TOTAL_MISMATCH)
     if AuditLog.objects.filter(
         entity_type=ENTITY_CHARGE, entity_id=str(charge.pk), action=LINKED_TOTAL_DIFFERS_ACTION
@@ -1352,16 +1488,20 @@ def unlinked_invoices(charge: ChargeRow) -> list[UnlinkedInvoice]:
 
 
 def _auto_candidates(operator_id: uuid.UUID, total: Decimal, issued: date) -> QuerySet[RentCharge]:
-    return RentCharge.objects.filter(
-        lease__operator_id=operator_id,
-        status__in=AUTO_LINK_STATUSES,
-        balance__gt=0,
-        amount_due=total,
-        period_month=issued.replace(day=1),
-        invoices__isnull=True,
-        # PLAN-012b-b D5: a month billed on an invoice builder invoice has its invoice.
-        invoice_lines__isnull=True,
-    ).exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
+    return (
+        RentCharge.objects.annotate(net=F("amount_due") - F("concession"))
+        .filter(
+            lease__operator_id=operator_id,
+            status__in=AUTO_LINK_STATUSES,
+            balance__gt=0,
+            net=total,
+            period_month=issued.replace(day=1),
+            invoices__isnull=True,
+            # PLAN-012b-b D5: a month billed on an invoice builder invoice has its invoice.
+            invoice_lines__isnull=True,
+        )
+        .exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
+    )
 
 
 def _attach(charge: ChargeRow, invoice: Invoice, kind: ChargeKind | None = None) -> None:
@@ -1562,14 +1702,16 @@ def record_manual_payment(
             return PaymentOutcome(True, PAY_ALREADY, replayed=True)
         if charge.status == RentChargeStatus.WAIVED:
             return PaymentOutcome(False, PAY_WAIVED)
+        if charge.status == RentChargeStatus.VOID:
+            return PaymentOutcome(False, PAY_VOID)
         if on_live_plan(rent_charge=charge):
             return PaymentOutcome(False, PAY_ON_PLAN)
-        balance = charge.amount_due - _paid(charge)
+        balance = charge.net_due - _paid(charge)
         if balance <= 0:
             return PaymentOutcome(False, PAY_NOTHING_DUE)
         if amount > balance:
             return PaymentOutcome(False, PAY_OVER_BALANCE, "amount")
-        whole = balance == charge.amount_due and amount == balance
+        whole = balance == charge.net_due and amount == balance
         before = _charge(charge)
         payment = Payment(
             rent_charge=charge,
@@ -1594,11 +1736,16 @@ def record_manual_payment(
         charge.amount_paid = _paid(charge)
         charge.status = (
             RentChargeStatus.PAID
-            if charge.amount_paid >= charge.amount_due
+            if charge.amount_paid >= charge.net_due
             else RentChargeStatus.PARTIAL
         )
         charge.save(update_fields=["amount_paid", "status", "updated_at"])
         contacts.close_kept_by_payment(payment)
+        # PLAN-015c: a payment recorded outside the processor gets the app's receipt e-mail
+        # (imported here: the messaging engine imports this module).
+        from ledger.services import invoice_messages
+
+        invoice_messages.queue_receipt_if_due(payment, actor)
         _audit(
             actor,
             "rent_charge.payment_recorded",
@@ -1982,11 +2129,11 @@ def recompute_charge(charge: RentCharge) -> None:
     the move, PLAN-012b-b D13) brings the plan's status up to date, as for a one-off
     parent (PLAN-012b-a D4): the plan's row lock is taken after the charge's.
     """
-    if charge.status == RentChargeStatus.WAIVED:
+    if charge.status in NOT_BILLED_RENT:
         return
     paid = _paid(charge)
     payments = Payment.objects.filter(rent_charge=charge, is_refund=False)
-    if paid >= charge.amount_due and paid > 0:
+    if paid >= charge.net_due and (paid > 0 or charge.net_due <= 0):
         status = RentChargeStatus.PAID
     elif paid > 0:
         status = RentChargeStatus.PARTIAL
@@ -2102,6 +2249,12 @@ def _charge(charge: RentCharge) -> dict[str, Any]:
         "status": charge.status,
         "needs_review": charge.needs_review,
         "proration_text": charge.proration_text,
+        # PLAN-015d: the free rent, named only when there is some (older rows read as before).
+        **(
+            {"concession": str(charge.concession), "concession_text": charge.concession_text}
+            if charge.concession
+            else {}
+        ),
     }
 
 

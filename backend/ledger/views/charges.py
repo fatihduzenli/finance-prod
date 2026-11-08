@@ -42,12 +42,12 @@ from ledger.forms import (
     LinkInvoiceForm,
 )
 from ledger.models import (
+    NOT_BILLED_RENT,
     ChargeEntityType,
     ChargeNote,
     Lease,
     Operator,
     RentCharge,
-    RentChargeStatus,
     Store,
 )
 from ledger.services import (
@@ -180,7 +180,7 @@ def _detail_context(request: HttpRequest, charge: RentCharge) -> dict[str, Any]:
     invoice_rows = detail_service.invoice_rows(charge, "rent")
     payments = list(charge.payments.order_by("-settled_on", "-created_at"))
     lease = charge.lease
-    balance_open = charge.status != RentChargeStatus.WAIVED and charge.balance > 0
+    balance_open = charge.status not in NOT_BILLED_RENT and charge.balance > 0
     return {
         **jobs,
         "charge": charge,
@@ -215,7 +215,7 @@ def _detail_context(request: HttpRequest, charge: RentCharge) -> dict[str, Any]:
         "review_message": rent_run.charge_review_message(charge),
         "carried_balance": rent_run.carried_balance(charge),
         "can_record": billing
-        and charge.status != RentChargeStatus.WAIVED
+        and charge.status not in NOT_BILLED_RENT
         and charge.balance > 0
         and not rent_run.on_live_plan(rent_charge=charge),
         # PLAN-012e D9, D10: the plan's progress and the Split button.

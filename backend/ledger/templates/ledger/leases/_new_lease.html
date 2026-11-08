@@ -1,4 +1,4 @@
-{% comment %}The New lease page (docs/qa/PLAN-014b item 1, Fable's decisions 2 to 8; the owner's reference docs/design/new-lease-dark-laptop.png). Five numbered cards in the form's main column, each with its number, title and muted line (_step_head.html): (1) Operator: the search input #operator-search filtering the options of the operator select (ledger/new_lease.js, no endpoint; without the script the select alone), "+ New operator" opening the operator dialog (its no-script link the operator page with next), the chosen operator as #operator-card from the option's data-initials, data-phone-text, data-email, data-stores and data-store-count; (2) Terms: Start date, Monthly rent and Deposit (the refundable fee type's price field, form.deposit_field) in one row, the "Prorate the first month" switch and the live line #prorate-line; (3) Collection: Debit day (1st to 28th) with "Twice a month" beside it, then the three channel cards; (4) Billing details (_billing_step.html with step, shown once an operator is chosen); (5) Move-in charges: one row per checklist item (its price, the grey usual price, and cost, vendor and due date behind "More"), the deposit's row showing the Terms card's amount (#deposit-mirror, an output; the one input is the Terms card's, so the value is posted once), the rows of the other active fee types hidden behind "+ Add item" with the script (all shown without it; a row without a price charges nothing). Then the Documents card (unnumbered). The right column: the sticky Summary aside#lease-summary (form.summary, kept live by the script), "Create lease", Cancel and the muted line. Phone: one column, the Summary above the button. The operator dialog sits after the form (a form of its own).{% endcomment %}{% load money static %}
+{% comment %}The New lease page (docs/qa/PLAN-014b item 1, Fable's decisions 2 to 8; the owner's reference docs/design/new-lease-dark-laptop.png). Five numbered cards in the form's main column, each with its number, title and muted line (_step_head.html): (1) Operator: the search input #operator-search filtering the options of the operator select (ledger/new_lease.js, no endpoint; without the script the select alone), "+ New operator" opening the operator dialog (its no-script link the operator page with next), the chosen operator as #operator-card from the option's data-initials, data-phone-text, data-email, data-stores and data-store-count; (2) Terms: Start date, Monthly rent and Deposit (the refundable fee type's price field, form.deposit_field) in one row, the "Prorate the first month" switch and the live line #prorate-line, then the Free rent row #free-rent-row (Days, 0 to 366, and Starts: from the move-in date or the 1st of the following month; PLAN-015d), the Summary's #summary-free-rent-row showing the first month's free rent; (3) Collection: Debit day (1st to 28th) with "Twice a month" beside it, then the three channel cards; (4) Billing details (_billing_step.html with step, shown once an operator is chosen); (5) Move-in charges: one row per checklist item (its price, the grey usual price, and cost, vendor and due date behind "More"), the deposit's row showing the Terms card's amount (#deposit-mirror, an output; the one input is the Terms card's, so the value is posted once), the rows of the other active fee types hidden behind "+ Add item" with the script (all shown without it; a row without a price charges nothing). Under the rows, the deposit's "When" (#deposit-when, PLAN-015d: with the move-in invoice, due on a date, or in 2 to 12 installments from a first date, monthly, every two weeks or weekly; the date and plan fields shown by ledger/shown_when.js for their choice; off the invoice the deposit is not a move-in line and the Summary leaves it out). Then the Documents card (unnumbered). The right column: the sticky Summary aside#lease-summary (form.summary, kept live by the script; its last line #summary-after reads "Starts <date>, activated on that day." for a start after data-today, PLAN-015b §9.1), "Create lease", Cancel and the muted line. Phone: one column, the Summary above the button. The operator dialog sits after the form (a form of its own).{% endcomment %}{% load money static %}
 <form method="post" id="lease-form" class="js-single-submit new-lease-form" enctype="multipart/form-data">
   {% csrf_token %}
   {% for field in form.hidden_fields %}{{ field }}{% endfor %}
@@ -25,6 +25,10 @@
     <div class="prorate-row">
       <div class="field switch-field{% if form.prorate_first_month.errors %} has-error{% endif %}"><label class="inline" for="{{ form.prorate_first_month.id_for_label }}">{{ form.prorate_first_month }} {{ form.prorate_first_month.label }}</label>{{ form.prorate_first_month.errors }}</div>
       <p class="prorate-line" id="prorate-line" aria-live="polite" hidden></p>
+    </div>
+    <div class="terms-row free-rent-row" id="free-rent-row">
+      {% include "ledger/stores/_form_field.html" with field=form.free_rent_days no_mark=True %}
+      {% include "ledger/stores/_form_field.html" with field=form.free_rent_from no_mark=True %}
     </div>
   </section>
   <section class="card form-card new-lease-step" id="collection-step" aria-labelledby="collection-title">
@@ -67,10 +71,23 @@
       {% endfor %}
     </div>
     {% if form.extra_types %}<button type="button" class="step-link add-item" id="add-item" hidden>+ Add item</button>{% endif %}
+    {% if form.deposit_type %}
+    <div class="deposit-when" id="deposit-when">
+      <div class="terms-row deposit-when-row">
+        {% include "ledger/stores/_form_field.html" with field=form.deposit_when label="Deposit: when" no_mark=True %}
+        {% include "ledger/stores/_form_field.html" with field=form.deposit_on no_mark=True %}
+      </div>
+      <div class="terms-row deposit-plan-row" id="deposit-plan-row">
+        {% include "ledger/stores/_form_field.html" with field=form.deposit_count no_mark=True %}
+        {% include "ledger/stores/_form_field.html" with field=form.deposit_first_due no_mark=True %}
+        {% include "ledger/stores/_form_field.html" with field=form.deposit_cadence no_mark=True %}
+      </div>
+    </div>
+    {% endif %}
   </section>
   <section class="card form-card" id="documents-card"><h2>Documents</h2>{% include "ledger/documents/_create_upload.html" %}</section>
   </div>
-  <aside class="form-summary" aria-label="Summary" id="lease-summary">
+  <aside class="form-summary" aria-label="Summary" id="lease-summary" data-today="{{ form.today|date:'Y-m-d' }}">
     {% with summary=form.summary %}
     <section class="card summary-card lease-summary-card">
       <h2 class="summary-label">Summary</h2>
@@ -82,12 +99,13 @@
       </dl>
       <dl class="lease-summary-rows lease-summary-money">
         <div><dt id="summary-first-month-label">{{ summary.first_month_label }}</dt><dd id="summary-first-month">{{ summary.first_month }}</dd></div>
+        <div id="summary-free-rent-row"{% if not summary.free_rent %} hidden style="display:none"{% endif %}><dt>Free rent</dt><dd id="summary-free-rent">{{ summary.free_rent }}</dd></div>
         <div><dt>Move-in charges</dt><dd id="setup-total">{{ summary.move_in }}</dd></div>
         <div class="lease-summary-total"><dt>First invoice</dt><dd id="summary-total">{{ summary.total }}</dd></div>
       </dl>
       <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-lease">Create lease</button></div>
       <p class="summary-cancel"><a class="btn btn-quiet" id="cancel-lease" href="{{ cancel_url }}">Cancel</a></p>
-      <p class="muted summary-after" id="summary-after">After saving you can send the move-in invoice by e-mail.</p>
+      <p class="muted summary-after" id="summary-after" data-default="{{ summary.default_after }}">{{ summary.after }}</p>
     </section>
     {% endwith %}
   </aside>

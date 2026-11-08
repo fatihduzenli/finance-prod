@@ -17,7 +17,15 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
-from ledger.models import ContactEntry, ContactKind, ContactStatus, Note, OutboundMessage, Store
+from ledger.models import (
+    AuditLog,
+    ContactEntry,
+    ContactKind,
+    ContactStatus,
+    Note,
+    OutboundMessage,
+    Store,
+)
 from ledger.services import collections, contacts, messaging, notes, timeline
 
 
@@ -125,10 +133,10 @@ class TimelineRow:
     """One row of the Notes & follow-ups list (PLAN-014 B6): ``kind`` as
     :class:`ledger.services.timeline.TimelineEntry` names it and the row its template
     reads (a :class:`NoteRow` for a note, a :class:`LogRow` for a contact entry, an
-    :class:`EmailRow` for a message)."""
+    :class:`EmailRow` for a message, a :class:`StatusRow` for a lease's status change)."""
 
     kind: str
-    row: NoteRow | LogRow | EmailRow
+    row: NoteRow | LogRow | EmailRow | StatusRow
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +149,15 @@ class EmailRow:
     status: str
     to: str
     show_text: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StatusRow:
+    """One status change of a lease of the store on the list (PLAN-015b): its audit row (when,
+    by whom) and its words (:func:`ledger.services.timeline.status_words`)."""
+
+    change: AuditLog
+    words: timeline.StatusWords
 
 
 def timeline_rows(
@@ -191,14 +208,21 @@ def timeline_rows(
                     ),
                 )
             )
+        elif entry.kind == timeline.STATUS:
+            rows.append(
+                TimelineRow(
+                    entry.kind,
+                    StatusRow(change=entry.payload, words=timeline.status_words(entry.payload)),
+                )
+            )
     return rows
 
 
 def timeline_filters(
     url: str, query: dict[str, str], fragment: str = ""
 ) -> list[tuple[str, str, str]]:
-    """The list's filter (All · Notes · Calls & promises · E-mails) as ``(value, label,
-    link)``: ``url`` with ``query`` and ``show=value``, then ``fragment``."""
+    """The list's filter (All · Notes · Calls & promises · E-mails · Lease status) as
+    ``(value, label, link)``: ``url`` with ``query`` and ``show=value``, then ``fragment``."""
     return [
         (value, label, f"{url}?{urlencode({**query, 'show': value})}{fragment}")
         for value, label in timeline.SHOWS

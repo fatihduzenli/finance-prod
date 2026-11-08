@@ -126,6 +126,7 @@ from django.utils import timezone
 
 from finance.dates import month_text
 from ledger.models import (
+    NOT_BILLED_RENT,
     ZERO,
     CollectionStatus,
     DepositResolution,
@@ -140,13 +141,13 @@ from ledger.models import (
     PaymentKind,
     PaymentStatus,
     RentCharge,
-    RentChargeStatus,
     Store,
     StoreCost,
 )
 from ledger.services.csv_export import CsvWriter
 from ledger.services.payments_ledger import (
     RENT_LINE,
+    deposit_installment,
     deposits_released,
     invoice_line_parts,
     multi_line_charges,
@@ -320,6 +321,9 @@ class Figures:
 
     rent_billed: Decimal = ZERO
     rent_collected: Decimal = ZERO
+    #: PLAN-015d §3 (2): the free-rent concessions of the rent billed (by ``period_month``,
+    #: as the rent); ``net_rent`` is the rent billed less them.
+    concessions: Decimal = ZERO
     fees_billed: Decimal = ZERO
     #: Includes ``withheld_deposits`` and ``insurance_collected``.
     fees_collected: Decimal = ZERO
@@ -337,9 +341,14 @@ class Figures:
         return _sum_known((self.landlord_rent, self.other_costs, self.fee_costs))
 
     @property
+    def net_rent(self) -> Decimal:
+        """The rent billed less its free-rent concessions (PLAN-015d)."""
+        return self.rent_billed - self.concessions
+
+    @property
     def margin_billed(self) -> Decimal | None:
         costs = self.costs
-        return None if costs is None else self.rent_billed + self.fees_billed - costs
+        return None if costs is None else self.net_rent + self.fees_billed - costs
 
     @property
     def margin_collected(self) -> Decimal | None:
@@ -394,6 +403,7 @@ def _sum(rows: Iterable[Figures]) -> dict[str, Any]:
     return {
         "rent_billed": total("rent_billed"),
         "rent_collected": total("rent_collected"),
+        "concessions": total("concessions"),
         "fees_billed": total("fees_billed"),
         "fees_collected": total("fees_collected"),
         "withheld_deposits": total("withheld_deposits"),
@@ -409,6 +419,7 @@ def _sum(rows: Iterable[Figures]) -> dict[str, Any]:
 class _Acc:
     rent_billed: Decimal = ZERO
     rent_collected: Decimal = ZERO
+    concessions: Decimal = ZERO
     fees_billed: Decimal = ZERO
     fees_collected: Decimal = ZERO
     withheld_deposits: Decimal = ZERO
@@ -519,13 +530,14 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
     """Rent and fees billed and collected, withheld deposits and fee costs (8 queries)."""
     rent_charges = (
         RentCharge.objects.filter(period_month__gte=start, period_month__lte=end)
-        .exclude(status=RentChargeStatus.WAIVED)
+        .exclude(status__in=NOT_BILLED_RENT)
         .values(store=F("lease__store"), operator=F("lease__operator"), month=F("period_month"))
-        .annotate(total=Sum("amount_due"))
+        .annotate(total=Sum("amount_due"), conceded=Sum("concession"))
         .order_by()
     )
     for rent in rent_charges:
         acc[_key(rent)].rent_billed += _money_or_zero(rent["total"])
+        acc[_key(rent)].concessions += _money_or_zero(rent["conceded"])
 
     one_off_operator = Coalesce("one_off_charge__operator", "one_off_charge__lease__operator")
     not_deposit = Q(one_off_charge__fee_type__isnull=True) | Q(
@@ -684,6 +696,8 @@ def _add_installments(acc: dict[_Key, _Acc], start: date, end: date) -> None:
             settled_on__lte=end,
             one_off_charge__category=OneOffCategory.INSTALLMENT,
         )
+        # PLAN-015d: a deposit paid in installments is money held, not revenue.
+        .exclude(**{f"{plan}__one_off_charge__fee_type__refundable": True})
         .values(
             store=F("one_off_charge__lease__store"),
             operator=Coalesce("one_off_charge__operator", "one_off_charge__lease__operator"),
@@ -936,6 +950,7 @@ def rows(query: PnlQuery) -> list[PnlRow]:
             PnlRow(
                 rent_billed=item.rent_billed,
                 rent_collected=item.rent_collected,
+                concessions=item.concessions,
                 fees_billed=item.fees_billed,
                 fees_collected=item.fees_collected,
                 withheld_deposits=item.withheld_deposits,
@@ -1008,9 +1023,13 @@ def deposits_held(query: PnlQuery) -> Decimal:
     """Deposits held at the end of the range: settled deposit payments (net of their
     settled refunds) less the deposits refunded, withheld or transferred by then. A
     payment on a multi-line invoice counts by the lines it paid: its part on a deposit
-    line is held (PLAN-012 D6). Not revenue; shown under the report only."""
+    line is held (PLAN-012 D6), and so is a payment on an installment of a deposit plan
+    (PLAN-015d: a deposit collected by installments). Not revenue; shown under the report
+    only."""
     end = query.end
-    deposit = Q(one_off_charge__fee_type__refundable=True, status=PaymentStatus.SETTLED)
+    deposit = Q(status=PaymentStatus.SETTLED) & (
+        Q(one_off_charge__fee_type__refundable=True) | deposit_installment()
+    )
     split = on_multi_line_invoice()
     held_by_lines = sum(
         (
@@ -1049,6 +1068,9 @@ CSV_HEADER: tuple[str, ...] = (
     "Operator",
     "Month",
     "Rent billed (USD)",
+    # PLAN-015d: the free-rent concessions and the rent net of them.
+    "Concessions (USD)",
+    "Net rent (USD)",
     "Rent collected (USD)",
     "Fees billed (USD)",
     "Fees collected (USD)",
@@ -1082,6 +1104,8 @@ def _record(
         operator,
         month,
         item.rent_billed,
+        item.concessions,
+        item.net_rent,
         item.rent_collected,
         item.fees_billed,
         item.fees_collected,

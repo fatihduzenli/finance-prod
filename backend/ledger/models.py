@@ -460,6 +460,18 @@ class PaymentChannel(models.TextChoices):
 LATER_CHANNELS: tuple[str, ...] = (PaymentChannel.INVOICE,)
 
 
+class FreeRentFrom(models.TextChoices):
+    """Where a lease's free-rent days start (PLAN-015d §3 (2)): its move-in date, or the 1st
+    of the month after its start month."""
+
+    MOVE_IN = "move_in", "From the move-in date"
+    NEXT_MONTH = "next_month", "From the 1st of the following month"
+
+
+#: The most free-rent days a lease may carry (PLAN-015d §3).
+FREE_RENT_DAYS_MAX = 366
+
+
 class Lease(GuardedModel):
     store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="leases")
     operator = models.ForeignKey(
@@ -477,6 +489,10 @@ class Lease(GuardedModel):
     #: PLAN-012e D2: the first rent charge of a lease that starts after the 1st is for
     #: the days used. Leases billed before the switch existed are never rewritten.
     prorate_first_month = models.BooleanField(default=True)
+    #: PLAN-015d §3 (2): free rent by days, counted from the move-in date or from the 1st of
+    #: the following month (:mod:`ledger.services.free_rent`); 0 is none.
+    free_rent_days = models.SmallIntegerField(default=0)
+    free_rent_from = _choice(FreeRentFrom, default=FreeRentFrom.MOVE_IN)
     #: PLAN-014 C2: where the lease stands with the payment provider, whose customer is
     #: now per lease (``payments.lease_sync``); the operator's columns of PLAN-006 D7 are
     #: kept for history and no longer written.
@@ -519,6 +535,11 @@ class Lease(GuardedModel):
             _valid_choice("leases", "payment_channel", PaymentChannel),
             _valid_choice("leases", "sync_status", SyncStatus),
             _valid_choice("leases", "sync_failure", SyncFailure, blank=True),
+            models.CheckConstraint(
+                condition=Q(free_rent_days__gte=0, free_rent_days__lte=FREE_RENT_DAYS_MAX),
+                name="leases_free_rent_days_range",
+            ),
+            _valid_choice("leases", "free_rent_from", FreeRentFrom),
         ]
 
     def __str__(self) -> str:
@@ -670,6 +691,25 @@ class RentChargeStatus(models.TextChoices):
     PARTIAL = "partial", "Partially paid"
     UNPAID = "unpaid", "Unpaid"
     WAIVED = "waived", "Waived"
+    #: PLAN-015d §3: a charge that never fell due (Change start date moved the start past its
+    #: month). Its balance is zero; waived means forgiven, void means never owed.
+    VOID = "void", "Void"
+
+
+#: The rent charge statuses that are not a bill (PLAN-015d §3): waived (forgiven) and void
+#: (never due). Billed figures, open balances and invoice bodies leave them out alike.
+NOT_BILLED_RENT: tuple[str, ...] = (RentChargeStatus.WAIVED.value, RentChargeStatus.VOID.value)
+
+
+#: PLAN-015d §3: a rent charge's balance, the generated column: what is due less the free-rent
+#: concession and what was paid; zero for a void charge.
+RENT_BALANCE = models.Case(
+    models.When(status="void", then=models.Value(Decimal("0.00"))),
+    default=F("amount_due") - F("concession") - F("amount_paid"),
+    output_field=models.DecimalField(
+        max_digits=MONEY_MAX_DIGITS, decimal_places=MONEY_DECIMAL_PLACES
+    ),
+)
 
 
 class RentCharge(GuardedModel):
@@ -679,8 +719,13 @@ class RentCharge(GuardedModel):
     due_on = models.DateField()
     amount_due = MoneyField()
     amount_paid = MoneyField(default=ZERO)
+    #: PLAN-015d §3 (2): the free rent of this charge's days (``0 ≤ concession ≤ amount_due``);
+    #: the amount due is kept and the concession nets it, with its text
+    #: ("Free rent per lease agreement (Dec 10 – Jan 8)"), empty when none.
+    concession = MoneyField(default=ZERO)
+    concession_text = free_text(default="")
     balance = models.GeneratedField(
-        expression=F("amount_due") - F("amount_paid"),
+        expression=RENT_BALANCE,
         output_field=models.DecimalField(
             max_digits=MONEY_MAX_DIGITS, decimal_places=MONEY_DECIMAL_PLACES
         ),
@@ -722,8 +767,18 @@ class RentCharge(GuardedModel):
             models.CheckConstraint(condition=Q(seq__in=[1, 2]), name="rent_charges_seq_valid"),
             _not_negative("rent_charges", "amount_due"),
             _not_negative("rent_charges", "amount_paid"),
+            _not_negative("rent_charges", "concession"),
+            models.CheckConstraint(
+                condition=Q(concession__lte=F("amount_due")),
+                name="rent_charges_concession_within_amount",
+            ),
             _valid_choice("rent_charges", "status", RentChargeStatus),
         ]
+
+    @property
+    def net_due(self) -> Decimal:
+        """What the charge bills: the amount due less its free-rent concession (PLAN-015d)."""
+        return Decimal(self.amount_due) - Decimal(self.concession)
 
 
 class InsurancePremium(GuardedModel):
@@ -1222,6 +1277,10 @@ class OneOffCharge(GuardedModel):
     #: notice) and its state; both empty on every other charge.
     retry_date = models.DateField(null=True, blank=True)
     retry_state = _choice(RetryState, blank=True, default="")
+    #: PLAN-015d §3 (3): a deposit the New lease page set "On a date": collected by its own
+    #: due date, off the move-in invoice (the reminders, the portal's Pay and the LEASE card
+    #: read it). Set at creation; every other charge, and every deposit saved before, is not.
+    dated = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1260,6 +1319,10 @@ class OneOffCharge(GuardedModel):
             models.CheckConstraint(
                 condition=~Q(collection="none", category__in=NON_SETUP_CATEGORIES),
                 name="one_off_charges_collection_none_only_setup",
+            ),
+            models.CheckConstraint(
+                condition=Q(dated=False) | Q(category="setup", collection="none"),
+                name="one_off_charges_dated_only_setup",
             ),
             models.CheckConstraint(
                 condition=Q(operator__isnull=False)
@@ -1440,6 +1503,8 @@ class InstallmentOrigin(models.TextChoices):
 
     SPLIT = "split", "Split into installments"
     SETTLEMENT = "settlement", "Settlement plan"
+    #: PLAN-015d §3 (3): the New lease page's deposit paid in installments.
+    DEPOSIT = "deposit", "Deposit installments"
 
 
 class InstallmentCollection(models.TextChoices):
@@ -2243,7 +2308,8 @@ class Payment(GuardedModel):
     #: PLAN-012d D6a: the payments of one entry of the store page's payment form, one per
     #: charge it paid, share this value (the kept credit too); null otherwise.
     allocation_group = models.UUIDField(null=True, blank=True)
-    #: The credit a ``credit`` payment applied, or a ``credit_refund`` paid back.
+    #: The credit a ``credit`` payment applied, or a ``credit_refund`` paid back; or, on a
+    #: ``rent`` payment naming no charge, the credit its money is held as (PLAN-015d).
     credit = models.ForeignKey(
         LeaseCredit, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
     )
@@ -2326,8 +2392,21 @@ class Payment(GuardedModel):
                 condition=~Q(method="credit") | Q(credit__isnull=False, is_refund=False),
                 name="payments_credit_method_has_credit",
             ),
+            # PLAN-015d: or rent money held as a credit (Change start date's "Keep as
+            # credit"): the payment that paid the rent, re-pointed from its charge to the
+            # credit, its method and processor reference unchanged.
             models.CheckConstraint(
-                condition=Q(credit__isnull=True) | Q(method="credit") | Q(kind="credit_refund"),
+                condition=Q(credit__isnull=True)
+                | Q(method="credit")
+                | Q(kind="credit_refund")
+                | Q(
+                    kind="rent",
+                    is_refund=False,
+                    rent_charge__isnull=True,
+                    insurance_charge__isnull=True,
+                    charge_adjustment__isnull=True,
+                    one_off_charge__isnull=True,
+                ),
                 name="payments_credit_only_credit_rows",
             ),
             # A credit refund is money paid back by hand, of a credit and nothing else.
@@ -2795,6 +2874,10 @@ class MessageRule(models.TextChoices):
     LADDER = "ladder", "Old collections ladder"
     #: PLAN-014 H2: an invitation to the operator portal, or a link to choose a new password.
     PORTAL = "portal", "Portal access"
+    #: PLAN-015c (ADR-0020): an invoice e-mailed by the company, with its PDF.
+    INVOICE = "invoice", "Invoice e-mailed"
+    #: PLAN-015c: the receipt of a payment recorded outside the processor, with its PDF.
+    RECEIPT = "receipt", "Receipt e-mailed"
 
 
 #: The rule of the retired collections ladder (owner, 2026-11-01): nothing queues it any more
@@ -2824,6 +2907,10 @@ class ChargeEntityType(models.TextChoices):
     #: PLAN-014 H2: a portal account (``portal.PortalUser``) whose invitation or password
     #: reset the message carries; the message has no lease and goes to the account's e-mail.
     PORTAL_USER = "portal_user", "Portal account"
+    #: PLAN-015c: an invoice the message e-mails (its PDF rendered at the send).
+    INVOICE = "invoice", "Invoice"
+    #: PLAN-015c: a payment whose receipt the message e-mails (its PDF rendered at the send).
+    PAYMENT = "payment", "Payment"
 
 
 #: The charge types a message about a charge (not a lease end) names; a lease month is the
@@ -2847,6 +2934,26 @@ class MessageKind(models.TextChoices):
     FINAL_STATEMENT = "final_statement", "Final statement"
     #: PLAN-014 H2: about a portal account, never a charge (rule ``portal``).
     PORTAL = "portal", "Portal access"
+    #: PLAN-015c: an invoice, its PDF attached at the send (rule ``invoice``).
+    INVOICE = "invoice", "Invoice"
+    #: PLAN-015c: a payment's receipt, its PDF attached at the send (rule ``receipt``).
+    RECEIPT = "receipt", "Receipt"
+
+
+#: PLAN-015c: (kind, entity type, rule) of the two messages that carry a rendered PDF; each
+#: of the three names the other two (``outbound_messages_kind_matches_rule``).
+PDF_MESSAGES: tuple[tuple[str, str, str], ...] = (
+    (MessageKind.INVOICE, ChargeEntityType.INVOICE, MessageRule.INVOICE),
+    (MessageKind.RECEIPT, ChargeEntityType.PAYMENT, MessageRule.RECEIPT),
+)
+
+
+def _pdf_message_shape(kind: str, entity_type: str, rule: str) -> Q:
+    """A message of ``kind`` names an entity of ``entity_type`` under ``rule``, and only such a
+    message names either (PLAN-015c)."""
+    return Q(kind=kind, charge_entity_type=entity_type, rule=rule) | (
+        ~Q(kind=kind) & ~Q(charge_entity_type=entity_type) & ~Q(rule=rule)
+    )
 
 
 class OutboundMessage(GuardedModel):
@@ -2987,7 +3094,11 @@ class OutboundMessage(GuardedModel):
                         & ~Q(charge_entity_type=ChargeEntityType.PORTAL_USER)
                         & ~Q(rule=MessageRule.PORTAL)
                     )
-                ),
+                )
+                # PLAN-015c: an invoice message names an invoice under rule ``invoice``, a
+                # receipt a payment under rule ``receipt``; no other message names either.
+                & _pdf_message_shape(*PDF_MESSAGES[0])
+                & _pdf_message_shape(*PDF_MESSAGES[1]),
                 name="outbound_messages_kind_matches_rule",
             ),
             models.CheckConstraint(
@@ -3603,6 +3714,18 @@ LOGO_PATH_MESSAGE = "The logo must be the path of a stored document, or blank."
 LOGO_CONTENT_TYPES = (DocumentContentType.PNG, DocumentContentType.JPEG)
 
 validate_logo_path = RegexValidator(LOGO_PATH_PATTERN, LOGO_PATH_MESSAGE, code="logo_path")
+#: PLAN-015c: the most bytes the logo's PNG copy (``CompanySettings.logo_png``) may hold.
+LOGO_PNG_MAX_BYTES = 1024 * 1024
+
+
+class InvoiceSender(models.TextChoices):
+    """Who e-mails the invoices (ADR-0020, PLAN-015c): the payment processor (the default:
+    nothing changes) or the company, through the app's messaging engine with the invoice
+    PDF. The settings page names each with the processor's display name and the company's
+    short name; these labels are what nothing else shows."""
+
+    PROCESSOR = "processor", "The payment processor"
+    COMPANY = "company", "The company"
 
 
 class CompanySettings(PaymentDataGuardedModel):
@@ -3644,6 +3767,20 @@ class CompanySettings(PaymentDataGuardedModel):
     #: without a staff click only when the second is on as well.
     bank_deposits_enabled = models.BooleanField(default=False)
     bank_auto_confirm_exact = models.BooleanField(default=False)
+    #: PLAN-015c: the company's address, printed in the invoice and receipt PDFs' band (the
+    #: lines that are set, joined ", "); each optional. Edited on Admin › Settings.
+    address_line1 = guarded_char(NAME_MAX_LENGTH, blank=True, default="")
+    address_line2 = guarded_char(NAME_MAX_LENGTH, blank=True, default="")
+    city = guarded_char(100, blank=True, default="")
+    state = guarded_char(50, blank=True, default="")
+    postal_code = guarded_char(20, blank=True, default="")
+    #: ADR-0020: who e-mails the invoices (the processor by default).
+    invoice_sender = _choice(InvoiceSender, default=InvoiceSender.PROCESSOR)
+    #: PLAN-015c: a PNG copy of the logo override (at most :data:`LOGO_PNG_MAX_BYTES`),
+    #: written when the logo is saved in the admin and cleared when it is removed, so the
+    #: PDF renderer and the portal read the logo without a staff actor; empty: the brand
+    #: logo. Never read by :meth:`read` (the page path), which defers it.
+    logo_png = models.BinaryField(blank=True, default=b"", editable=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -3662,6 +3799,7 @@ class CompanySettings(PaymentDataGuardedModel):
                 condition=Q(logo="") | Q(logo__regex=LOGO_PATH_PATTERN),
                 name="company_settings_logo_path",
             ),
+            _valid_choice("company_settings", "invoice_sender", InvoiceSender),
         ]
 
     def __str__(self) -> str:
@@ -3698,7 +3836,7 @@ class CompanySettings(PaymentDataGuardedModel):
         from ledger.company_defaults import SEED
 
         try:
-            row = cls.objects.filter(pk=COMPANY_SETTINGS_ID).first()
+            row = cls.objects.filter(pk=COMPANY_SETTINGS_ID).defer("logo_png").first()
         except DatabaseError:
             row = None
         return row if row is not None else cls(pk=COMPANY_SETTINGS_ID, **SEED)

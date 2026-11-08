@@ -17,8 +17,9 @@ Once its lease has ended, an admin resolves it once (:func:`resolve_deposit`, on
   every other charge.
 
 ``withheld_amount`` is the part of the paid deposit the business keeps: paid less the
-amount for a refund or a transfer, the amount itself when withheld. "Paid" is the
-deposit's settled ``one_off`` payments less their settled refunds.
+amount for a refund or a transfer, the amount itself when withheld. "Paid" is what was
+collected of the deposit (:func:`collected`): its settled ``one_off`` payments less their
+settled refunds, and the same of the installments of its deposit plan (PLAN-015d).
 
 **At a lease end** (PLAN-012e D5(d)) the wizard resolves each deposit with
 :func:`resolve_deposit_split`: one row whose ``amount`` is the part refunded (kind
@@ -36,11 +37,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from finance.dates import day_text
@@ -51,7 +55,16 @@ from ledger.models import (
     DepositResolution,
     DepositResolutionKind,
     FeeType,
+    InstallmentCadence,
+    InstallmentOrigin,
+    InstallmentPlan,
+    InstallmentPlanStatus,
+    Invoice,
+    InvoiceDraftLine,
+    InvoiceDraftStatus,
+    InvoiceLineItem,
     Lease,
+    MoneyField,
     OneOffCategory,
     OneOffCharge,
     OneOffChargeStatus,
@@ -222,7 +235,7 @@ def resolve_deposit(
             refused = _charge_refusal(charge, kind, amount)
             if refused is not None:
                 return refused
-            paid = one_off_charges.settled(charge)
+            paid = collected(charge)
             target: Lease | None = None
             if to_lease is not None:
                 target = Lease.objects.select_for_update().get(pk=to_lease.pk)
@@ -334,7 +347,7 @@ def resolve_deposit_split(
                 return _refused(LEASE_NOT_ENDED)
             if DepositResolution.objects.filter(setup_charge=charge).exists():
                 return _refused(ALREADY_RESOLVED)
-            paid = one_off_charges.settled(charge)
+            paid = collected(charge)
             if refunded + withheld != paid:
                 return _refused(SPLIT_NOT_WHOLE.format(paid=format_amount(paid)), "amount")
             resolution = DepositResolution.objects.create(
@@ -388,7 +401,7 @@ def _charge_refusal(charge: OneOffCharge, kind: str, amount: Decimal) -> Outcome
         return _refused(LEASE_NOT_ENDED)
     if DepositResolution.objects.filter(setup_charge=charge).exists():
         return _refused(ALREADY_RESOLVED)
-    paid = one_off_charges.settled(charge)
+    paid = collected(charge)
     if amount > paid:
         return _refused(ABOVE_PAID.format(paid=format_amount(paid)), "amount")
     if kind == DepositResolutionKind.WITHHELD and amount != paid:
@@ -511,6 +524,233 @@ def _state(resolution: DepositResolution) -> dict[str, Any]:
     }
 
 
+def collected(charge: OneOffCharge) -> Decimal:
+    """What was collected of the deposit ``charge`` (Fable's finding 3 on PLAN-015d: the
+    lease-end and transfer wizards use only the deposit actually collected): its settled
+    ``one_off`` payments less their settled refunds (:func:`ledger.services.one_off_charges.
+    settled`), plus the same of the installments of its deposit plans (origin ``deposit``,
+    whatever their status), to the cent. A deposit refund (``refund_deposit``) is not
+    counted, as in ``settled``. One query."""
+    read = _read(OneOffCharge.objects.filter(pk=charge.pk)).first()
+    held = read.held if read is not None else 0  # type: ignore[attr-defined]
+    return Decimal(held).quantize(CENT)
+
+
+def _held() -> Coalesce:
+    """:func:`collected` of each charge of a query (``OuterRef("pk")``), as one subquery."""
+    zero = Value(Decimal(0), output_field=MoneyField())
+    rows = (
+        Payment.objects.filter(
+            Q(one_off_charge=OuterRef("pk"))
+            | Q(
+                one_off_charge__plan__one_off_charge=OuterRef("pk"),
+                one_off_charge__plan__origin=InstallmentOrigin.DEPOSIT,
+            ),
+            kind=PaymentKind.ONE_OFF,
+            status=PaymentStatus.SETTLED,
+        )
+        .order_by()
+        .values("kind")
+        .annotate(
+            net=Coalesce(Sum("amount", filter=Q(is_refund=False)), zero)
+            - Coalesce(Sum("amount", filter=Q(is_refund=True)), zero)
+        )
+        .values("net")
+    )
+    return Coalesce(Subquery(rows, output_field=MoneyField()), zero)
+
+
+def _read(rows: QuerySet[OneOffCharge]) -> QuerySet[OneOffCharge]:
+    """``rows`` with what the LEASE card's deposit row reads of each, in the same query:
+    ``held`` (:func:`collected`), ``on_line``/``on_invoice``/``on_draft``
+    (:func:`riding_invoice`) and ``plan_pk`` (its deposit plan not cancelled, the first)."""
+    return rows.annotate(
+        held=_held(),
+        on_line=Exists(InvoiceLineItem.objects.filter(one_off_charge=OuterRef("pk"))),
+        on_invoice=Exists(Invoice.objects.filter(one_off_charge=OuterRef("pk"))),
+        on_draft=Exists(
+            InvoiceDraftLine.objects.filter(
+                existing_charge=OuterRef("pk"), draft__status=InvoiceDraftStatus.DRAFT
+            )
+        ),
+        plan_pk=Subquery(
+            InstallmentPlan.objects.filter(
+                one_off_charge=OuterRef("pk"), origin=InstallmentOrigin.DEPOSIT
+            )
+            .exclude(status=InstallmentPlanStatus.CANCELLED)
+            .order_by("pk")
+            .values("pk")[:1]
+        ),
+    )
+
+
+def lease_deposits(lease: Lease) -> list[OneOffCharge]:
+    """The lease's deposits (its refundable one-off charges, not waived or voided), oldest
+    first, each with what :func:`_read` adds: one query for the LEASE card's row."""
+    return list(
+        _read(
+            OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True)
+            .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+            .order_by("created_at", "pk")
+        )
+    )
+
+
 def lease_label(lease: Lease) -> str:
     started = day_text(lease.started_on) if lease.started_on else "no start date"
     return f"Lease {lease.store.external_label} from {started}"
+
+
+# --- Deposit timing on New lease (PLAN-015d §3 (3)) -------------------------------------------
+
+
+class DepositWhen(StrEnum):
+    """When the New lease page's deposit is collected."""
+
+    WITH_INVOICE = "with_invoice"
+    ON_DATE = "on_date"
+    INSTALLMENTS = "installments"
+
+
+DEPOSIT_WHEN_CHOICES = [
+    (DepositWhen.WITH_INVOICE.value, "With the invoice"),
+    (DepositWhen.ON_DATE.value, "On a date"),
+    (DepositWhen.INSTALLMENTS.value, "In installments"),
+]
+#: The cadences a deposit plan offers (Split's three; yearly is the settlement's).
+DEPOSIT_CADENCES = [
+    (InstallmentCadence.MONTHLY.value, "Monthly"),
+    (InstallmentCadence.BIWEEKLY.value, "Every two weeks"),
+    (InstallmentCadence.WEEKLY.value, "Weekly"),
+]
+FIRST_BEFORE_START = "The first installment cannot be before the lease's start date."
+DUE_BEFORE_TODAY = "The deposit's due date cannot be in the past."
+DEPOSIT_REQUIRED = "Enter the deposit's amount to collect it on a date or in installments."
+
+
+@dataclass(frozen=True, slots=True)
+class DepositTiming:
+    """The New lease page's choice: with the move-in invoice (the deposit is a move-in line),
+    on a date (``due_on``; its own charge, not a move-in line), or in ``count`` installments
+    from ``first_due`` every ``cadence`` (a plan of origin ``deposit``)."""
+
+    when: str = DepositWhen.WITH_INVOICE
+    due_on: date | None = None
+    count: int = 0
+    first_due: date | None = None
+    cadence: str = InstallmentCadence.MONTHLY
+
+    @property
+    def on_invoice(self) -> bool:
+        return self.when == DepositWhen.WITH_INVOICE
+
+    @property
+    def due_date(self) -> date | None:
+        """The deposit charge's own due date: the chosen date, or the first installment's."""
+        if self.when == DepositWhen.ON_DATE:
+            return self.due_on
+        if self.when == DepositWhen.INSTALLMENTS:
+            return self.first_due
+        return None
+
+
+def riding_invoice(charge: OneOffCharge) -> bool:
+    """Whether the deposit goes with an invoice (a line of a sent invoice, the invoice's own
+    charge, or a line of a draft not yet sent): such a deposit rides the invoice and gets no
+    reminder of its own (PLAN-015d §3 (3))."""
+    read = _read(OneOffCharge.objects.filter(pk=charge.pk)).first()
+    return read is not None and _riding(read)
+
+
+def _riding(read: OneOffCharge) -> bool:
+    """:func:`riding_invoice` of a charge read through :func:`_read`."""
+    return bool(read.on_line or read.on_invoice or read.on_draft)  # type: ignore[attr-defined]
+
+
+def create_lease_with_deposit(
+    fields: Any,
+    *,
+    rent: Decimal,
+    creation_key: Any,
+    items: Any,
+    actor: User | None,
+    timing: DepositTiming,
+    billing: Any = None,
+    account: str = "",
+    today: date | None = None,
+) -> tuple[Lease, bool, list[OneOffCharge]]:
+    """The New lease save (:func:`ledger.services.one_off_charges.create_lease_with_checklist`)
+    and, in the same transaction, the deposit's plan when it is paid in installments
+    (:func:`ledger.services.installments.create_plan`, origin ``deposit``, collected as the
+    lease's channel). A refused plan raises
+    :class:`~ledger.services.one_off_charges.SetupRefused` and nothing is saved."""
+    from ledger.services import installments, leases
+
+    day = today or timezone.localdate()
+    with transaction.atomic():
+        lease, created, charges = one_off_charges.create_lease_with_checklist(
+            fields,
+            rent=rent,
+            creation_key=creation_key,
+            items=items,
+            actor=actor,
+            billing=billing,
+            account=account or leases.ACCOUNT_LATER,
+        )
+        if not created or timing.when != DepositWhen.INSTALLMENTS:
+            return lease, created, charges
+        deposit = next((charge for charge in charges if is_deposit(charge)), None)
+        if deposit is None or timing.first_due is None:
+            raise one_off_charges.SetupRefused("deposit_when", DEPOSIT_REQUIRED, None)
+        if lease.started_on is not None and timing.first_due < lease.started_on:
+            raise one_off_charges.SetupRefused(
+                "deposit_first_due", FIRST_BEFORE_START, deposit.fee_type
+            )
+        lines, refused = installments.preview(
+            deposit, timing.count, timing.first_due, timing.cadence, day
+        )
+        made = refused or installments.create_plan(
+            deposit,
+            timing.count,
+            timing.first_due,
+            timing.cadence,
+            lines,
+            actor,
+            confirmed=True,
+            today=day,
+            origin=InstallmentOrigin.DEPOSIT,
+        )
+        if not made.ok:
+            raise one_off_charges.SetupRefused(
+                f"deposit_{made.field}" if made.field else None, made.message, deposit.fee_type
+            )
+    return lease, created, charges
+
+
+def card_text(lease: Lease, found: list[OneOffCharge] | None = None) -> str:
+    """The LEASE card's deposit when it is not on the move-in invoice: "$3,000.00 · due Dec 1"
+    for a dated deposit nothing of which is collected yet, "$3,000.00 · 1 of 3 installments
+    paid" for a deposit plan (with what was collected before it, "$3,000.00 · $1,000.00
+    collected · 1 of 3 installments paid", once something is); ``""`` otherwise (the row's
+    usual words apply). ``found``: :func:`lease_deposits` when the caller read them.
+
+    A dated deposit is one the New lease page set "On a date" (``OneOffCharge.dated``, set at
+    creation), owed and on no invoice or draft; every other deposit, one saved before
+    PLAN-015d included, keeps the usual words (Fable's run-2 finding (d), run-3)."""
+    from finance.dates import day_short_text
+    from ledger.services import installments
+
+    rows = lease_deposits(lease) if found is None else found
+    if not rows:
+        return ""
+    deposit = rows[0]
+    price = format_amount(Decimal(deposit.price))
+    held = Decimal(deposit.held).quantize(CENT)  # type: ignore[attr-defined]
+    plan_pk = deposit.plan_pk  # type: ignore[attr-defined]
+    if plan_pk is not None:
+        progress = installments.progress(InstallmentPlan.objects.get(pk=plan_pk))
+        so_far = f" · {format_amount(held)} collected" if held > 0 else ""
+        return f"{price}{so_far} · {progress.paid_count} of {progress.count} installments paid"
+    if _riding(deposit) or not deposit.dated or deposit.balance <= 0 or held > 0:
+        return ""
+    return f"{price} · due {day_short_text(deposit.due_date)}"

@@ -18,7 +18,11 @@ class and the field names it rejected (never provider text).
   :mod:`payments.invoice_sync`) and it becomes ``ready``. For collection ``email`` it
   is then sent (:func:`send`); a failed send leaves it linked and ``ready``.
 - :func:`send` (``invoice_send``): the e-mail alone, then a re-fetch; ``sent`` once the
-  provider shows it sent (a later webhook does the same, :func:`note_sent`).
+  provider shows it sent (a later webhook does the same, :func:`note_sent`). When the company
+  setting "Invoice e-mails sent by" is the company (ADR-0020, PLAN-015c), the provider is asked
+  for no e-mail: the app's invoice e-mail with its PDF is queued
+  (:func:`ledger.services.invoice_messages.queue_invoice`, held by the Outbox while mail is
+  off), the invoice becomes ``sent`` here and the send is audited with ``sender: company``.
 - :func:`delete` (``invoice_delete``): the cancel of an invoiced charge (D6). The
   invoice is re-fetched (a paid one is never deleted), deleted (a 404 counts as already
   deleted) and re-fetched again; only an invoice the provider shows ``DELETED`` or no
@@ -98,6 +102,7 @@ import payments
 from finance.dates import day_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     AuditLog,
     CollectionMethod,
@@ -111,7 +116,6 @@ from ledger.models import (
     Payment,
     PaymentStatus,
     RentCharge,
-    RentChargeStatus,
     SyncFailure,
     format_quantity,
 )
@@ -183,6 +187,12 @@ SEND_REQUESTED = provider_sentence(
 )
 SEND_FAILED = provider_sentence("Invoice {number} is in {provider}, but sending it failed")
 ALREADY_SENT = "Invoice {number} was already sent."
+#: ADR-0020 (PLAN-015c): the company e-mails the invoice with its PDF.
+COMPANY_SENT = "Invoice {number} is queued to be e-mailed with its PDF."
+COMPANY_SEND_FAILED = (
+    "Invoice {number} could not be queued for e-mail: it bills no lease, or the invoice"
+    " template is off."
+)
 NOT_LINKED = provider_sentence("The charge's invoice is not in {provider} yet. Nothing was sent.")
 DELETE_PAID = provider_sentence("{provider} shows the invoice paid. Nothing was cancelled.")
 DELETE_NOT_CONFIRMED = provider_sentence(
@@ -388,8 +398,8 @@ def _builder_lines(charge: OneOffCharge) -> list[InvoiceLineItem]:
         InvoiceLineItem.objects.filter(invoice__one_off_charge=charge)
         .filter(Q(one_off_charge__isnull=False) | Q(rent_charge__isnull=False))
         .exclude(one_off_charge__status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
-        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
-        .select_related("one_off_charge")
+        .exclude(rent_charge__status__in=NOT_BILLED_RENT)
+        .select_related("one_off_charge", "rent_charge")
         .order_by("position")
     )
 
@@ -398,7 +408,7 @@ def _rent_lines(invoice: Invoice) -> list[InvoiceLineItem]:
     """The Rent lines of an invoice of rent alone, not waived, in line order."""
     return list(
         InvoiceLineItem.objects.filter(invoice=invoice, rent_charge__isnull=False)
-        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
+        .exclude(rent_charge__status__in=NOT_BILLED_RENT)
         .order_by("position")
     )
 
@@ -406,7 +416,7 @@ def _rent_lines(invoice: Invoice) -> list[InvoiceLineItem]:
 def _line_amounts(items: list[InvoiceLineItem]) -> Amounts:
     """One provider line per line item, no tax; the total is their sum."""
     provider_lines = tuple(_provider_line(item) for item in items)
-    amount = sum((Decimal(item.line_total) for item in items), ZERO)
+    amount = sum((line.total for line in provider_lines), ZERO)
     return Amounts(amount, amount, ZERO, provider_lines)
 
 
@@ -414,18 +424,27 @@ def _provider_line(item: InvoiceLineItem) -> LineItem:
     """One builder line for the provider: its text (the item, PLAN-012b D3), its quantity
     and unit price when they multiply to its total exactly, else quantity 1 at its total
     with the charge's description (which names the quantity), so that the lines always
-    sum to the invoice's total; its detail as the line's ``details`` either way."""
+    sum to the invoice's total; its detail as the line's ``details`` either way. A Rent line
+    whose charge carries a free-rent concession carries it as the line's discount (PLAN-015d
+    §9.2), so the line's total is the charge's net."""
     quantity = Decimal(item.quantity)
+    rent = item.rent_charge
+    discount = Decimal(rent.concession) if rent is not None else ZERO
     if quantity * Decimal(item.unit_price) == Decimal(item.line_total):
         return LineItem(
             item.description,
             Decimal(format_quantity(quantity)),
             Decimal(item.unit_price),
             details=item.details,
+            discount=discount,
         )
     text = item.one_off_charge.description if item.one_off_charge is not None else ""
     return LineItem(
-        text or item.description, Decimal(1), Decimal(item.line_total), details=item.details
+        text or item.description,
+        Decimal(1),
+        Decimal(item.line_total),
+        details=item.details,
+        discount=discount,
     )
 
 
@@ -599,6 +618,10 @@ def note_sent(invoice: Invoice, record: InvoiceRecord) -> None:
 def _send(
     charge: OneOffCharge | RentCharge, invoice: Invoice, ref: str, actor: User | None
 ) -> Result:
+    from ledger.services import invoice_messages
+
+    if invoice_messages.company_sends():
+        return _queue_company_email(invoice, ref, actor)
     number = invoice.invoice_number
     provider = payments.get_provider()
     entity = ENTITY_RENT_CHARGE if isinstance(charge, RentCharge) else ENTITY_CHARGE
@@ -628,6 +651,34 @@ def _send(
         },
     )
     return True, (SENT if shown else SEND_REQUESTED).format(number=number)
+
+
+def _queue_company_email(invoice: Invoice, ref: str, actor: User | None) -> Result:
+    """The company sends (ADR-0020): queue the app's invoice e-mail, ask the provider for
+    none, and mark the invoice ``sent`` (from ``draft`` or ``ready``) here."""
+    from ledger.services import invoice_messages
+
+    number = invoice.invoice_number
+    try:
+        queued = invoice_messages.queue_invoice(invoice, actor=actor)
+    except ValueError:
+        return False, COMPANY_SEND_FAILED.format(number=number)
+    Invoice.objects.filter(
+        pk=invoice.pk, internal_status__in=[InvoiceStatus.DRAFT, InvoiceStatus.READY]
+    ).update(internal_status=InvoiceStatus.SENT, updated_at=timezone.now())
+    _audit(
+        actor,
+        "invoice.sent",
+        ENTITY_INVOICE,
+        invoice.pk,
+        {
+            "invoice_number": number,
+            "provider_invoice": mask_identifier(ref),
+            "sender": "company",
+            "message": str(queued.pk) if queued is not None else None,
+        },
+    )
+    return True, COMPANY_SENT.format(number=number)
 
 
 def send(charge_id: uuid.UUID, actor: User | None) -> Result:
@@ -1580,3 +1631,74 @@ def _create_for_schedule(
                 {"invoice_number": invoice.invoice_number, "provider_total": str(total)},
             )
     return WebhookOutcome.PROCESSED, invoice
+
+
+# --- The void of a sent, unpaid invoice (PLAN-015d §3 (1)) -------------------------------------
+
+#: The ``invoice_void`` job's parameters: the invoice, what becomes of its rent charges
+#: (:data:`ledger.services.move_in.RENT_VOID` or ``RENT_FOLLOW_START``) and whether a new
+#: move-in draft is prepared after it.
+VOID_INVOICE_PARAM = "invoice"
+VOID_RENT_PARAM = "rent"
+VOID_REDRAFT_PARAM = "redraft"
+NO_INVOICE = "The invoice no longer exists."
+VOID_PAID = "Something was paid on this invoice, so it was not voided."
+
+
+def void(invoice_id: uuid.UUID, actor: User | None, *, rent: str, redraft: bool) -> Result:
+    """The ``invoice_void`` job: the invoice deleted at the provider as :func:`delete` deletes
+    it (a paid one never; a 404 counts as deleted; re-fetched after), then, in one
+    transaction, the provider's state copied, the invoice ``void`` and its lines released by
+    :func:`ledger.services.move_in.after_void`. Refused, with nothing sent, once anything was
+    paid or is pending on its charges; a second run of a void invoice does nothing more."""
+    from ledger.services import move_in
+
+    invoice = Invoice.objects.filter(pk=invoice_id).first()
+    if invoice is None:
+        return False, NO_INVOICE
+    if invoice.internal_status == InvoiceStatus.VOID:
+        return True, move_in.VOIDED
+    if move_in.invoice_paid(invoice):
+        return False, VOID_PAID
+    ref = _ref(invoice)
+    record = None
+    if ref:
+        provider = payments.get_provider()
+        try:
+            record = _fetch(provider.get_invoice, ref)
+            if record is not None and invoice_sync.shows_paid(record):
+                return False, str(DELETE_PAID)
+            if record is not None and not invoice_sync.shows_deleted(record):
+                try:
+                    provider.delete_invoice(ref)
+                except ProviderRejected as error:
+                    if error.status != NOT_FOUND:
+                        raise
+                record = _fetch(provider.get_invoice, ref)
+        except ProviderError as error:
+            _audit(
+                actor,
+                "invoice.void_failed",
+                ENTITY_INVOICE,
+                invoice.pk,
+                {"invoice_number": invoice.invoice_number, "failure": _failure(error)},
+            )
+            return False, f"{DELETE_FAILED}: {_failure(error)}."
+        if record is not None and not invoice_sync.shows_deleted(record):
+            return False, str(DELETE_NOT_CONFIRMED)
+    with transaction.atomic():
+        if record is not None:
+            invoice_sync.record_provider_state(invoice.pk, record)
+        elif ref:
+            invoice_sync.record_provider_status(invoice.pk, invoice_sync.PROVIDER_DELETED)
+        outcome = move_in.after_void(
+            invoice,
+            actor,
+            rent=rent,
+            redraft=redraft,
+            context={
+                "provider_invoice": mask_identifier(ref) if ref else None,
+                "provider_status": record.raw_status if record is not None else None,
+            },
+        )
+    return outcome.ok, outcome.message

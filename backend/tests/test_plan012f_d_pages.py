@@ -382,6 +382,13 @@ FORM_PAGES = (
     # PLAN-014 B5: the Edit note and Delete note dialogs over the store page.
     "ledger:notes:edit",
     "ledger:notes:delete",
+    # PLAN-015b: Pause collection, Resume collection (§9.2) and Activate now, dialogs over the
+    # store page (the world's lease is active, so Resume and Activate now show their refusal).
+    "ledger:leases:pause_collection",
+    "ledger:leases:resume_collection",
+    "ledger:leases:activate",
+    # PLAN-015d §3 (1): Change start date, a dialog over the store page (GET and POST).
+    "ledger:leases:change_start",
 )
 
 POST_ONLY = "a POST-only action (405 to a GET)"
@@ -407,6 +414,9 @@ NOT_PAGES: dict[str, str] = {
     "ledger:calendar:search": "the calendar entry dialog's link rows (JSON for its script)",
     "ledger:invoices:print": "the invoice document's print page (its own layout)",
     "ledger:lease_ends:pdf": "the statement PDF",
+    # PLAN-015c: rendered on request, downloaded.
+    "ledger:invoices:pdf": "the invoice PDF",
+    "ledger:payments:receipt": "the receipt PDF",
     "ledger:documents:download": "a stored file",
     "ledger:documents:preview": "a stored file in a frame",
     "ledger:stores:schedule_payment": "a redirect to the builder with its choice (PLAN-012e-2 D3)",
@@ -511,6 +521,12 @@ AUTHOR_PAGES = (
 )
 
 
+#: Form pages whose view asks more than the route's registry role of the world's records:
+#: Change start date is billing on a prospective lease, admin on an active one (PLAN-015d
+#: §9.1), and the world's lease is active.
+VIEW_ROLES = {"ledger:leases:change_start": Role.ADMIN}
+
+
 def client_of(world: World, name: str, clients: dict[Role, Client]) -> Client:
     if name in AUTHOR_PAGES:
         return world.author
@@ -521,6 +537,8 @@ def client_of(world: World, name: str, clients: dict[Role, Client]) -> Client:
 def role_of(name: str) -> Role:
     if name in PAGES:
         return PAGES[name]
+    if name in VIEW_ROLES:
+        return VIEW_ROLES[name]
     rule = registry.rule_for(name)
     assert rule is not None and rule.min_role is not None, name
     return rule.min_role
@@ -566,6 +584,23 @@ def test_the_routes_that_are_not_pages_answer_as_listed(world: World) -> None:
 PORTAL_NOT_PAGES: dict[str, str] = {
     "portal:manifest": "the portal's PWA manifest (JSON), opening on /portal/",
 }
+
+
+#: PLAN-015c: the portal's routes that are not pages and need a signed-in operator (so not in
+#: the public manifest's test above): files rendered on request. Their isolation and their
+#: answers are tested per route in tests/test_plan014_h_isolation.py.
+PORTAL_PRIVATE_NOT_PAGES: dict[str, str] = {
+    "portal:invoice_pdf": "the invoice PDF",
+    "portal:receipt_pdf": "the receipt PDF",
+}
+
+
+def test_the_portal_private_routes_that_are_not_pages_are_classified() -> None:
+    names = {name for name, _, _ in iter_routes() if name}
+    for name in PORTAL_PRIVATE_NOT_PAGES:
+        assert name in names and name in registry.PORTAL_ROUTE_NAMES, name
+        assert name not in registry.PORTAL_PUBLIC_ROUTE_NAMES, name
+        assert name not in PORTAL_NOT_PAGES, name
 
 
 def test_the_portal_routes_that_are_not_pages_answer_as_listed() -> None:

@@ -33,6 +33,10 @@ from ledger.models import (
     FeeType,
     Note,
     OneOffCategory,
+    Payment,
+    PaymentKind,
+    PaymentMethod,
+    PaymentStatus,
     Store,
 )
 from ledger.services import attention, detail_cards, notes, timeline
@@ -476,7 +480,7 @@ def _deposit(lease: Any, operator: Any, paid: str) -> None:
     fee, _ = FeeType.objects.get_or_create(
         code="deposit-i-b", defaults={"name": "Security deposit", "refundable": True}
     )
-    a_one_off_charge(
+    charge = a_one_off_charge(
         operator,
         "3000.00",
         date(2026, 9, 1),
@@ -488,6 +492,19 @@ def _deposit(lease: Any, operator: Any, paid: str) -> None:
         collection="none",
         status="paid" if paid == "3000.00" else "owed",
     )
+    # PLAN-015d (Fable's finding 3): the card reads what was collected from the payments
+    # (ledger.services.deposits.collected), so the amount paid is a settled payment too.
+    if Decimal(paid) > 0:
+        Payment.objects.create(
+            one_off_charge=charge,
+            kind=PaymentKind.ONE_OFF,
+            method=PaymentMethod.ZELLE,
+            amount=Decimal(paid),
+            status=PaymentStatus.SETTLED,
+            initiated_on=date(2026, 9, 1),
+            settled_on=date(2026, 9, 1),
+            note="Paid by Zelle.",
+        )
 
 
 @pytest.mark.parametrize(
@@ -495,6 +512,8 @@ def _deposit(lease: Any, operator: Any, paid: str) -> None:
     [
         ("3000.00", "$3,000.00 · collected", "side-paid"),
         ("1000.00", "$3,000.00 · $1,000.00 collected", "side-partial"),
+        # PLAN-015d: only a deposit marked dated at creation shows its due date (767d749); this
+        # one is a plain setup charge, so, uncollected, it keeps the usual words.
         ("0.00", "$3,000.00 · not collected", "side-unpaid"),
     ],
 )

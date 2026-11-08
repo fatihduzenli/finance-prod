@@ -927,6 +927,12 @@ LEDGER_CASES: list[ConstraintCase] = [
     ConstraintCase(
         "leases_debit_day_range", lambda: new_lease(debit_day=31), lambda: new_lease(debit_day=32)
     ),
+    # PLAN-015d: free rent of 0 to 366 days.
+    ConstraintCase(
+        "leases_free_rent_days_range",
+        lambda: new_lease(free_rent_days=366),
+        lambda: new_lease(free_rent_days=367),
+    ),
     ConstraintCase(
         "leases_second_debit_day_range",
         lambda: new_lease(debit_day=1, second_debit_day=15),
@@ -1058,6 +1064,17 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_rent_charge(amount_paid=D("0.00")),
         lambda: new_rent_charge(amount_paid=D("-0.01")),
     ),
+    # PLAN-015d: a concession is never negative and never more than the rent.
+    ConstraintCase(
+        "rent_charges_concession_not_negative",
+        lambda: new_rent_charge(concession=D("0.00")),
+        lambda: new_rent_charge(concession=D("-0.01")),
+    ),
+    ConstraintCase(
+        "rent_charges_concession_within_amount",
+        lambda: new_rent_charge(concession=D("2450.00")),
+        lambda: new_rent_charge(concession=D("2450.01")),
+    ),
     _field_unique("rent_charges", "local_ref", new_rent_charge, _UUID_1, _UUID_2),
     # insurance_premiums
     ConstraintCase(
@@ -1156,6 +1173,13 @@ LEDGER_CASES: list[ConstraintCase] = [
         "one_off_charges_collection_none_only_setup",
         lambda: new_setup_charge(collection="none"),
         lambda: new_one_off_charge(collection="none"),
+    ),
+    # PLAN-015d §3 (3), Fable's run-3 finding: only a deposit (setup, collection none) is
+    # dated.
+    ConstraintCase(
+        "one_off_charges_dated_only_setup",
+        lambda: new_setup_charge(collection="none", dated=True),
+        lambda: new_one_off_charge(dated=True),
     ),
     ConstraintCase(
         "one_off_charges_has_operator",
@@ -2241,7 +2265,24 @@ LEDGER_CASES: list[ConstraintCase] = [
     ConstraintCase(
         "payments_credit_only_credit_rows",
         lambda: new_payment(method="credit", note="Applied.", credit=saved(new_lease_credit())),
-        lambda: new_payment(method="wire", note="Wire.", credit=saved(new_lease_credit())),
+        # PLAN-015d: a rent payment naming no charge may name the credit it is held as; one
+        # still paying a charge may not.
+        lambda: new_payment(
+            method="wire",
+            note="Wire.",
+            credit=saved(new_lease_credit()),
+            rent_charge=saved(new_rent_charge()),
+        ),
+    ),
+    ConstraintCase(
+        "payments_credit_only_credit_rows",
+        lambda: new_payment(method="ach", credit=saved(new_lease_credit())),
+        lambda: new_payment(
+            kind="one_off",
+            method="ach",
+            credit=saved(new_lease_credit()),
+            one_off_charge=saved(new_one_off_charge()),
+        ),
     ),
     ConstraintCase(
         "payments_credit_refund_shape",

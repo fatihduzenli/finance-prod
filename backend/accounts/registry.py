@@ -92,6 +92,9 @@ PORTAL_ROUTE_NAMES: frozenset[str] = PORTAL_PUBLIC_ROUTE_NAMES | frozenset(
         "portal:bank",
         "portal:account",
         "portal:password",
+        # PLAN-015c: the invoice and receipt PDFs of the operator's own stores.
+        "portal:invoice_pdf",
+        "portal:receipt_pdf",
     }
 )
 
@@ -165,6 +168,15 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:leases:switch_own": RouteRule(min_role=Role.BILLING, methods=POST),
     # The LEASE card's insurance "Bill now" (PLAN-014 I-b): billing; the view checks again.
     "ledger:leases:insurance_bill": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The LEASE card's Pause / Resume collection (PLAN-015b §9.3: admin, as the autopay pause
+    # and resume) and Activate now (billing); the views refuse the dialogs' GET below that
+    # role too.
+    "ledger:leases:pause_collection": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:leases:resume_collection": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:leases:activate": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Change start date (PLAN-015d §9.1): billing on a prospective lease, admin on an active
+    # one (the view checks the lease's status and refuses the GET below that role too).
+    "ledger:leases:change_start": RouteRule(min_role=Role.BILLING, methods=POST),
     # Ending a lease (PLAN-010b Batch C): admin. The view refuses the form's GET below
     # admin too, and sends an admin to the end-of-lease wizard (PLAN-012e D4).
     "ledger:leases:end": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -544,6 +556,10 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:invoices:draft",
         "ledger:invoices:preview",
         "ledger:invoices:print",
+        # PLAN-015c: an invoice's PDF and a settled payment's receipt PDF, rendered on
+        # request as downloads (any role, as the print view); GET only.
+        "ledger:invoices:pdf",
+        "ledger:payments:receipt",
         # PLAN-012f-b D15: the "Invoice saved" dialog over the Invoices tab (billing,
         # checked by the view); GET only, it writes nothing.
         "ledger:invoices:saved",

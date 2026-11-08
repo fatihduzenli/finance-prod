@@ -43,6 +43,23 @@
       <button class="btn btn-primary" type="submit">Save</button>
     </form>
   </section>
+  {% comment %}PLAN-015c (ADR-0020): the Company card. The address prints in the band of the invoice and receipt PDFs (the lines that are set, joined by commas). "Invoice e-mails sent by" names the processor (its display name; the default, nothing changes) or the company (its short name): the app then e-mails each invoice itself with its PDF, held in the Outbox while mail is not set up. Posted to the Mail card's route with section=company.{% endcomment %}
+  <section class="card settings-card" id="company-card">
+    <div class="card-header"><h2 id="company">Company</h2></div>
+    <form method="post" action="{% url 'ledger:settings:mail_save' %}" id="company-form">{% csrf_token %}
+      <input type="hidden" name="section" value="company">
+      <div class="field"><label for="company-address1">Address line 1</label><input type="text" name="address_line1" id="company-address1" value="{{ company_card.address_line1 }}" maxlength="200" autocomplete="off"></div>
+      <div class="field"><label for="company-address2">Address line 2</label><input type="text" name="address_line2" id="company-address2" value="{{ company_card.address_line2 }}" maxlength="200" autocomplete="off"></div>
+      <div class="field"><label for="company-city">City</label><input type="text" name="city" id="company-city" value="{{ company_card.city }}" maxlength="100" autocomplete="off"></div>
+      <div class="field"><label for="company-state">State</label><input type="text" name="state" id="company-state" value="{{ company_card.state }}" maxlength="50" autocomplete="off"></div>
+      <div class="field"><label for="company-postal-code">ZIP code</label><input type="text" name="postal_code" id="company-postal-code" value="{{ company_card.postal_code }}" maxlength="20" autocomplete="off"><span class="help">Printed on the invoice and receipt PDFs.</span></div>
+      <fieldset class="field" id="company-invoice-sender"><legend>Invoice e-mails sent by</legend>
+        {% for value, label in invoice_senders %}<p><label><input type="radio" name="invoice_sender" value="{{ value }}" id="invoice-sender-{{ value }}"{% if company_card.invoice_sender == value %} checked{% endif %}> {{ label }}</label></p>{% endfor %}
+        <span class="help">{{ company.provider_name }}: the processor e-mails each invoice, as today. {{ company.short_name }}: the app e-mails each invoice with its PDF and the pay links, and asks the processor for none.</span>
+      </fieldset>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+  </section>
   {% comment %}PLAN-014 I2: the Bank deposits card. Whether the Plaid keys are here reads their presence, never a value. The switches turn the module on and the automatic confirmation of exact matches. Connect a bank account (admin, once the module is on and a bank source exists) asks the server for a link token, opens Plaid Link (Plaid's script, loaded only here and only then, banking/static/banking/link.js) and posts back only the public token, the chosen account's id and the institution's name; the server exchanges the token and keeps the access token encrypted. Locally without keys the fake source connects a fake account with one click (no script). The mask is Plaid's last four of the business's own account.{% endcomment %}
   <section class="card settings-card" id="bank-deposits-card">
     <div class="card-header"><h2 id="bank-deposits">Bank deposits</h2></div>

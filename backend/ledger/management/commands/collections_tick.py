@@ -1,6 +1,9 @@
 """``collections_tick``: the daily tick (docs/qa/PLAN-011b D8).
 
-Run once a day by the scheduled job (09:00 New York). First it creates the day's rent
+Run once a day by the scheduled job (09:00 New York). First it makes active the prospective
+leases whose start date has come (:func:`ledger.services.leases.activate_due`, PLAN-015b §3 A:
+each audited ``lease.activated`` and charged at once; one that misses an operator, a debit day
+or a known channel waits, counted). Then it creates the day's rent
 charges and catches up the missing ones (:func:`ledger.services.rent_run.create_charges`
 with no actor, PLAN-012b-b D3, as the run page's button does), so that the collection
 rules after it read them, and records what it created in one ``rent_run.ticked`` audit
@@ -28,7 +31,8 @@ only, when the Bank deposits module is ready), so it runs whatever process role 
 more (it writes a second ``rent_run.ticked`` row, with nothing created; a second bank fetch
 adds no deposit already read). It prints counts only; the bank's part is
 :func:`banking.services.tick_line` ("Bank deposits fetched: 3 (new 2)." or "Bank deposits: off."
-with why).
+with why), and the line ends with the activations ("Leases activated: 1 (0 waiting on
+details).").
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ from ledger.services import (
     contacts,
     disputes,
     lease_end,
+    leases,
     nsf,
     reminders,
     rent_run,
@@ -59,6 +64,8 @@ class Command(BaseCommand):
 
     def handle(self, *args: Any, **options: Any) -> None:
         today = timezone.localdate()
+        # PLAN-015b §3 A: before the rent run, so a lease starting today is charged today.
+        activation = leases.activate_due(today)
         # First, so that what follows reads today's charges (PLAN-012b-b D3).
         charges = rent_run.create_charges(today, actor=None)
         # PLAN-012d D11: the run's report, for the run page and the dashboard's line.
@@ -89,5 +96,7 @@ class Command(BaseCommand):
             f"Morning e-mails queued: {morning.entries}. "
             f"Promise reminders queued: {morning.promises}. Promises kept by a payment: {kept}. "
             f"Dispute list read queued: {'yes' if dispute_read else 'no'}. "
-            f"Lease-end drafts without terms removed: {swept}."
+            f"Lease-end drafts without terms removed: {swept}. "
+            f"Leases activated: {activation.activated} "
+            f"({activation.waiting} waiting on details)."
         )

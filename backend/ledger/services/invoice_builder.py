@@ -184,7 +184,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Max
+from django.db.models import Max, Prefetch
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -195,12 +195,14 @@ from ledger.models import (
     INSTALLMENTS_MAX,
     INSTALLMENTS_MIN,
     NAME_MAX_LENGTH,
+    NOT_BILLED_RENT,
     NSF_FEE_CODES,
     ZERO,
     AuditLog,
     AutopayPlan,
     CollectionMethod,
     CollectionStatus,
+    CompanySettings,
     FeeType,
     InstallmentCollection,
     InstallmentOrigin,
@@ -227,6 +229,7 @@ from ledger.models import (
 )
 from ledger.services import (
     autopay_plans,
+    free_rent,
     installments,
     leases,
     numbering,
@@ -361,6 +364,10 @@ ATTACHED_ACTION = "one_off_charge.attached_to_invoice"
 RENT_ALONE = (
     "An invoice of rent alone has one rent line: bill the other months on their own "
     "invoices or with another line. Nothing was saved."
+)
+#: PLAN-015d: free rent covers everything the invoice bills.
+NOTHING_TO_BILL = (
+    "Free rent covers everything on this invoice, so there is nothing to bill. Nothing was sent."
 )
 RENT_ALONE_CHARGE_NOW = (
     "Charge now needs a line other than rent on the invoice. Nothing was charged."
@@ -638,6 +645,19 @@ def bill_to(lease: Lease | None, operator: Operator) -> BillTo:
 
 
 @dataclass(frozen=True, slots=True)
+class DiscountLine:
+    """A free-rent concession shown under the lines (PLAN-015d §3 (2)): its words and its
+    amount (above zero; the pages show it negative)."""
+
+    item: str
+    amount: Decimal
+
+    @property
+    def shown(self) -> Decimal:
+        return -self.amount
+
+
+@dataclass(frozen=True, slots=True)
 class Preview:
     """What the preview and print pages show (D7)."""
 
@@ -659,6 +679,9 @@ class Preview:
     #: PLAN-014 I5: "Paying by wire or Zelle? Put INV-… in the memo." once sent (never on
     #: a draft or a void invoice), else ``""``.
     pay_memo: str
+    #: PLAN-015d: the free-rent concessions of its Rent lines, under the lines; ``total`` is
+    #: net of them.
+    discounts: tuple[DiscountLine, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -726,17 +749,81 @@ def total_of(lines: Sequence[InvoiceDraftLine | CleanLine]) -> Decimal:
     return sum((Decimal(line.line_total) for line in lines), ZERO)
 
 
-def preview(draft: InvoiceDraft, today: date | None = None) -> Preview:
-    """The preview of ``draft`` (D7): its invoice's figures once sent."""
+def discounts_for(lines: Sequence[InvoiceDraftLine | CleanLine]) -> tuple[DiscountLine, ...]:
+    """The free-rent concession of each Rent line (PLAN-015d §3 (2)): the month's charge's
+    when the run made it, else what :func:`ledger.services.free_rent.concession_for` gives the
+    line's amount; none for a month without free days."""
+    found: list[DiscountLine] = []
+    for line in lines:
+        lease, month = line.rent_lease, line.rent_month
+        if lease is None or month is None:
+            continue
+        charge = RentCharge.objects.filter(lease=lease, period_month=month, seq=1).first()
+        if charge is not None and charge.status not in NOT_BILLED_RENT:
+            amount, words = Decimal(charge.concession), charge.concession_text
+        else:
+            amount, words = free_rent.concession_for(lease, month, Decimal(line.line_total))
+        if amount > 0:
+            found.append(DiscountLine(words, amount))
+    return tuple(found)
+
+
+def net_total(lines: Sequence[InvoiceDraftLine | CleanLine]) -> Decimal:
+    """The lines' total less their free-rent concessions: what the invoice bills."""
+    return total_of(lines) - sum((line.amount for line in discounts_for(lines)), ZERO)
+
+
+def sent_lines_prefetch() -> Prefetch[Any, Any, Any]:
+    """The sent invoice's lines of a draft, read once with their one-off charges: the pages
+    of a draft load it with this (PLAN-015d), so that :func:`sent_charges` and
+    :func:`invoice_discounts` share one read."""
+    return Prefetch(
+        "sent_invoice__line_items",
+        queryset=InvoiceLineItem.objects.select_related("one_off_charge").order_by("position"),
+    )
+
+
+def _invoice_lines(invoice: Invoice) -> list[InvoiceLineItem]:
+    """``invoice``'s lines in line order, their one-off charges with them: the prefetch of
+    :func:`sent_lines_prefetch` when the caller made it, else one read here."""
+    if "line_items" in getattr(invoice, "_prefetched_objects_cache", {}):
+        return list(invoice.line_items.all())
+    return list(invoice.line_items.select_related("one_off_charge").order_by("position"))
+
+
+def invoice_discounts(invoice: Invoice) -> tuple[DiscountLine, ...]:
+    """The discount lines of a sent invoice (kind ``discount``), in line order."""
+    return tuple(
+        DiscountLine(str(item.description), Decimal(item.line_total))
+        for item in _invoice_lines(invoice)
+        if item.kind == InvoiceLineKind.DISCOUNT
+    )
+
+
+def preview(
+    draft: InvoiceDraft,
+    today: date | None = None,
+    *,
+    company: CompanySettings | None = None,
+) -> Preview:
+    """The preview of ``draft`` (D7): its invoice's figures once sent. ``company``: the
+    company settings row the page has read already (else it is read here)."""
     day = today or timezone.localdate()
     lines = lines_of(draft)
     invoice = draft.sent_invoice
     lease = draft.lease
+    discounts = invoice_discounts(invoice) if invoice is not None else discounts_for(lines)
     return Preview(
         draft=draft,
         lines=lines,
-        total=invoice.total if invoice is not None else total_of(lines),
-        company=str(settings.COMPANY_NAME),
+        total=(
+            invoice.total
+            if invoice is not None
+            else total_of(lines) - sum((d.amount for d in discounts), ZERO)
+        ),
+        discounts=discounts,
+        # PLAN-015c, the owner's decision 4: the company settings' name (as the PDFs').
+        company=str((company if company is not None else CompanySettings.read()).name),
         operator=draft.operator,
         lease=lease,
         store=lease.store if lease is not None else None,
@@ -756,16 +843,11 @@ def preview(draft: InvoiceDraft, today: date | None = None) -> Preview:
 
 def sent_charges(draft: InvoiceDraft) -> list[OneOffCharge]:
     """The charges of a sent draft's invoice, in line order."""
-    if draft.sent_invoice_id is None:
+    invoice = draft.sent_invoice
+    if invoice is None:
         return []
     return [
-        line.one_off_charge
-        for line in InvoiceLineItem.objects.filter(
-            invoice_id=draft.sent_invoice_id, one_off_charge__isnull=False
-        )
-        .select_related("one_off_charge")
-        .order_by("position")
-        if line.one_off_charge is not None
+        line.one_off_charge for line in _invoice_lines(invoice) if line.one_off_charge is not None
     ]
 
 
@@ -910,8 +992,15 @@ def rent_charge_refusal(charge: RentCharge) -> str:
     included); on a live installment plan."""
     if charge.status == RentChargeStatus.WAIVED:
         return LINE_RENT_WAIVED
+    # PLAN-015d: a month free rent covers in full reads paid with nothing paid; a Rent line
+    # may still bill it (its discount line nets it).
+    covered = charge.status == RentChargeStatus.PAID and charge.net_due <= 0
     if (
-        charge.status in (RentChargeStatus.PAID, RentChargeStatus.PARTIAL, RentChargeStatus.PENDING)
+        (
+            charge.status
+            in (RentChargeStatus.PAID, RentChargeStatus.PARTIAL, RentChargeStatus.PENDING)
+            and not covered
+        )
         or charge.amount_paid > 0
         or rent_run.on_live_plan(rent_charge=charge)
         or any(
@@ -1623,7 +1712,7 @@ def charge_now_unavailable(operator: Operator | None, lease: Lease | None = None
 
 def charge_now_details(draft: InvoiceDraft, actor: User | None) -> ChargeNowDetails:
     """The confirmation page of Charge now on a draft (admin). Never calls the provider."""
-    total = total_of(lines_of(draft))
+    total = net_total(lines_of(draft))
     if not _is_admin(actor):
         refusal = CHARGE_NOW_ADMIN
     elif draft.status != InvoiceDraftStatus.DRAFT:
@@ -2158,6 +2247,10 @@ def _record(
                 prefix = LINE_PREFIX.format(line=item.position)
                 return Outcome(False, prefix + paid.message, paid.field, draft=converted.draft)
             payments.append(paid.payment)
+        # PLAN-015c: the entry's one receipt e-mail, once its rows are all written.
+        from ledger.services import invoice_messages
+
+        invoice_messages.queue_entry_receipt(payments, actor)
     return replace(
         converted,
         message=RECORDED.format(number=converted.invoice.invoice_number),
@@ -2190,7 +2283,9 @@ def _convert(
             return Outcome(False, error.outcome.message, error.outcome.field, draft=draft)
         if collection == CollectionMethod.MANUAL and any(line.is_rent for line in lines):
             return Outcome(False, RECORD_RENT, draft=draft)
-        total = total_of(lines)
+        total = net_total(lines)
+        if total <= 0:
+            return Outcome(False, NOTHING_TO_BILL, draft=draft)
         account = billing_account(operator, lease)
         if account is None:
             return Outcome(False, leases.NO_LEASE_BILLING, draft=draft)
@@ -2250,6 +2345,14 @@ def _convert(
             charges.append(made.charge)
         one_offs = [charge for charge in charges if isinstance(charge, OneOffCharge)]
         rents = [charge for charge in charges if isinstance(charge, RentCharge)]
+        # PLAN-015d: a Rent line's free rent is a discount line after the lines, from the
+        # charge's own concession; the invoice bills the net.
+        discounts = [
+            DiscountLine(rent.concession_text, Decimal(rent.concession))
+            for rent in rents
+            if rent.concession > 0
+        ]
+        total = total_of(lines) - sum((line.amount for line in discounts), ZERO)
         invoice = Invoice.objects.create(
             invoice_number=number,
             operator=operator,
@@ -2285,6 +2388,19 @@ def _convert(
                     kind=InvoiceLineKind.CHARGE,
                 )
                 for position, (line, charge) in enumerate(zip(lines, charges, strict=True), 1)
+            ]
+            + [
+                InvoiceLineItem(
+                    invoice=invoice,
+                    position=len(lines) + offset,
+                    description=discount.item,
+                    details="",
+                    quantity=Decimal(1),
+                    unit_price=discount.amount,
+                    line_total=discount.amount,
+                    kind=InvoiceLineKind.DISCOUNT,
+                )
+                for offset, discount in enumerate(discounts, 1)
             ]
         )
         for rent in rents:
@@ -2509,6 +2625,16 @@ def cancel(draft_id: uuid.UUID, actor: User | None, *, note: str = "") -> Outcom
             {"invoice_number": draft.sent_invoice.invoice_number if draft.sent_invoice else None},
         )
     return Outcome(outcome.ok, outcome.message, outcome.field, draft=draft, job=outcome.job)
+
+
+def discard_draft(draft: InvoiceDraft, actor: User | None, context: dict[str, Any]) -> None:
+    """Delete a never-sent draft for a rebuild (PLAN-015d: the move-in draft made again for
+    a new start date), audited as :func:`delete_draft` audits, with ``context``. The caller
+    holds the transaction; no role check (the caller's is the rebuild's)."""
+    if draft.status != InvoiceDraftStatus.DRAFT:
+        raise ValueError(NOT_A_DRAFT)
+    _audit(actor, DELETED_ACTION, draft, {**draft_state(draft), **context}, None)
+    draft.delete()
 
 
 def delete_draft(draft_id: uuid.UUID, actor: User | None) -> Outcome:

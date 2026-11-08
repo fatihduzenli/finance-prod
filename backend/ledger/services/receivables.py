@@ -86,10 +86,13 @@ from finance.us_states import state_name
 from ledger.models import (
     BANK_DEBIT_LABEL,
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     InstallmentPlanStatus,
     InsuranceCharge,
     Invoice,
+    InvoiceDraftLine,
+    InvoiceDraftStatus,
     InvoiceLineItem,
     InvoiceStatus,
     LegacyStatus,
@@ -200,7 +203,7 @@ def _rent_description(
 def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
     rows = (
         RentCharge.objects.filter(balance__gt=0)
-        .exclude(status=RentChargeStatus.WAIVED)
+        .exclude(status__in=NOT_BILLED_RENT)
         .exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
     )
     if operator is not None:
@@ -994,10 +997,32 @@ def owed_deposits() -> QuerySet[OneOffCharge]:
     )
 
 
-def _deposit_balances() -> list[OpenBalance]:
-    """:func:`owed_deposits` as receivables rows, in one query."""
+def dated_deposits(operator: uuid.UUID | None = None) -> list[OpenBalance]:
+    """The deposits owed that the New lease page set "Due on a date" (PLAN-015d §3 (3):
+    ``OneOffCharge.dated``, set at creation) and that do not ride an invoice (one put on a
+    sent invoice or a draft not yet sent later goes with it), as receivables rows: the
+    reminders follow their due dates and the portal offers Pay for them. A deposit saved
+    before PLAN-015d is not dated. They stay out of :func:`open_balances` (money held, not
+    revenue)."""
+    drafted = InvoiceDraftLine.objects.filter(
+        draft__status=InvoiceDraftStatus.DRAFT, existing_charge__isnull=False
+    ).values("existing_charge")
     rows = (
         owed_deposits()
+        .filter(dated=True, invoice_lines__isnull=True, invoices__isnull=True)
+        .exclude(pk__in=drafted)
+    )
+    if operator is not None:
+        rows = rows.filter(
+            Q(operator=operator) | Q(operator__isnull=True, lease__operator=operator)
+        )
+    return _deposit_balances(rows)
+
+
+def _deposit_balances(found: QuerySet[OneOffCharge] | None = None) -> list[OpenBalance]:
+    """:func:`owed_deposits` (or ``found``) as receivables rows, in one query."""
+    rows = (
+        (owed_deposits() if found is None else found)
         .values(
             "pk",
             "due_date",

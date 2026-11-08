@@ -209,6 +209,20 @@ lease_patterns = (
         path("<str:pk>/bank/attach/", leases.lease_bank_attach, name="bank_attach"),
         path("<str:pk>/bank/switch-own/", leases.lease_switch_own, name="switch_own"),
         path("<str:pk>/insurance/bill/", leases.lease_insurance_bill, name="insurance_bill"),
+        # PLAN-015b: the LEASE card's Pause / Resume collection and Activate now.
+        path(
+            "<str:pk>/pause-collection/",
+            leases.lease_pause_collection,
+            name="pause_collection",
+        ),
+        path(
+            "<str:pk>/resume-collection/",
+            leases.lease_resume_collection,
+            name="resume_collection",
+        ),
+        path("<str:pk>/activate/", leases.lease_activate, name="activate"),
+        # PLAN-015d: the LEASE card's Change start date.
+        path("<str:pk>/change-start/", leases.lease_change_start, name="change_start"),
         path(
             "<str:pk>/setup-charges/new/",
             one_off_charges.lease_add_setup_charge,
@@ -314,6 +328,8 @@ invoice_patterns = (
         path("drafts/<str:pk>/charge-now/", invoices.draft_charge_now, name="charge_now"),
         path("drafts/<str:pk>/cancel/", invoices.draft_cancel, name="cancel"),
         path("drafts/<str:pk>/delete/", invoices.draft_delete, name="delete_draft"),
+        # PLAN-015c: an invoice's PDF (the invoice's id; a rent-run invoice has no draft).
+        path("<str:pk>.pdf", invoices.invoice_pdf, name="pdf"),
     ],
     "invoices",
 )
@@ -326,6 +342,8 @@ payment_patterns = (
         path("<str:pk>/refund/", payments.payment_refund, name="refund"),
         path("<str:pk>/void/", payments.payment_void, name="void"),
         path("<str:pk>/void-manual/", payments.payment_void_manual, name="void_manual"),
+        # PLAN-015c: a settled payment's receipt PDF.
+        path("<str:pk>/receipt.pdf", payments.payment_receipt, name="receipt"),
     ],
     "payments",
 )

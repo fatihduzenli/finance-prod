@@ -69,6 +69,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from finance.context_processors import company_settings
 from ledger.forms import (
     ITEMS_LIST_ID,
     RENT_ITEM,
@@ -86,6 +87,7 @@ from ledger.forms import (
 from ledger.models import (
     CollectionMethod,
     FeeType,
+    Invoice,
     InvoiceDraft,
     InvoiceDraftStatus,
     Lease,
@@ -103,6 +105,8 @@ from ledger.services import (
 )
 from ledger.services import stores as store_service
 from ledger.services.invoice_builder import CollectChoice
+from ledger.services.pdf import downloads
+from ledger.services.pdf.invoice import pdf_filename, render_invoice
 from ledger.services.rent_run import ENTITY_CHARGE as ENTITY_RENT_CHARGE
 from ledger.services.rent_run import ENTITY_INVOICE
 from ledger.validators import contains_card_number
@@ -142,7 +146,7 @@ def _load(pk: str) -> InvoiceDraft:
     return get_object_or_404(
         InvoiceDraft.objects.select_related(
             "operator", "lease", "lease__store", "lease__operator", "sent_invoice"
-        ),
+        ).prefetch_related(invoice_builder.sent_lines_prefetch()),
         pk=_key(pk),
     )
 
@@ -824,7 +828,7 @@ def _draft_page_context(
     sent = _sent_context(draft) if draft.status == InvoiceDraftStatus.SENT else {}
     if sent:
         sent.update(_sent_detail(request, draft, sent))
-    preview = invoice_builder.preview(draft)
+    preview = invoice_builder.preview(draft, company=company_settings(request))
     preview_total = _lines_total(formset) if formset is not None else preview.total
     return {
         **sent,
@@ -1203,10 +1207,32 @@ def draft_preview(request: HttpRequest, pk: str) -> HttpResponse:
         "ledger/invoices/preview.html",
         {
             "draft": draft,
-            "preview": invoice_builder.preview(draft),
+            "preview": invoice_builder.preview(draft, company=company_settings(request)),
             "billing": meets(_role(request), Role.BILLING),
         },
     )
+
+
+@role_required
+@require_safe
+def invoice_pdf(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:invoices:pdf`` (any role; PLAN-015c): the invoice's PDF as a download, rendered
+    now from stored data (an invoice of the rent run, with no draft, as well), audited
+    ``invoice.pdf_downloaded``. ``pk`` is the invoice's, not a draft's."""
+    invoice = get_object_or_404(Invoice.objects.select_related("operator"), pk=_key(pk))
+    data = render_invoice(invoice, today=timezone.localdate())
+    filename = pdf_filename(invoice)
+    downloads.audit(
+        downloads.INVOICE_DOWNLOADED,
+        ENTITY_INVOICE,
+        invoice.pk,
+        actor=_actor(request),
+        filename=filename,
+    )
+    response = HttpResponse(data, content_type=downloads.CONTENT_TYPE)
+    for name, value in downloads.headers(filename, len(data)).items():
+        response[name] = value
+    return response
 
 
 @role_required
@@ -1216,5 +1242,7 @@ def draft_print(request: HttpRequest, pk: str) -> HttpResponse:
     and no navigation, to save as PDF from the browser's print dialog."""
     draft = _load(pk)
     return render(
-        request, "ledger/invoices/print.html", {"preview": invoice_builder.preview(draft)}
+        request,
+        "ledger/invoices/print.html",
+        {"preview": invoice_builder.preview(draft, company=company_settings(request))},
     )

@@ -124,6 +124,7 @@ from ledger.models import (
     INSTALLMENTS_MAX,
     INSTALLMENTS_MIN,
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     AuditLog,
     CollectionMethod,
@@ -569,6 +570,18 @@ def collection_of(parent: Parent) -> str:
     return InstallmentCollection.MANUAL
 
 
+def deposit_collection(deposit: OneOffCharge) -> str:
+    """How a deposit plan's installments are collected (PLAN-015d §3 (3)): as the lease's
+    channel collects rent — the processor's bank debit when the lease's account can take it
+    (``autopay_due``), else recorded by staff (``manual``)."""
+    lease = deposit.lease
+    if lease is not None and lease.payment_channel == PaymentChannel.PROVIDER_ACH:
+        billing = leases.billing_lease(deposit)
+        if not _collection_refusal(InstallmentCollection.AUTOPAY_DUE, billing):
+            return InstallmentCollection.AUTOPAY_DUE
+    return InstallmentCollection.MANUAL
+
+
 def installments_of(plan: InstallmentPlan) -> list[OneOffCharge]:
     return list(
         OneOffCharge.objects.filter(plan=plan).order_by("installment_no", "created_at", "id")
@@ -631,7 +644,7 @@ def _autopay_will_debit(charge: RentCharge, today: date) -> bool:
 
 
 def _rent_refusal(charge: RentCharge, today: date) -> str:
-    if charge.status == RentChargeStatus.WAIVED:
+    if charge.status in NOT_BILLED_RENT:
         return CLOSED
     if charge.status == RentChargeStatus.PENDING:
         return PENDING
@@ -647,7 +660,7 @@ def _rent_refusal(charge: RentCharge, today: date) -> str:
     return ""
 
 
-def _one_off_refusal(charge: OneOffCharge) -> str:
+def _one_off_refusal(charge: OneOffCharge, *, deposit_plan: bool = False) -> str:
     if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
         return CLOSED
     if charge.category in (
@@ -656,7 +669,7 @@ def _one_off_refusal(charge: OneOffCharge) -> str:
         OneOffCategory.INSTALLMENT,
     ):
         return NOT_SPLITTABLE
-    if charge.fee_type is not None and charge.fee_type.refundable:
+    if charge.fee_type is not None and charge.fee_type.refundable and not deposit_plan:
         return DEPOSIT
     billed_on = one_off_charges.billed_with(charge) or charge
     if billed_on.pk == charge.pk and _schedule_fired(charge):
@@ -753,9 +766,10 @@ def retry_release(parent: RentCharge) -> str | None:
     return str(job.kind)
 
 
-def split_refusal(parent: Parent, today: date | None = None) -> str:
+def split_refusal(parent: Parent, today: date | None = None, *, origin: str = "") -> str:
     """Why ``parent`` cannot be split now, or ``""`` (see the module docstring). Local
-    data only."""
+    data only. A deposit is refused unless ``origin`` is the New lease page's deposit plan
+    (PLAN-015d §3 (3))."""
     day = today or timezone.localdate()
     operator = operator_of(parent)
     if operator is None:
@@ -768,7 +782,7 @@ def split_refusal(parent: Parent, today: date | None = None) -> str:
         reason = _rent_refusal(parent, day)
         pending = Payment.objects.filter(rent_charge=parent, status=PaymentStatus.PENDING)
     else:
-        reason = _one_off_refusal(parent)
+        reason = _one_off_refusal(parent, deposit_plan=origin == InstallmentOrigin.DEPOSIT)
         pending = Payment.objects.filter(one_off_charge=parent, status=PaymentStatus.PENDING)
     if reason:
         return reason
@@ -1018,8 +1032,15 @@ def create_plan(
     try:
         with transaction.atomic():
             locked = _lock(parent)
-            reason = split_refusal(locked, day)
+            reason = split_refusal(locked, day, origin=origin)
             operator = operator_of(locked)
+            if (
+                not reason
+                and collection is None
+                and origin == InstallmentOrigin.DEPOSIT
+                and isinstance(locked, OneOffCharge)
+            ):
+                collection = deposit_collection(locked)
             if not reason and collection is not None and operator is not None:
                 reason = _collection_refusal(collection, leases.billing_lease(locked))
             if reason:
