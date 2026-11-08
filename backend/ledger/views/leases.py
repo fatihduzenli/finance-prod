@@ -25,6 +25,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
@@ -53,6 +54,7 @@ from ledger.forms import (
     LeaseEditForm,
     LinkForm,
     OperatorCreateForm,
+    PauseCollectionForm,
 )
 from ledger.models import (
     ChargeNote,
@@ -78,6 +80,7 @@ from ledger.services import (
     insurance,
     list_filters,
     one_off_charges,
+    rent_run,
     search,
     workspace,
 )
@@ -1193,3 +1196,184 @@ def lease_insurance_bill(request: HttpRequest, pk: str) -> HttpResponse:
         outcome = insurance.bill_now(lease, timezone.localdate(), actor=_actor(request))
         (messages.success if outcome.ok else messages.error)(request, outcome.message)
     return redirect("ledger:stores:detail", pk=lease.store_id)
+
+
+# --- Pause / Resume collection and Activate now (PLAN-015b) ------------------------------
+
+COLLECTION_PAUSED = "Collection paused."
+COLLECTION_PAUSED_AUTOPAY = "Collection paused. Autopay is being paused."
+COLLECTION_RESUMED = "Collection resumed."
+COLLECTION_RESUMED_AUTOPAY = "Collection resumed. Autopay is being resumed."
+LEASE_ACTIVATED = "Lease activated."
+#: The Resume dialog's first line (PLAN-015b §9.2).
+RESUME_BILLS = "Resuming will bill {count} paused {months}: {amount}."
+RESUME_BILLS_NOTHING = "Resuming will bill nothing."
+
+
+def _store_dialog(request: HttpRequest, lease: Lease, extra: dict[str, Any]) -> dict[str, Any]:
+    """The store page's context with a dialog's own names (``extra``): the dialog opens over
+    the lease's store page, as Stop plan does (PLAN-012f-b E-4)."""
+    from ledger.views.stores import _detail_context as store_page  # stores imports this module
+
+    return {**store_page(request, lease.store), **extra, "status_lease": lease}
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_pause_collection(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:pause_collection`` (admin; PLAN-015b §3 B, §9.3): GET is the dialog over
+    the store page (what will happen, the required reason); POST pauses collection
+    (:func:`ledger.services.leases.pause_collection`) and, when the lease's autopay was on,
+    queues its pause (``autopay_pause``, the worker's job; the view never calls the provider).
+    A form with errors or a refusal is held for the dialog's next GET (a reason holding a card
+    or account number is dropped, never shown again: :func:`ledger.views.operators._hold`);
+    done, it returns to the store page."""
+    refused = _admin_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    target = f"lease-pause-collection:{lease.pk}"
+    if request.method == "POST":
+        form = PauseCollectionForm(request.POST)
+        if form.is_valid():
+            try:
+                outcome = service.pause_collection(
+                    lease.pk, reason=form.cleaned_data["reason"], actor=_actor(request)
+                )
+            except LeaseRefused as error:
+                form.add_error(error.field if error.field in form.fields else None, str(error))
+            else:
+                if outcome.autopay_paused:
+                    # PLAN-015b §9.5: the job does nothing if collection is resumed first.
+                    submit(
+                        request,
+                        JobKind.AUTOPAY_PAUSE,
+                        lease,
+                        {service.EXPECTED_STATUS_PARAM: CollectionStatus.PAUSED.value},
+                    )
+                    messages.success(request, COLLECTION_PAUSED_AUTOPAY)
+                else:
+                    messages.success(request, COLLECTION_PAUSED)
+                return redirect("ledger:stores:detail", pk=lease.store_id)
+        _hold(request, target, form)
+        return redirect("ledger:leases:pause_collection", pk=lease.pk)
+    form = _held(request, target, PauseCollectionForm) or PauseCollectionForm()
+    refusal = "" if lease.collection_status == CollectionStatus.ACTIVE else service.PAUSE_NOT_ACTIVE
+    return render(
+        request,
+        "ledger/leases/pause_collection.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "pause_form": form,
+                "pause_refusal": refusal,
+                "pause_autopay": service.autopay_on(lease),
+            },
+        ),
+    )
+
+
+def resume_bills(lease: Lease, today: date) -> str:
+    """The Resume dialog's first line (PLAN-015b §9.2): what resuming ``lease`` on ``today``
+    bills, from the rent run's preview (:func:`ledger.services.rent_run.months_resume_would_create`;
+    a month is counted once when debited twice)."""
+    planned = rent_run.months_resume_would_create(lease, today)
+    if not planned:
+        return RESUME_BILLS_NOTHING
+    count = len({plan.period_month for plan in planned})
+    return RESUME_BILLS.format(
+        count=count,
+        months="month" if count == 1 else "months",
+        amount=format_amount(sum((plan.amount for plan in planned), Decimal("0.00"))),
+    )
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_resume_collection(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:resume_collection`` (admin; PLAN-015b §3 B, §9.2, §9.3): GET is the Resume
+    dialog over the store page, its first line what resuming bills (:func:`resume_bills`);
+    POST resumes collection (:func:`ledger.services.leases.resume_collection`, which charges
+    those months) and, when the pause paused autopay, queues its resume (``autopay_resume``).
+    A refusal re-renders the dialog with its sentence; done, it returns to the store page."""
+    refused = _admin_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    today = timezone.localdate()
+    refusal = ""
+    if lease.collection_status != CollectionStatus.PAUSED or lease.ended_on is not None:
+        refusal = service.RESUME_NOT_PAUSED
+    elif blockers := service.activation_blockers(lease):
+        refusal = blockers[0]
+    if request.method == "POST" and not refusal:
+        try:
+            outcome = service.resume_collection(lease.pk, actor=_actor(request), today=today)
+        except LeaseRefused as error:
+            refusal = str(error)
+        else:
+            if outcome.autopay_resume:
+                # PLAN-015b §9.5: the job does nothing if collection is paused again first.
+                submit(
+                    request,
+                    JobKind.AUTOPAY_RESUME,
+                    lease,
+                    {service.EXPECTED_STATUS_PARAM: CollectionStatus.ACTIVE.value},
+                )
+                messages.success(request, COLLECTION_RESUMED_AUTOPAY)
+            else:
+                messages.success(request, COLLECTION_RESUMED)
+            return redirect("ledger:stores:detail", pk=lease.store_id)
+    return render(
+        request,
+        "ledger/leases/resume_collection.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "resume_refusal": refusal,
+                "resume_bills": "" if refusal else resume_bills(lease, today),
+            },
+        ),
+    )
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_activate(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:activate`` (billing; PLAN-015b §3 A): GET is the "Activate now" dialog
+    over the store page (the start date becomes today when it is later; the first month is
+    billed); POST activates the lease (:func:`ledger.services.leases.activate`). A refusal
+    re-renders the dialog with its sentence; done, it returns to the store page."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    today = timezone.localdate()
+    refusal = ""
+    if lease.collection_status != CollectionStatus.PROSPECTIVE or lease.ended_on is not None:
+        refusal = service.NOT_PROSPECTIVE
+    elif blockers := service.activation_blockers(lease):
+        refusal = blockers[0]
+    if request.method == "POST" and not refusal:
+        try:
+            service.activate(lease.pk, actor=_actor(request), today=today)
+        except LeaseRefused as error:
+            refusal = str(error)
+        else:
+            messages.success(request, LEASE_ACTIVATED)
+            return redirect("ledger:stores:detail", pk=lease.store_id)
+    return render(
+        request,
+        "ledger/leases/activate.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "activate_refusal": refusal,
+                "activate_today": today,
+                "activate_moves_start": lease.started_on is None or lease.started_on > today,
+            },
+        ),
+    )

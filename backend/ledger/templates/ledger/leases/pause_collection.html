@@ -1,0 +1,24 @@
+{% extends "ledger/stores/detail.html" %}
+{% load components %}
+{% comment %}Pause collection (docs/qa/15/PLAN-015b-lease-status.md §3 B; billing): the dialog over the lease's store page, in the pattern of ledger/one_off_charges/waive.html. ledger.views.leases.lease_pause_collection: GET asks first (what will happen, the required reason), POST pauses collection and, when autopay was on, queues its pause for the worker. The form, the refusal and whether autopay is on come as pause_form, pause_refusal and pause_autopay so the store page's own names stay its own; "Keep collecting" and × go back to the store page.{% endcomment %}
+{% block title %}Pause collection{% endblock %}
+{% block dialog %}{% url 'ledger:stores:detail' pk=status_lease.store_id as back_url %}{% dialog id="pause-collection-dialog" title="Pause collection" size="sm" open=True return_url=back_url %}
+  <section class="confirm" aria-labelledby="confirm-question">
+  <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <div class="confirm-what">
+  <h3>What will happen</h3>
+  <ul id="pause-collection-what">
+    <li>The lease's status becomes Paused. No reminders are sent and no autopay debit, autopay plan debit or automatic re-debit is made while it is paused.</li>
+    {% if pause_autopay %}<li>Autopay is on: its schedules are paused in {{ company.provider_name }}, and resumed with collection.</li>{% endif %}
+    <li>Rent is still owed: the months inside the pause are charged when collection resumes.</li>
+  </ul>
+  </div>
+  {% if pause_refusal %}<p id="pause-collection-refusal"><strong>{{ pause_refusal }}</strong></p>{% endif %}
+  <form method="post" id="pause-collection-form" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {% if not pause_refusal %}{{ pause_form.non_field_errors }}{% endif %}
+    {% if not pause_refusal %}{% include "ledger/stores/_form_field.html" with field=pause_form.reason label="Reason" mark=True %}{% endif %}
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="pause-collection-keep">Keep collecting</a>{% if not pause_refusal %} <button class="btn btn-primary" type="submit" id="pause-collection-submit">Pause collection</button>{% endif %}</div>
+  </form>
+  </section>
+{% enddialog %}{% endblock %}

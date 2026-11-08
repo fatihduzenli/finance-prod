@@ -165,6 +165,12 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:leases:switch_own": RouteRule(min_role=Role.BILLING, methods=POST),
     # The LEASE card's insurance "Bill now" (PLAN-014 I-b): billing; the view checks again.
     "ledger:leases:insurance_bill": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The LEASE card's Pause / Resume collection (PLAN-015b §9.3: admin, as the autopay pause
+    # and resume) and Activate now (billing); the views refuse the dialogs' GET below that
+    # role too.
+    "ledger:leases:pause_collection": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:leases:resume_collection": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:leases:activate": RouteRule(min_role=Role.BILLING, methods=POST),
     # Ending a lease (PLAN-010b Batch C): admin. The view refuses the form's GET below
     # admin too, and sends an admin to the end-of-lease wizard (PLAN-012e D4).
     "ledger:leases:end": RouteRule(min_role=Role.ADMIN, methods=POST),

@@ -67,6 +67,9 @@ LAST = TODAY + timedelta(days=29)
 PREVIEW = "/admin-settings/outbox/preview/"
 OUTBOX = "/admin-settings/outbox/"
 BACKEND = Path(__file__).resolve().parents[1]
+#: A start after the window's last rent debit (LAST + reminders.DAYS_BEFORE): a lease with no
+#: rent month of its own in the preview.
+AFTER_THE_WINDOW = date(2027, 1, 1)
 
 
 def written() -> tuple[int, int, int]:
@@ -247,8 +250,10 @@ def world() -> dict[str, Any]:
     plain = _leased(first, 101, email="first-billing@example.com", debit_day=10)
     autopay = _leased(second, 102, email="second-billing@example.com", debit_day=15)
     saved(new_schedule(lease=autopay, debit_day=15, amount=D("1300.00")))
-    # Paused, no debit day: no rent month of its own in the window, its one-off charge only.
-    silent = _leased(third, 103, email=None, debit_day=None, collection_status="paused")
+    # Re-pinned (Opus, PLAN-015b §3 B: a paused lease's charges are skipped, so it no longer
+    # stands in): active, starting after the window, so no rent month of its own (A/B) in it,
+    # its one-off charge only (B to E, a promise pausing its B).
+    silent = _leased(third, 103, email=None, debit_day=1, started_on=AFTER_THE_WINDOW)
     late = saved(
         new_one_off_charge(
             operator=first, lease=plain, due_date=TODAY - timedelta(days=5), price=D("80.00")
@@ -461,11 +466,12 @@ def test_the_pages_queries_do_not_grow_with_its_rows(clock: Any) -> None:
     def leases_with_a_late_charge(count: int) -> None:
         for _ in range(count):
             owner = operator()
-            # Paused, no debit day: no rent month (its rule B reads the lease's rent, the
-            # planner's own query per lease, rent_run.first_debit_amount); charges only.
+            # Re-pinned (Opus, PLAN-015b §3 B: a paused lease's charges are skipped): active,
+            # starting after the window, so no rent month (its rule B reads the lease's rent,
+            # the planner's own query per lease, rent_run.first_debit_amount); charges only.
             number = 500 + Operator.objects.count()
             lease = _leased(
-                owner, number, email=owner.email, debit_day=None, collection_status="paused"
+                owner, number, email=owner.email, debit_day=1, started_on=AFTER_THE_WINDOW
             )
             saved(new_one_off_charge(operator=owner, lease=lease, due_date=TODAY))
 
@@ -531,3 +537,51 @@ def test_the_job_queues_only_what_the_planner_would_queue(clock: Any) -> None:
     jobs = Job.objects.filter(kind=JobKind.MESSAGE_SEND).count()
     assert jobs == summary.queued
     assert OneOffCharge.objects.count() == 2
+
+
+def test_a_paused_lease_is_listed_skipped_queues_nothing_and_counts_as_skipped(
+    clock: Any,
+) -> None:
+    """PLAN-015b §3 B: the open charge of a lease whose collection is paused is listed with
+    "Skipped: collection is paused" (outcome ``collection_paused``), never "Paused by a
+    promise"; the job queues nothing for it and counts it skipped, not paused."""
+    world()
+    owner = operator("paused-op@example.com", display_name="Paused Op")
+    lease = _leased(
+        owner, 104, email="paused-billing@example.com", debit_day=1, collection_status="paused"
+    )
+    # Five days late today: its C is due today, its D and E later in the window.
+    saved(
+        new_one_off_charge(
+            operator=owner, lease=lease, due_date=TODAY - timedelta(days=5), price=D("60.00")
+        )
+    )
+    clock(at(TODAY))
+    found = outbox_preview.preview(TODAY)
+    mine = [row for row in found.rows if row.store == "#104 Store 104 Elm"]
+    assert mine
+    assert {row.outcome for row in mine} == {"Skipped: collection is paused"}
+    assert not any(row.queues for row in mine)
+    [item] = [
+        item
+        for item in reminders.plan(TODAY)
+        if item.lease is not None and item.lease.pk == lease.pk
+    ]
+    assert (item.outcome, item.outcome_text) == (
+        reminders.COLLECTION_PAUSED,
+        "Skipped: collection is paused",
+    )
+    items = reminders.plan(TODAY)
+    summary = reminders.queue_due(TODAY)
+    assert summary.paused == sum(entry.outcome == reminders.PAUSED for entry in items)
+    assert summary.skipped == sum(
+        not entry.queues and entry.outcome != reminders.PAUSED for entry in items
+    )
+    # The paused lease's C is today's one collection_paused item, counted in skipped.
+    assert [entry.lease for entry in items if entry.outcome == reminders.COLLECTION_PAUSED] == [
+        lease
+    ]
+    assert not OutboundMessage.objects.filter(lease=lease).exists()
+    admin, _ = client_for(Role.ADMIN)
+    page = admin.get(PREVIEW).content.decode()
+    assert "Skipped: collection is paused" in page

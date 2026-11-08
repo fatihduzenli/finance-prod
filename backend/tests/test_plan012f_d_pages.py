@@ -382,6 +382,11 @@ FORM_PAGES = (
     # PLAN-014 B5: the Edit note and Delete note dialogs over the store page.
     "ledger:notes:edit",
     "ledger:notes:delete",
+    # PLAN-015b: Pause collection, Resume collection (§9.2) and Activate now, dialogs over the
+    # store page (the world's lease is active, so Resume and Activate now show their refusal).
+    "ledger:leases:pause_collection",
+    "ledger:leases:resume_collection",
+    "ledger:leases:activate",
 )
 
 POST_ONLY = "a POST-only action (405 to a GET)"

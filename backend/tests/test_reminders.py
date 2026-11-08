@@ -1121,3 +1121,114 @@ def test_migration_0062_adds_the_month_and_reverses_only_without_lease_month_row
         OutboundMessage.objects.all().delete()
         MessageTemplate.objects.filter(code="probe_0062").delete()
     assert "period_month" in _columns()
+
+
+# --- PLAN-015b §3 B: a lease whose collection is paused ------------------------------------
+
+
+def paused(lease: Lease) -> None:
+    Lease.objects.filter(pk=lease.pk).update(collection_status="paused")
+
+
+def resumed(lease: Lease) -> None:
+    Lease.objects.filter(pk=lease.pk).update(collection_status="active")
+
+
+def test_a_paused_lease_gets_no_b_c_d_or_e_and_its_rules_resume_once_collection_resumes(
+    clock: Any,
+) -> None:
+    charge = monthly(rent_charge())
+    paused(charge.lease)
+    assert by_day(calendar(clock, -10, 35)) == {}
+    assert rules_of(charge) == [] and month_rules(charge.lease) == []
+    resumed(charge.lease)
+    # From the next rule day, without catching up the days paused.
+    assert by_day(calendar(clock, 36, 40)) == {40: {"D": 1}}
+    assert rules_of(charge) == [("D", 2)]
+
+
+def test_an_active_lease_beside_a_paused_one_keeps_its_rules(clock: Any) -> None:
+    kept = rent_charge()
+    stopped = rent_charge()
+    paused(stopped.lease)
+    clock(at(day(5)))
+    summary = reminders.queue_due(day(5))
+    assert summary.queued_by_rule["C"] == 1
+    assert rules_of(kept) == [("C", 1)] and rules_of(stopped) == []
+
+
+def test_the_plan_says_a_paused_leases_charge_is_skipped(clock: Any) -> None:
+    owner = operator()
+    lease = billed(saved(new_lease(operator=owner)), owner.email)
+    one_off = saved(new_one_off_charge(operator=owner, lease=lease, due_date=DUE))
+    paused(lease)
+    clock(at(day(5)))
+    [item] = [item for item in reminders.plan(day(5)) if item.subject == one_off]
+    assert item.outcome == reminders.COLLECTION_PAUSED
+    assert item.outcome_text == "Skipped: collection is paused"
+    assert not item.queues
+    assert reminders.queue_due(day(5)).skipped == 1
+    assert rules_of(one_off) == []
+
+
+def test_a_one_off_without_a_lease_billed_by_a_paused_lease_is_skipped(clock: Any) -> None:
+    owner = operator()
+    lease = billed(saved(new_lease(operator=owner)), owner.email)  # its first active lease
+    charge = saved(new_one_off_charge(operator=owner, due_date=DUE))
+    paused(lease)
+    clock(at(day(5)))
+    reminders.queue_due(day(5))
+    assert rules_of(charge) == []
+
+
+def test_a_reminder_queued_before_the_pause_is_suppressed_at_the_send(
+    clock: Any, memory: MemoryMailSender
+) -> None:
+    charge = rent_charge()
+    clock(at(day(5)))
+    assert reminders.queue_due(day(5)).queued_by_rule["C"] == 1
+    paused(charge.lease)
+    run_queued_jobs()
+    [message] = OutboundMessage.objects.filter(charge_entity_id=str(charge.pk))
+    assert (message.status, message.error) == (MessageStatus.SUPPRESSED, messaging.LEASE_PAUSED)
+    assert message.error == "LeasePaused"
+    assert memory.sent == []
+
+
+def test_a_months_b_queued_before_the_pause_is_suppressed_at_the_send(
+    clock: Any, memory: MemoryMailSender
+) -> None:
+    charge = monthly(rent_charge())
+    clock(at(day(-3)))
+    reminders.queue_due(day(-3))
+    paused(charge.lease)
+    run_queued_jobs()
+    [message] = OutboundMessage.objects.filter(lease=charge.lease, charge_entity_type="lease_month")
+    assert (message.status, message.error) == (MessageStatus.SUPPRESSED, "LeasePaused")
+    assert memory.sent == []
+
+
+def test_a_reminder_of_an_active_lease_is_still_sent(clock: Any, memory: MemoryMailSender) -> None:
+    charge = rent_charge()
+    clock(at(day(5)))
+    reminders.queue_due(day(5))
+    paused(charge.lease)
+    resumed(charge.lease)
+    run_queued_jobs()
+    [message] = OutboundMessage.objects.filter(charge_entity_id=str(charge.pk))
+    assert message.status == MessageStatus.SENT and len(memory.sent) == 1
+
+
+def test_a_message_sent_by_hand_to_a_paused_lease_still_goes(
+    clock: Any, memory: MemoryMailSender
+) -> None:
+    clock(at(date(2026, 10, 8)))
+    _, user = client_for(Role.BILLING)
+    charge = rent_charge()
+    paused(charge.lease)
+    template = MessageTemplate.objects.get(code="overdue_day5").pk
+    assert messaging.send_by_hand("rent_charge", charge.pk, template, user).ok
+    run_queued_jobs()
+    [message] = OutboundMessage.objects.filter(charge_entity_id=str(charge.pk))
+    assert (message.rule, message.status) == (MessageRule.MANUAL, MessageStatus.SENT)
+    assert len(memory.sent) == 1

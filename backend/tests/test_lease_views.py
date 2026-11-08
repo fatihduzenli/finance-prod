@@ -170,6 +170,10 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             "alias_remove",
             # PLAN-014 I-b: the LEASE card's insurance "Bill now".
             "insurance_bill",
+            # PLAN-015b: the LEASE card's Pause / Resume collection and Activate now.
+            "pause_collection",
+            "resume_collection",
+            "activate",
             *POST_ROUTES,
         )
     }
@@ -211,6 +215,12 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
         assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     # PLAN-014 I-b: the insurance row's "Bill now" needs billing.
     rule = registry.rule_for("ledger:leases:insurance_bill")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-015b §9.3: Pause / Resume collection need admin; Activate now needs billing.
+    for name in ("pause_collection", "resume_collection"):
+        rule = registry.rule_for(f"ledger:leases:{name}")
+        assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
+    rule = registry.rule_for("ledger:leases:activate")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
 
 

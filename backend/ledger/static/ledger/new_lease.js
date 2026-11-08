@@ -16,7 +16,9 @@
 //   data-extra, hidden here; without the script every row shows).
 // - The Summary (aside#lease-summary): operator, start, rent, who collects ("Autopay · 1st"),
 //   the first month (prorated or the rent), the move-in charges (every priced row, the deposit
-//   included) and the first invoice's total.
+//   included) and the first invoice's total; its last line #summary-after reads "Starts Nov 15,
+//   2026, activated on that day." for a start after the aside's data-today (PLAN-015b §9.1:
+//   the lease saves prospective), else its data-default.
 (function () {
   "use strict";
   var form = document.getElementById("lease-form");
@@ -134,6 +136,7 @@
   }
 
   var start = byId("id_started_on");
+  var summary = byId("lease-summary");
   var rent = byId("id_rent");
   var prorate = byId("id_prorate_first_month");
   var line = byId("prorate-line");
@@ -191,6 +194,13 @@
     setText("summary-operator", option ? option.textContent.trim() : NONE);
     var day = parseDay(start && start.value);
     setText("summary-starts", day ? MONTHS[day.month - 1] + " " + day.day + ", " + day.year : NONE);
+    var after = byId("summary-after");
+    if (after) {
+      var later = day && summary && start.value > summary.getAttribute("data-today");
+      after.textContent = later
+        ? "Starts " + MONTHS[day.month - 1] + " " + day.day + ", " + day.year + ", activated on that day."
+        : after.getAttribute("data-default");
+    }
     var monthly = cents(rent && rent.value);
     setText("summary-rent", monthly === null ? NONE : money(monthly));
     setText("summary-collected", collectedBy());

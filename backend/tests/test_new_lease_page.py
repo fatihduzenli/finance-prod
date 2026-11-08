@@ -35,7 +35,7 @@ from ledger.models import (
     Store,
     StoreStatus,
 )
-from ledger.services import move_in, proration, rent_run
+from ledger.services import leases, move_in, proration, rent_run
 from tests.receivables_helpers import a_lease, a_store, an_operator
 from tests.test_operator_views import client_for
 
@@ -262,10 +262,60 @@ def test_a_saved_lease_is_active_and_the_debit_day_starts_at_the_1st(
     assert tag_with(html_text, '<option value="1"', "selected") and ">1st</option>" in html_text
     assert ">28th</option>" in html_text and ">29th</option>" not in html_text
     operator = an_operator("Active Operator")
-    data = create_data(store, operator, collection_status="prospective")
+    # Re-pinned (Opus, PLAN-015b §9.1): the start date decides the status, never a posted
+    # one; this form's start (Nov 15, after today) saves the lease prospective, a start of
+    # today or earlier active (test_a_start_of_today_or_earlier_saves_the_lease_active).
+    data = create_data(store, operator, collection_status="active")
     assert post_create(admin, store, data).status_code == 302
     lease = Lease.objects.get(store=store)
-    assert lease.collection_status == "active" and lease.debit_day == 1
+    assert lease.collection_status == "prospective" and lease.debit_day == 1
+
+
+@pytest.mark.parametrize("started", ["2026-11-03", "2026-10-01"])
+def test_a_start_of_today_or_earlier_saves_the_lease_active(
+    admin: Client, today: date, started: str
+) -> None:
+    """PLAN-015b §9.1: a start of today or earlier saves the lease active (a posted status
+    is ignored), with its move-in draft."""
+    store = vacant_store()
+    data = create_data(
+        store, an_operator("Starts Now"), started_on=started, collection_status="prospective"
+    )
+    assert post_create(admin, store, data).status_code == 302
+    lease = Lease.objects.get(store=store)
+    assert lease.collection_status == "active"
+    assert InvoiceDraft.objects.filter(lease=lease, status=InvoiceDraftStatus.DRAFT).exists()
+
+
+def test_a_future_start_saves_prospective_and_the_summary_says_when_it_activates(
+    admin: Client, today: date
+) -> None:
+    """PLAN-015b §9.1: a start after today saves the lease prospective, checked by the active
+    lease's rules (a missing debit day is still refused); the Summary's last line reads
+    "Starts <date>, activated on that day." (the page's script reads ``data-today`` and
+    ``data-default``), and the default line for a start of today."""
+    store = vacant_store()
+    fresh = page(admin, create_path(store))
+    assert tag_with(fresh, 'id="lease-summary"', 'data-today="2026-11-03"')
+    assert tag_with(
+        fresh,
+        'id="summary-after"',
+        'data-default="After saving you can send the move-in invoice by e-mail."',
+    )
+    operator = an_operator("Starts Later")
+    refused = create_data(store, operator, debit_day="")
+    assert post_create(admin, store, refused).status_code == 302
+    assert not Lease.objects.filter(store=store).exists()
+    held = page(admin, create_path(store))
+    assert 'id="summary-starts">Nov 15, 2026<' in held
+    assert ">Starts Nov 15, 2026, activated on that day.</p>" in held
+    post_create(admin, store, create_data(store, operator, rent="", started_on="2026-11-03"))
+    assert ">After saving you can send the move-in invoice by e-mail.</p>" in page(
+        admin, create_path(store)
+    )
+    assert post_create(admin, store, create_data(store, operator)).status_code == 302
+    lease = Lease.objects.get(store=store)
+    assert (lease.collection_status, lease.started_on) == ("prospective", date(2026, 11, 15))
 
 
 def test_debit_day_29_is_refused(admin: Client, today: date) -> None:
@@ -681,6 +731,9 @@ def test_the_rent_run_creates_no_second_charge_for_the_start_month(
         assert draft.status != InvoiceDraftStatus.DRAFT
         [charge] = RentCharge.objects.filter(lease=lease)
         assert charge.billed_by_invoice_id is not None
+    # Re-pinned (Opus, PLAN-015b §9.1): the lease starts after today, so it is saved
+    # prospective; the daily job activates it before the run (collections_tick's order).
+    assert leases.activate_due(date(2026, 11, 20)).activated == 1
     report = rent_run.create_charges(date(2026, 11, 20), actor=None)
     mine = [
         item
@@ -695,7 +748,8 @@ def test_the_rent_run_creates_no_second_charge_for_the_start_month(
             item for item in (*report.created, *report.caught_up) if item.lease_id == lease.pk
         ]
     else:
-        # Before the send the run makes the month's charge; the send then takes it.
+        # Before the send the activation's catch-up makes the month's charge (the run finds
+        # it); the send then takes it.
         assert [item.pk for item in mine] == [charge.pk]
         admin.post(f"/invoices/drafts/{draft.pk}/send/?store={store.pk}")
         draft.refresh_from_db()
@@ -703,6 +757,87 @@ def test_the_rent_run_creates_no_second_charge_for_the_start_month(
         assert RentCharge.objects.filter(lease=lease).count() == 1
         again = rent_run.create_charges(date(2026, 11, 20), actor=None)
         assert [item.pk for item in again.already if item.lease_id == lease.pk] == [charge.pk]
+
+
+def sent_prospective(admin: Client, store: Store, name: str) -> tuple[Lease, RentCharge]:
+    """A lease saved from the page with a start after today (prospective, debited on the
+    15th, its start day), its move-in invoice sent: the start month's charge, billed by it."""
+    saved_draft(admin, store, an_operator(name), debit_day="15")
+    lease = Lease.objects.get(store=store)
+    assert lease.collection_status == "prospective"
+    draft = InvoiceDraft.objects.get(lease=lease)
+    connect(lease)
+    assert admin.post(f"/invoices/drafts/{draft.pk}/send/?store={store.pk}").status_code == 302
+    draft.refresh_from_db()
+    assert draft.status != InvoiceDraftStatus.DRAFT
+    [charge] = RentCharge.objects.filter(lease=lease)
+    assert (charge.period_month, charge.amount_due) == (date(2026, 11, 1), Decimal("1066.67"))
+    assert charge.billed_by_invoice_id is not None
+    return lease, charge
+
+
+def test_the_daily_job_on_the_start_date_activates_the_lease_and_bills_the_month_once(
+    admin: Client, today: date
+) -> None:
+    """PLAN-015b §9.1 with the owner's option (a): the move-in invoice of a prospective lease
+    billed the start month; the daily job on the start date (activation, then the run, as
+    collections_tick) makes the lease active and creates no second charge for the month, the
+    proration unchanged."""
+    store = vacant_store()
+    lease, charge = sent_prospective(admin, store, "Starts On Time")
+    start = date(2026, 11, 15)
+    assert leases.activate_due(start).activated == 1
+    report = rent_run.create_charges(start, actor=None)
+    lease.refresh_from_db()
+    assert lease.collection_status == "active" and lease.started_on == start
+    assert [item.pk for item in report.already if item.lease_id == lease.pk] == [charge.pk]
+    assert not [item for item in (*report.created, *report.caught_up) if item.lease_id == lease.pk]
+    [kept] = RentCharge.objects.filter(lease=lease)
+    assert (kept.pk, kept.amount_due, kept.billed_by_invoice_id) == (
+        charge.pk,
+        Decimal("1066.67"),
+        charge.billed_by_invoice_id,
+    )
+    # The next day's job finds nothing to activate and nothing to charge.
+    assert leases.activate_due(date(2026, 11, 16)).activated == 0
+    assert RentCharge.objects.filter(lease=lease).count() == 1
+
+
+def test_activate_now_before_the_start_date_keeps_the_invoices_charge_and_adds_none(
+    admin: Client, today: date
+) -> None:
+    """Staff's "Activate now" (the start date becomes today, Nov 3, in the same month) on a
+    prospective lease whose move-in invoice is sent: the lease is active, the invoice's charge
+    for the start month is the month's only charge, at its amount and still billed by it."""
+    store = vacant_store()
+    lease, charge = sent_prospective(admin, store, "Starts Early")
+    assert admin.post(f"/leases/{lease.pk}/activate/").status_code == 302
+    lease.refresh_from_db()
+    assert (lease.collection_status, lease.started_on) == ("active", date(2026, 11, 3))
+    [kept] = RentCharge.objects.filter(lease=lease)
+    assert (kept.pk, kept.amount_due, kept.billed_by_invoice_id) == (
+        charge.pk,
+        Decimal("1066.67"),
+        charge.billed_by_invoice_id,
+    )
+    report = rent_run.create_charges(date(2026, 11, 15), actor=None)
+    assert not [item for item in (*report.created, *report.caught_up) if item.lease_id == lease.pk]
+    assert RentCharge.objects.filter(lease=lease).count() == 1
+
+
+def test_autopay_set_up_waits_for_the_activation_of_a_prospective_lease(
+    admin: Client, today: date
+) -> None:
+    """Autopay cannot be set up on the prospective lease the page saved (NOT_ACTIVE, the
+    existing blocker, unchanged); once the daily job activates it, that blocker is gone."""
+    store = vacant_store()
+    saved_draft(admin, store, an_operator("Autopay Later"))
+    lease = Lease.objects.get(store=store)
+    assert lease.collection_status == "prospective"
+    assert leases.NOT_ACTIVE in leases.autopay_blockers(lease)
+    assert leases.activate_due(date(2026, 11, 15)).activated == 1
+    lease.refresh_from_db()
+    assert leases.NOT_ACTIVE not in leases.autopay_blockers(lease)
 
 
 def test_a_refused_rent_line_saves_the_lease_without_a_draft_and_says_why(
@@ -727,6 +862,33 @@ def test_no_operator_makes_no_draft_and_one_sentence() -> None:
     found = move_in.create_draft(lease, [], creation_key=uuid.uuid4(), actor=None)
     assert (found.draft, found.message) == (None, move_in.NO_OPERATOR)
     assert not InvoiceDraft.objects.exists()
+
+
+@pytest.mark.parametrize(
+    ("status", "made"),
+    [("prospective", True), ("active", True), ("paused", False), ("ended", False)],
+)
+def test_the_move_in_draft_is_made_for_a_prospective_or_active_lease_only(
+    today: date, status: str, made: bool
+) -> None:
+    """PLAN-015b §9.1, the owner's option (a): a prospective lease (a start after today) has
+    its move-in draft as an active one does; a paused or ended lease gets none and the
+    sentence says why."""
+    lease = a_lease(
+        a_store("7202", number=7202),
+        an_operator("Option A"),
+        started=date(2026, 12, 10),
+        status=status,
+    )
+    billing = client_for(Role.BILLING, "billing-move-in")[1]
+    found = move_in.create_draft(lease, [], creation_key=uuid.uuid4(), actor=billing)
+    if made:
+        assert found.draft is not None and found.draft.due_date == date(2026, 12, 10)
+        [line] = found.draft.lines.all()
+        assert (line.rent_lease_id, line.rent_month) == (lease.pk, date(2026, 12, 1))
+    else:
+        assert (found.draft, found.message) == (None, move_in.NOT_ACTIVE)
+        assert not InvoiceDraft.objects.filter(lease=lease).exists()
 
 
 def test_a_replayed_form_makes_one_lease_and_one_draft(admin: Client, today: date) -> None:
