@@ -199,6 +199,10 @@ def test_the_seven_templates_are_seeded_and_the_ladder_is_retired() -> None:
         "internal_day30": ("E — 30 days overdue (internal)", True),
         "returned_debit": ("F — Payment returned", False),
         "returned_debit_no_retry": ("F — Payment returned (no retry)", False),
+        # PLAN-015e (ledger 0077): a returned bank debit kept as a credit reverses the credit;
+        # the managers' internal e-mail and the operator's.
+        "credit_returned": ("F — Credit reversed (internal)", True),
+        "credit_returned_operator": ("F — Credit reversed (returned debit)", False),
     }
     assert set(MessageTemplate.objects.filter(active=False).values_list("code", flat=True)) == {
         "friendly_reminder",
