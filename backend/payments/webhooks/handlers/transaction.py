@@ -407,8 +407,9 @@ def _transition(payment: Payment, record: TransactionRecord, *, settle: bool) ->
         reversals += _return_split_rows(payment, record)
         # PLAN-014 F2: the NSF fee, the automatic re-debit or Needs review, and template F.
         nsf.on_return(payment, timezone.localdate())
-        # PLAN-015e: the credit's lease flagged, the managers and the operator told.
-        nsf.on_credit_return(payment, reversals, timezone.localdate())
+        if reversals:
+            # PLAN-015e: the credit's lease flagged, the managers and the operator told.
+            nsf.on_credit_return(payment, reversals, timezone.localdate())
     if target == PaymentStatus.SETTLED:
         contacts.close_kept_by_payment(payment)
         nsf.on_settled(payment)
@@ -475,8 +476,8 @@ def _refresh_returned(payment: Payment) -> None:
 def _refresh_charge(payment: Payment, *, returned: bool) -> credits.CreditReversal | None:
     """Recompute the rent or one-off charge, and on a return flag the charge for review; on
     the return of a payment held as a credit, reverse the credit (PLAN-015e), which is
-    returned. A returned payment with neither a charge nor a credit is logged and audited
-    (:data:`UNPLACED_ACTION`)."""
+    returned. A returned payment with neither a charge, an adjustment nor a credit is logged
+    and audited (:data:`UNPLACED_ACTION`)."""
     context = {"payment": str(payment.pk), "payment_status": payment.status}
     if returned:
         context |= {"return_code": payment.return_code, "return_reason": payment.return_reason}
@@ -538,7 +539,7 @@ def _refresh_charge(payment: Payment, *, returned: bool) -> credits.CreditRevers
     elif payment.credit_id is not None:
         if returned:
             return credits.reverse_from_return(payment, _refresh_returned)
-    elif returned:
+    elif returned and payment.charge_adjustment_id is None:
         logger.warning("Returned payment %s has neither a charge nor a credit", payment.pk)
         audit(UNPLACED_ACTION, ENTITY_PAYMENT, payment.pk, None, _state(payment) | context)
     return None

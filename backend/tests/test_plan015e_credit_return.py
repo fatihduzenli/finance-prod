@@ -31,7 +31,9 @@ from django.utils import timezone
 
 from accounts.roles import Role
 from ledger.models import (
+    AdjustmentReason,
     AuditLog,
+    ChargeAdjustment,
     ChargeEntityType,
     CompanySettings,
     HeldReason,
@@ -960,3 +962,27 @@ def test_the_two_templates_preview_and_are_not_offered_by_hand(told: FakeProvide
         assert "{" not in shown.body and "{" not in shown.subject
     offered = {row.code for row in messaging.manual_templates()}
     assert not offered & set(SEEDED)
+
+
+# --- Task 5: the self-review's cases --------------------------------------------------------
+
+
+def test_a_returned_adjustment_payment_is_not_called_unplaced(fake: FakeProvider) -> None:
+    """A payment of an adjustment invoice has no charge recomputed here (as before PLAN-015e):
+    its return is not audited as unplaced."""
+    world = a_world(fake)
+    provider_txn(fake, invoice_external_id="")
+    assert deliver("create_transaction", id=TXN) == "processed"
+    payment = payment_for()
+    adjustment = ChargeAdjustment.objects.create(
+        to_charge=world.charge,
+        amount=D("1500.00"),
+        reason=AdjustmentReason.DISCOUNT,
+        note="An adjustment.",
+        created_by=client_for(Role.ADMIN)[1],
+    )
+    Payment.objects.filter(pk=payment.pk).update(
+        kind=PaymentKind.ADJUSTMENT, charge_adjustment=adjustment
+    )
+    assert bank_returns(fake) == "processed"
+    assert not AuditLog.objects.filter(action=transaction_handler.UNPLACED_ACTION).exists()
