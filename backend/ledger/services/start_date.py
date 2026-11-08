@@ -17,12 +17,16 @@ is billed for (an overlap), an empty reason or one holding a card or account num
   rebuild_draft`). A sent one with nothing paid is voided at the provider by the worker
   (``invoice_void``, :func:`ledger.services.move_in.request_void`), which then re-prices or
   voids its rent and prepares a new draft. A paid one stays as it is: the rent paid for days
-  that are no longer the lease's is kept as a credit (``credit``: written back off the charge as
-  a settled refund row, the money then held as a :class:`~ledger.models.LeaseCredit` and applied
-  to the lease's new first charges that exist) or refunded through the existing refund path
-  (``refund``: a ``payment_refund`` job per bank-debit payment; the worker calls the provider)
-  — the choice is required, and a refund needs the money to have come by bank debit. The
-  deposit's payment is never touched.
+  that are no longer the lease's is kept as a credit (``credit``: no refund row — the money
+  stays received and its allocation moves: the payment that paid that rent is re-pointed from
+  the rent charge to a :class:`~ledger.models.LeaseCredit` of the same amount, its method,
+  processor reference and allocation group unchanged, a payment paying more than that part
+  split in two; the credit is then applied to the lease's new first charges that exist) or
+  refunded through the existing refund path (``refund``: a ``payment_refund`` job per
+  bank-debit payment; the worker calls the provider) — the choice is required, and a refund
+  needs the money to have come by bank debit. The money comes from the rent charge's own
+  payments, then from the move-in invoice's payments up to the rent's share of them; the
+  deposit's part of those payments is never touched.
 - **Rent charges.** Every charge of a month before the new start month that has nothing paid
   is void (``rent_charge.voided``; :data:`~ledger.models.RentChargeStatus.VOID`, never due).
   A charge of the new start month, or of a later month that was the start month, is re-priced
@@ -76,7 +80,16 @@ from ledger.models import (
     PaymentStatus,
     RentCharge,
 )
-from ledger.services import credits, deposits, free_rent, installments, leases, move_in, rent_run
+from ledger.services import (
+    credits,
+    deposits,
+    free_rent,
+    installments,
+    leases,
+    move_in,
+    one_off_charges,
+    rent_run,
+)
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 from ledger.wording import format_amount
 from payments import jobs
@@ -122,6 +135,7 @@ CONFIRM_REQUIRED = "Tick the box to confirm the extra days billed."
 ADMIN_ONLY = "Only an admin can change the start date when money moves. Nothing was changed."
 CHANGED = "Start date changed to {date}."
 CREDIT_NOTE = "Kept as a credit: the start date changed from {old} to {new}."
+HELD_ACTION = "payment.held_as_credit"
 EXTRA_TEXT = "{span}: {amount} more billed on the {month} rent (the start moved earlier)."
 
 EFFECT_DRAFT = {
@@ -255,12 +269,41 @@ def _deposit(lease: Lease) -> tuple[str, bool]:
     return text, True
 
 
-def _rent_payments(charge: RentCharge) -> list[Payment]:
-    return list(
+def _settled_refunds(payment: Payment) -> Decimal:
+    rows = payment.refunds.filter(status=PaymentStatus.SETTLED)
+    return Decimal(sum((row.amount for row in rows), ZERO))
+
+
+def _rent_sources(charge: RentCharge) -> list[tuple[Payment, Decimal]]:
+    """The settled payments that paid ``charge``'s rent and how much of each did: its own
+    payments, newest first, then the payments on the builder (move-in) invoice billing it on
+    a Rent line, newest first, up to the rent's share of them (the rest paid the invoice's
+    other lines, the deposit among them, and is never touched)."""
+    found: list[tuple[Payment, Decimal]] = []
+    for payment in Payment.objects.filter(
+        rent_charge=charge, is_refund=False, status=PaymentStatus.SETTLED
+    ).order_by("-settled_on", "-created_at"):
+        found.append((payment, Decimal(payment.amount) - _settled_refunds(payment)))
+    share = one_off_charges.rent_share(charge)
+    for payment in (
         Payment.objects.filter(
-            rent_charge=charge, is_refund=False, status=PaymentStatus.SETTLED
-        ).order_by("-settled_on", "-created_at")
-    )
+            one_off_charge__invoices__line_items__rent_charge=charge,
+            kind=PaymentKind.ONE_OFF,
+            is_refund=False,
+            status=PaymentStatus.SETTLED,
+        )
+        .distinct()
+        .order_by("-settled_on", "-created_at")
+    ):
+        part = min(share, Decimal(payment.amount) - _settled_refunds(payment))
+        if part > 0:
+            found.append((payment, part))
+            share -= part
+    return [(payment, part) for payment, part in found if part > 0]
+
+
+def _by_bank_debit(charge: RentCharge) -> bool:
+    return all(row.method == PaymentMethod.ACH for row, _part in _rent_sources(charge))
 
 
 def preview(lease: Lease, new_start: date, *, today: date) -> StartDateChange:
@@ -295,9 +338,7 @@ def preview(lease: Lease, new_start: date, *, today: date) -> StartDateChange:
         if charge.period_month < new_month:
             if paid > 0:
                 paid_back += paid
-                all_ach = all_ach and all(
-                    row.method == PaymentMethod.ACH for row in _rent_payments(charge)
-                )
+                all_ach = all_ach and _by_bank_debit(charge)
             if charge.pk not in on_invoice or paid > 0:
                 to_void.append(charge)
             continue
@@ -307,9 +348,7 @@ def preview(lease: Lease, new_start: date, *, today: date) -> StartDateChange:
         net = new_amount - Decimal(charge.concession)
         if paid > net:
             paid_back += paid - net
-            all_ach = all_ach and all(
-                row.method == PaymentMethod.ACH for row in _rent_payments(charge)
-            )
+            all_ach = all_ach and _by_bank_debit(charge)
         elif new_amount > Decimal(charge.amount_due):
             extra += new_amount - Decimal(charge.amount_due)
             first = new_start if charge.period_month == new_month else charge.period_month
@@ -373,62 +412,112 @@ class StartDateRefused(Exception):  # noqa: N818 (an outcome, as LeaseRefused)
 def _keep_as_credit(
     lease: Lease, charge: RentCharge, amount: Decimal, actor: User | None, today: date, note: str
 ) -> Decimal:
-    """Take up to ``amount`` of the rent paid on ``charge`` back off it (settled refund rows of
-    its payments, newest first) and hold it as a credit on the lease; what was kept."""
+    """Hold up to ``amount`` of the rent paid on ``charge`` as credits on the lease, one per
+    payment it came from (:func:`_hold`); no refund row is written. What was kept."""
     left = amount
-    methods: list[str] = []
-    for payment in _rent_payments(charge):
+    for payment, available in _rent_sources(charge):
         if left <= 0:
             break
-        refunded = Decimal(
-            sum(
-                (row.amount for row in payment.refunds.filter(status=PaymentStatus.SETTLED)),
-                ZERO,
-            )
-        )
-        part = min(left, Decimal(payment.amount) - refunded)
-        if part <= 0:
-            continue
-        Payment.objects.create(
-            rent_charge=charge,
+        part = min(left, available)
+        _hold(lease, charge, payment, part, actor, today, note)
+        left -= part
+    rent_run.recompute_charge(RentCharge.objects.select_for_update().get(pk=charge.pk))
+    return amount - left
+
+
+def _payment_state(payment: Payment) -> dict[str, Any]:
+    return {
+        "amount": str(payment.amount),
+        "kind": payment.kind,
+        "method": payment.method,
+        "rent_charge": str(payment.rent_charge_id) if payment.rent_charge_id else None,
+        "one_off_charge": str(payment.one_off_charge_id) if payment.one_off_charge_id else None,
+        "credit": str(payment.credit_id) if payment.credit_id else None,
+    }
+
+
+def _hold(
+    lease: Lease,
+    charge: RentCharge,
+    payment: Payment,
+    part: Decimal,
+    actor: User | None,
+    today: date,
+    note: str,
+) -> Payment:
+    """Move ``part`` of ``payment`` from ``charge`` to a new credit of that amount: the money
+    stays received (the processor knows nothing different). A rent payment wholly taken is
+    re-pointed from the charge to the credit; otherwise ``part`` is split off into a payment
+    of its own naming the credit (same method, dates, reference, invoice and allocation
+    group), the payment keeping the rest on its charge. Audited (``lease_credit.created``
+    with ``from_rent_charge``; :data:`HELD_ACTION`). The held payment."""
+    credit = credits.create(
+        lease,
+        part,
+        # A credit's method is never ACH (lease_credits_method_manual): a bank debit's
+        # money is held as "other"; the payment keeps its own method.
+        method=payment.method if payment.method != PaymentMethod.ACH else MoneyMethod.OTHER,
+        received_on=payment.settled_on or today,
+        reference=payment.reference,
+        note=note,
+        allocation_group=payment.allocation_group or uuid.uuid4(),
+        actor=actor,
+        context={"from_rent_charge": str(charge.pk), "from_payment": str(payment.pk)},
+    )
+    before = _payment_state(payment)
+    whole = (
+        payment.kind == PaymentKind.RENT
+        and part == Decimal(payment.amount)
+        and not payment.refunds.exists()
+    )
+    if whole:
+        payment.rent_charge = None
+        payment.credit = credit
+        payment.save(update_fields=["rent_charge", "credit", "updated_at"])
+        held = payment
+    else:
+        payment.amount = Decimal(payment.amount) - part
+        payment.save(update_fields=["amount", "updated_at"])
+        held = Payment.objects.create(
+            invoice=payment.invoice,
             kind=PaymentKind.RENT,
             method=payment.method,
             amount=part,
             status=PaymentStatus.SETTLED,
-            initiated_on=today,
-            settled_on=today,
-            is_refund=True,
-            parent_payment=payment,
-            note=note,
-            recorded_by=actor,
+            initiated_on=payment.initiated_on,
+            settled_on=payment.settled_on,
+            provider_created_at=payment.provider_created_at,
+            reference=payment.reference,
+            note=payment.note or note,
+            recorded_by=payment.recorded_by,
+            allocation_group=payment.allocation_group,
+            credit=credit,
         )
-        methods.append(payment.method)
-        left -= part
-    kept = amount - left
-    rent_run.recompute_charge(RentCharge.objects.select_for_update().get(pk=charge.pk))
-    if kept > 0:
-        method = next((m for m in methods if m != PaymentMethod.ACH), MoneyMethod.OTHER)
-        credits.create(
-            lease,
-            kept,
-            method=method,
-            received_on=today,
-            reference="",
-            note=note,
-            allocation_group=uuid.uuid4(),
-            actor=actor,
-        )
-    return kept
+    AuditLog.objects.create(
+        actor=actor,
+        action=HELD_ACTION,
+        entity_type="payment",
+        entity_id=str(payment.pk),
+        before=before,
+        after={
+            **_payment_state(payment),
+            "held_payment": str(held.pk),
+            "held": str(part),
+            "credit": str(credit.pk),
+            "from_rent_charge": str(charge.pk),
+        },
+    )
+    return held
 
 
 def _refund(charge: RentCharge, amount: Decimal, actor: User | None) -> Decimal:
     """Queue ``payment_refund`` for up to ``amount`` of the bank debits on ``charge`` (the
     existing refund path; the worker calls the provider); what was queued."""
     left = amount
-    for payment in _rent_payments(charge):
+    for payment, available in _rent_sources(charge):
         if left <= 0:
             break
-        part = min(left, Decimal(payment.amount))
+        part = min(left, available)
         jobs.enqueue(
             JobKind.PAYMENT_REFUND,
             payment,

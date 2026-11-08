@@ -400,6 +400,7 @@ GUARD_MODULES = (
     "ledger.migrations.0072_rent_charge_void_and_concession",
     "ledger.migrations.0073_lease_free_rent",
     "ledger.migrations.0074_installment_origin_deposit",
+    "ledger.migrations.0075_payment_held_as_credit",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0003_webhook_event_processing",
     "payments.migrations.0005_jobs",

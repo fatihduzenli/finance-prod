@@ -2300,7 +2300,8 @@ class Payment(GuardedModel):
     #: PLAN-012d D6a: the payments of one entry of the store page's payment form, one per
     #: charge it paid, share this value (the kept credit too); null otherwise.
     allocation_group = models.UUIDField(null=True, blank=True)
-    #: The credit a ``credit`` payment applied, or a ``credit_refund`` paid back.
+    #: The credit a ``credit`` payment applied, or a ``credit_refund`` paid back; or, on a
+    #: ``rent`` payment naming no charge, the credit its money is held as (PLAN-015d).
     credit = models.ForeignKey(
         LeaseCredit, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
     )
@@ -2383,8 +2384,21 @@ class Payment(GuardedModel):
                 condition=~Q(method="credit") | Q(credit__isnull=False, is_refund=False),
                 name="payments_credit_method_has_credit",
             ),
+            # PLAN-015d: or rent money held as a credit (Change start date's "Keep as
+            # credit"): the payment that paid the rent, re-pointed from its charge to the
+            # credit, its method and processor reference unchanged.
             models.CheckConstraint(
-                condition=Q(credit__isnull=True) | Q(method="credit") | Q(kind="credit_refund"),
+                condition=Q(credit__isnull=True)
+                | Q(method="credit")
+                | Q(kind="credit_refund")
+                | Q(
+                    kind="rent",
+                    is_refund=False,
+                    rent_charge__isnull=True,
+                    insurance_charge__isnull=True,
+                    charge_adjustment__isnull=True,
+                    one_off_charge__isnull=True,
+                ),
                 name="payments_credit_only_credit_rows",
             ),
             # A credit refund is money paid back by hand, of a credit and nothing else.

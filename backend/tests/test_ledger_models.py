@@ -2258,7 +2258,24 @@ LEDGER_CASES: list[ConstraintCase] = [
     ConstraintCase(
         "payments_credit_only_credit_rows",
         lambda: new_payment(method="credit", note="Applied.", credit=saved(new_lease_credit())),
-        lambda: new_payment(method="wire", note="Wire.", credit=saved(new_lease_credit())),
+        # PLAN-015d: a rent payment naming no charge may name the credit it is held as; one
+        # still paying a charge may not.
+        lambda: new_payment(
+            method="wire",
+            note="Wire.",
+            credit=saved(new_lease_credit()),
+            rent_charge=saved(new_rent_charge()),
+        ),
+    ),
+    ConstraintCase(
+        "payments_credit_only_credit_rows",
+        lambda: new_payment(method="ach", credit=saved(new_lease_credit())),
+        lambda: new_payment(
+            kind="one_off",
+            method="ach",
+            credit=saved(new_lease_credit()),
+            one_off_charge=saved(new_one_off_charge()),
+        ),
     ),
     ConstraintCase(
         "payments_credit_refund_shape",

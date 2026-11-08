@@ -180,9 +180,13 @@ def test_paid_rent_for_days_that_move_needs_a_choice_and_an_admin(nov_5: date) -
     assert refused(lease, date(2026, 11, 4), choice="refund").message == start_date.REFUND_NOT_ACH
 
 
-def test_kept_as_credit_takes_the_rent_off_the_charge_into_a_credit(nov_5: date) -> None:
+def test_kept_as_credit_moves_the_paid_part_to_a_credit_and_writes_no_refund(nov_5: date) -> None:
     lease = an_active_lease()
     payment = pay(november(lease), "3000.00")
+    Payment.objects.filter(pk=payment.pk).update(
+        reference="Z-20261101", allocation_group=uuid.uuid4()
+    )
+    payment = fresh(payment)
     change = apply(lease, date(2026, 11, 4), choice="credit")
     assert change.paid_back == D("300.00") and change.outcome == start_date.OUTCOME_CREDIT
     charge = november(lease)
@@ -192,11 +196,107 @@ def test_kept_as_credit_takes_the_rent_off_the_charge_into_a_credit(nov_5: date)
         RentChargeStatus.PAID,
         D("0.00"),
     )
-    refund = Payment.objects.get(parent_payment=payment)
-    assert (refund.is_refund, refund.amount, refund.status) == (True, D("300.00"), "settled")
+    assert not Payment.objects.filter(is_refund=True).exists()
+    # The payment keeps what pays November; the $300.00 it paid for 1–3 Nov is held as a
+    # credit by a payment of its own: same method, reference, dates and allocation group.
+    assert (fresh(payment).amount, fresh(payment).rent_charge_id) == (D("2700.00"), charge.pk)
     credit = LeaseCredit.objects.get(lease=lease)
+    held = Payment.objects.get(credit=credit)
+    assert (held.amount, held.rent_charge_id, held.kind, held.method, held.status) == (
+        D("300.00"),
+        None,
+        PaymentKind.RENT,
+        PaymentMethod.ZELLE,
+        PaymentStatus.SETTLED,
+    )
+    assert (held.reference, held.allocation_group, held.settled_on) == (
+        payment.reference,
+        payment.allocation_group,
+        payment.settled_on,
+    )
     assert (credit.amount, credit.remaining, credit.method) == (D("300.00"), D("300.00"), "zelle")
+    assert (credit.reference, credit.allocation_group) == (
+        payment.reference,
+        payment.allocation_group,
+    )
+    audit = AuditLog.objects.get(action="lease_credit.created", entity_id=str(credit.pk))
+    assert audit.after["from_rent_charge"] == str(charge.pk)
     assert not Job.objects.filter(kind=JobKind.PAYMENT_REFUND).exists()
+
+
+def test_kept_as_credit_repoints_a_whole_bank_debit_of_a_month_that_never_falls_due(
+    fake: FakeProvider,
+) -> None:
+    operator = a_provider_operator(fake)
+    lease = a_rent_lease(operator, collection_status=CollectionStatus.PROSPECTIVE)
+    october = RentCharge.objects.create(
+        lease=lease,
+        period_month=date(2026, 10, 1),
+        due_on=date(2026, 10, 14),
+        amount_due=D("580.65"),
+        status=RentChargeStatus.DUE,
+    )
+    payment = pay(october, "580.65", PaymentMethod.ACH)
+    Payment.objects.filter(pk=payment.pk).update(reference="ACH-1014")
+    change = apply(lease, date(2026, 11, 10), choice="credit", today=date(2026, 10, 6))
+    assert change.outcome == start_date.OUTCOME_CREDIT
+    assert not Payment.objects.filter(is_refund=True).exists()
+    # The same row, re-pointed: its amount, method and reference unchanged.
+    payment = fresh(payment)
+    credit = LeaseCredit.objects.get(lease=lease)
+    assert (payment.rent_charge_id, payment.credit_id, payment.amount, payment.method) == (
+        None,
+        credit.pk,
+        D("580.65"),
+        PaymentMethod.ACH,
+    )
+    assert Payment.objects.count() == 1
+    october = fresh(october)
+    assert (october.status, october.amount_paid) == (RentChargeStatus.VOID, D("0.00"))
+    assert (credit.amount, credit.remaining, credit.reference) == (
+        D("580.65"),
+        D("580.65"),
+        "ACH-1014",
+    )
+    audit = AuditLog.objects.get(action=start_date.HELD_ACTION, entity_id=str(payment.pk))
+    assert (audit.before["rent_charge"], audit.after["rent_charge"]) == (str(october.pk), None)
+
+
+def test_kept_as_credit_on_a_paid_move_in_invoice_leaves_the_deposit_paid(
+    fake: FakeProvider, worker: None
+) -> None:
+    lease, draft = a_prospective(fake)
+    invoice = sent(draft).invoice
+    assert invoice is not None
+    run_queued_jobs()
+    october = RentCharge.objects.get(lease=lease, period_month=date(2026, 10, 1))
+    deposit = OneOffCharge.objects.get(lease=lease, fee_type__refundable=True)
+    total = D(october.amount_due) + D(deposit.price)
+    builder_tests.pay(fake, fresh(invoice), str(total))
+    assert fresh(october).amount_paid == october.amount_due
+    [payment] = Payment.objects.filter(is_refund=False)
+    change = apply(lease, date(2026, 11, 10), choice="credit", today=date(2026, 10, 6))
+    assert change.draft_state == start_date.DRAFT_PAID
+    assert change.outcome == start_date.OUTCOME_CREDIT
+    assert not Payment.objects.filter(is_refund=True).exists()
+    # The invoice's payment keeps the deposit's part, on the deposit; the rent's part is held.
+    payment = fresh(payment)
+    assert (payment.amount, payment.one_off_charge_id) == (D(deposit.price), deposit.pk)
+    credit = LeaseCredit.objects.get(lease=lease)
+    held = Payment.objects.get(credit=credit)
+    assert (held.amount, held.method, held.invoice_id, held.kind) == (
+        D(october.amount_due),
+        PaymentMethod.ACH,
+        payment.invoice_id,
+        PaymentKind.RENT,
+    )
+    assert (credit.amount, credit.reference) == (D(october.amount_due), payment.reference)
+    deposit = fresh(deposit)
+    assert (deposit.amount_paid, deposit.status) == (D(deposit.price), "paid")
+    october = fresh(october)
+    assert (october.status, october.amount_paid) == (RentChargeStatus.VOID, D("0.00"))
+    assert sum(row.amount for row in Payment.objects.all()) == total
+    assert not calls(fake, "refund_transaction")
 
 
 def test_refund_queues_the_refund_job_and_never_calls_the_provider(
