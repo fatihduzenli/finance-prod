@@ -544,7 +544,7 @@ def _free_rent_fields(form: forms.BaseForm) -> None:
         initial=0,
         widget=forms.NumberInput(attrs={"min": 0, "max": FREE_RENT_DAYS_MAX, "step": 1}),
     )
-    form.fields["free_rent_from"] = forms.ChoiceField(
+    form.fields["free_rent_from"] = _QuietChoiceField(
         label=FREE_RENT_FROM_LABEL,
         choices=FREE_RENT_FROM_CHOICES,
         initial=FreeRentFrom.MOVE_IN,
@@ -802,7 +802,7 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         if self.deposit_type is not None:
             self.fields[f"{_setup_name(self.deposit_type)}_price"].label = DEPOSIT_LABEL
         # PLAN-015d §3 (3): when the deposit is collected.
-        self.fields["deposit_when"] = forms.ChoiceField(
+        self.fields["deposit_when"] = _QuietChoiceField(
             label="When",
             choices=deposits.DEPOSIT_WHEN_CHOICES,
             initial=deposits.DepositWhen.WITH_INVOICE,
@@ -825,7 +825,7 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         self.fields["deposit_first_due"] = forms.DateField(
             label="First due", required=False, widget=forms.DateInput({"type": "date", **plan})
         )
-        self.fields["deposit_cadence"] = forms.ChoiceField(
+        self.fields["deposit_cadence"] = _QuietChoiceField(
             label="Every",
             choices=deposits.DEPOSIT_CADENCES,
             initial=InstallmentCadence.MONTHLY,
@@ -2175,7 +2175,7 @@ class ChangeStartDateForm(forms.Form):
         help_text="Required: why the start date changes.",
         error_messages={"required": "A reason is required: say why the start date changes."},
     )
-    choice = forms.ChoiceField(
+    choice = _QuietChoiceField(
         label="Rent already paid",
         choices=[("credit", "Keep as credit"), ("refund", "Refund")],
         required=False,
