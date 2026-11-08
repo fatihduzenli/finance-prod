@@ -90,6 +90,22 @@ def test_due_on_a_date_is_its_own_charge_off_the_move_in_invoice(
     assert text == "$3,000.00 · due Dec 1"
 
 
+def test_the_lease_cards_deposit_row_reads_its_deposits_in_one_query(
+    admin: Client, today: date, django_assert_num_queries: Any
+) -> None:
+    """The LEASE card's row keeps the page's query budget (PLAN-012f-a D4): what was
+    collected, the invoice it rides and its plan, in one read."""
+    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    assert lease is not None
+    deposit = the_deposit(lease)
+    with django_assert_num_queries(1):
+        found = deposits.lease_deposits(lease)
+    with django_assert_num_queries(0):
+        assert deposits.card_text(lease, found) == "$3,000.00 · due Dec 1"
+    with django_assert_num_queries(1):
+        assert deposits.collected(deposit) == D("0.00")
+
+
 def test_in_installments_makes_a_deposit_plan_off_the_move_in_invoice(
     admin: Client, today: date
 ) -> None:

@@ -425,15 +425,11 @@ def _deposit_text(lease: Lease) -> tuple[str, str]:
     with its state's code (:data:`ledger.services.detail_cards.COLLECTED`, ``PARTIAL`` or
     ``UNCOLLECTED``; PLAN-014 I-b: the LEASE card colours the row by it); ``("", "")``
     without a deposit."""
-    found = list(
-        OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True).exclude(
-            status__in=_CLOSED_ONE_OFF
-        )
-    )
+    found = deposits.lease_deposits(lease)
     if not found:
         return "", ""
     price = sum((Decimal(charge.price) for charge in found), ZERO)
-    paid = sum((deposits.collected(charge) for charge in found), ZERO)
+    paid = sum((Decimal(charge.held) for charge in found), ZERO)  # type: ignore[attr-defined]
     if paid >= price:
         state, code = "collected", detail_cards.COLLECTED
     elif paid <= 0:
@@ -441,7 +437,7 @@ def _deposit_text(lease: Lease) -> tuple[str, str]:
     else:
         state, code = f"{format_amount(paid)} collected", detail_cards.PARTIAL
     # PLAN-015d §3 (3): a deposit due on a date or in installments says so while owed.
-    timed = deposits.card_text(lease) if code != detail_cards.COLLECTED else ""
+    timed = deposits.card_text(lease, found) if code != detail_cards.COLLECTED else ""
     return timed or f"{format_amount(price)} · {state}", code
 
 

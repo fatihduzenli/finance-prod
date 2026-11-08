@@ -43,7 +43,8 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum
+from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from finance.dates import day_text
@@ -56,12 +57,14 @@ from ledger.models import (
     FeeType,
     InstallmentCadence,
     InstallmentOrigin,
+    InstallmentPlan,
     InstallmentPlanStatus,
     Invoice,
     InvoiceDraftLine,
     InvoiceDraftStatus,
     InvoiceLineItem,
     Lease,
+    MoneyField,
     OneOffCategory,
     OneOffCharge,
     OneOffChargeStatus,
@@ -527,18 +530,70 @@ def collected(charge: OneOffCharge) -> Decimal:
     ``one_off`` payments less their settled refunds (:func:`ledger.services.one_off_charges.
     settled`), plus the same of the installments of its deposit plans (origin ``deposit``,
     whatever their status), to the cent. A deposit refund (``refund_deposit``) is not
-    counted, as in ``settled``."""
-    rows = Payment.objects.filter(
-        one_off_charge__plan__one_off_charge=charge,
-        one_off_charge__plan__origin=InstallmentOrigin.DEPOSIT,
-        kind=PaymentKind.ONE_OFF,
-        status=PaymentStatus.SETTLED,
-    ).aggregate(
-        paid=Sum("amount", filter=Q(is_refund=False)),
-        refunded=Sum("amount", filter=Q(is_refund=True)),
+    counted, as in ``settled``. One query."""
+    read = _read(OneOffCharge.objects.filter(pk=charge.pk)).first()
+    held = read.held if read is not None else 0  # type: ignore[attr-defined]
+    return Decimal(held).quantize(CENT)
+
+
+def _held() -> Coalesce:
+    """:func:`collected` of each charge of a query (``OuterRef("pk")``), as one subquery."""
+    zero = Value(Decimal(0), output_field=MoneyField())
+    rows = (
+        Payment.objects.filter(
+            Q(one_off_charge=OuterRef("pk"))
+            | Q(
+                one_off_charge__plan__one_off_charge=OuterRef("pk"),
+                one_off_charge__plan__origin=InstallmentOrigin.DEPOSIT,
+            ),
+            kind=PaymentKind.ONE_OFF,
+            status=PaymentStatus.SETTLED,
+        )
+        .order_by()
+        .values("kind")
+        .annotate(
+            net=Coalesce(Sum("amount", filter=Q(is_refund=False)), zero)
+            - Coalesce(Sum("amount", filter=Q(is_refund=True)), zero)
+        )
+        .values("net")
     )
-    plan = Decimal(rows["paid"] or 0) - Decimal(rows["refunded"] or 0)
-    return (one_off_charges.settled(charge) + plan).quantize(CENT)
+    return Coalesce(Subquery(rows, output_field=MoneyField()), zero)
+
+
+def _read(rows: QuerySet[OneOffCharge]) -> QuerySet[OneOffCharge]:
+    """``rows`` with what the LEASE card's deposit row reads of each, in the same query:
+    ``held`` (:func:`collected`), ``on_line``/``on_invoice``/``on_draft``
+    (:func:`riding_invoice`) and ``plan_pk`` (its deposit plan not cancelled, the first)."""
+    return rows.annotate(
+        held=_held(),
+        on_line=Exists(InvoiceLineItem.objects.filter(one_off_charge=OuterRef("pk"))),
+        on_invoice=Exists(Invoice.objects.filter(one_off_charge=OuterRef("pk"))),
+        on_draft=Exists(
+            InvoiceDraftLine.objects.filter(
+                existing_charge=OuterRef("pk"), draft__status=InvoiceDraftStatus.DRAFT
+            )
+        ),
+        plan_pk=Subquery(
+            InstallmentPlan.objects.filter(
+                one_off_charge=OuterRef("pk"), origin=InstallmentOrigin.DEPOSIT
+            )
+            .exclude(status=InstallmentPlanStatus.CANCELLED)
+            .order_by("pk")
+            .values("pk")[:1]
+        ),
+    )
+
+
+def lease_deposits(lease: Lease) -> list[OneOffCharge]:
+    """The lease's deposits (its refundable one-off charges, not waived or voided), oldest
+    first, each with what :func:`_read` adds: one query for the LEASE card's row."""
+    return list(
+        _read(
+            OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True)
+            .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+            .order_by("created_at", "pk")
+        )
+    )
 
 
 def lease_label(lease: Lease) -> str:
@@ -603,13 +658,13 @@ def riding_invoice(charge: OneOffCharge) -> bool:
     """Whether the deposit goes with an invoice (a line of a sent invoice, the invoice's own
     charge, or a line of a draft not yet sent): such a deposit rides the invoice and gets no
     reminder of its own (PLAN-015d §3 (3))."""
-    return (
-        InvoiceLineItem.objects.filter(one_off_charge=charge).exists()
-        or Invoice.objects.filter(one_off_charge=charge).exists()
-        or InvoiceDraftLine.objects.filter(
-            existing_charge=charge, draft__status=InvoiceDraftStatus.DRAFT
-        ).exists()
-    )
+    read = _read(OneOffCharge.objects.filter(pk=charge.pk)).first()
+    return read is not None and _riding(read)
+
+
+def _riding(read: OneOffCharge) -> bool:
+    """:func:`riding_invoice` of a charge read through :func:`_read`."""
+    return bool(read.on_line or read.on_invoice or read.on_draft)  # type: ignore[attr-defined]
 
 
 def create_lease_with_deposit(
@@ -672,34 +727,26 @@ def create_lease_with_deposit(
     return lease, created, charges
 
 
-def card_text(lease: Lease) -> str:
+def card_text(lease: Lease, found: list[OneOffCharge] | None = None) -> str:
     """The LEASE card's deposit when it is not on the move-in invoice: "$3,000.00 · due Dec 1"
     for a dated deposit nothing of which is collected yet, "$3,000.00 · 1 of 3 installments
     paid" for a deposit plan (with what was collected before it, "$3,000.00 · $1,000.00
     collected · 1 of 3 installments paid", once something is); ``""`` otherwise (the row's
-    usual words apply)."""
+    usual words apply). ``found``: :func:`lease_deposits` when the caller read them."""
     from finance.dates import day_short_text
     from ledger.services import installments
 
-    deposit = (
-        OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True)
-        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
-        .order_by("created_at")
-        .first()
-    )
-    if deposit is None:
+    rows = lease_deposits(lease) if found is None else found
+    if not rows:
         return ""
-    plan = (
-        deposit.installment_plans.filter(origin=InstallmentOrigin.DEPOSIT)
-        .exclude(status=InstallmentPlanStatus.CANCELLED)
-        .first()
-    )
+    deposit = rows[0]
     price = format_amount(Decimal(deposit.price))
-    if plan is not None:
-        progress = installments.progress(plan)
-        held = collected(deposit)
+    held = Decimal(deposit.held).quantize(CENT)  # type: ignore[attr-defined]
+    plan_pk = deposit.plan_pk  # type: ignore[attr-defined]
+    if plan_pk is not None:
+        progress = installments.progress(InstallmentPlan.objects.get(pk=plan_pk))
         so_far = f" · {format_amount(held)} collected" if held > 0 else ""
         return f"{price}{so_far} · {progress.paid_count} of {progress.count} installments paid"
-    if riding_invoice(deposit) or deposit.balance <= 0 or collected(deposit) > 0:
+    if _riding(deposit) or deposit.balance <= 0 or held > 0:
         return ""
     return f"{price} · due {day_short_text(deposit.due_date)}"
