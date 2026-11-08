@@ -28,6 +28,7 @@ from ledger.models import (
 )
 from ledger.services import (
     deposits,
+    detail_cards,
     installments,
     invoice_builder,
     one_off_charges,
@@ -90,11 +91,24 @@ def test_due_on_a_date_is_its_own_charge_off_the_move_in_invoice(
     assert text == "$3,000.00 · due Dec 1"
 
 
+def test_a_deposit_of_a_lease_without_a_move_in_invoice_keeps_the_usual_words(
+    admin: Client, today: date
+) -> None:
+    """Fable's run-2 finding (d): "due <date>" is for a dated deposit only — one the New lease
+    page kept off the lease's move-in invoice. A deposit on no invoice of a lease that has no
+    move-in invoice (saved before PLAN-014b decision 6) reads as before."""
+    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    assert lease is not None
+    InvoiceDraft.objects.filter(lease=lease).delete()
+    assert deposits.card_text(lease) == ""
+    assert workspace._deposit_text(lease) == ("$3,000.00 · not collected", detail_cards.UNCOLLECTED)
+
+
 def test_the_lease_cards_deposit_row_reads_its_deposits_in_one_query(
     admin: Client, today: date, django_assert_num_queries: Any
 ) -> None:
     """The LEASE card's row keeps the page's query budget (PLAN-012f-a D4): what was
-    collected, the invoice it rides and its plan, in one read."""
+    collected, the invoice it rides, its plan and the move-in invoice, in one read."""
     lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
     assert lease is not None
     deposit = the_deposit(lease)
