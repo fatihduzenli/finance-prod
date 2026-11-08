@@ -6,6 +6,8 @@ migration 0077 both ways (the data step linking the rows split before it, the se
 the refused reverse). Task 2: the return reaches the credit through real webhook deliveries to a
 :class:`~payments.fake.FakeProvider` (whole and split rows, unapplied, partly and fully applied,
 refunded at the lease end, replays, a row split before ledger 0077), the P&L's credits held.
+Task 3: the NSF step of such a return (the credit's lease, one fee, no re-debit, no template F,
+the transaction's total).
 """
 
 from __future__ import annotations
@@ -25,7 +27,10 @@ from django.utils import timezone
 from ledger.models import (
     AuditLog,
     LeaseCredit,
+    MessageRule,
     MessageTemplate,
+    OneOffCategory,
+    OneOffCharge,
     OutboundMessage,
     Payment,
     PaymentKind,
@@ -34,11 +39,12 @@ from ledger.models import (
     RentCharge,
     RentChargeStatus,
 )
-from ledger.services import credits, receivables, rent_run, returns, start_date
+from ledger.services import credits, leases, nsf, receivables, rent_run, returns, start_date
 from payments.fake import FakeProvider
-from payments.models import ExternalRef
+from payments.models import ExternalRef, Job, JobKind
 from payments.webhooks.handlers import transaction as transaction_handler
 from tests import test_returns_nsf as nsf_tests
+from tests.test_lease_services import make_lease
 from tests.test_plan015d_change_start import an_active_lease, apply, november, pay
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 from tests.test_returns_nsf import NOTICE, Clock, a_world
@@ -606,3 +612,69 @@ def test_a_non_ach_credit_has_no_return_path(nov_5: date) -> None:
     assert not ExternalRef.objects.filter(entity_id=held.pk).exists()
     assert credits.reverse_from_return(held, lambda row: None) is None
     assert LeaseCredit.objects.get(pk=credit.pk).reversed_at is None
+
+
+# --- Task 3: the NSF step of a debit kept as a credit ---------------------------------------
+
+
+def return_audit(payment: Payment) -> AuditLog:
+    return AuditLog.objects.get(action=nsf.RETURN_ACTION, entity_id=str(payment.pk))
+
+
+def test_a_debit_kept_whole_gets_its_fee_on_the_credits_lease_and_no_redebit_or_f(
+    fake: FakeProvider,
+) -> None:
+    world, held, credit = kept_whole(fake)
+    # The operator's earliest active lease is another one: never the guess.
+    other = make_lease(operator=world.operator, started_on=date(2025, 1, 1))
+    assert leases.first_active_lease(world.operator) == other
+    assert bank_returns(fake, "R01") == "processed"
+    [fee] = OneOffCharge.objects.filter(source_payment=held, category=OneOffCategory.NSF_FEE)
+    assert fee.lease_id == credit.lease_id == world.lease.pk
+    assert fee.description == (
+        f"{OneOffCategory.NSF_FEE.label}: returned debit of a payment kept as a credit"
+    )
+    # R01 is retried on a charge; a credit's return is not.
+    assert not OneOffCharge.objects.filter(category=OneOffCategory.REDEBIT).exists()
+    assert not OutboundMessage.objects.filter(rule=MessageRule.F).exists()
+    audit = return_audit(held)
+    assert audit.after["retry"] == nsf.NO_RETRY_CREDIT
+    assert audit.after["lease"] == str(world.lease.pk)
+    assert audit.after["credit_reversed"] == [str(credit.pk)]
+    assert audit.after["transaction_total"] == "1500.00"
+    assert audit.after["fee_charge"] == str(fee.pk) and audit.after["message"] is None
+    assert not Job.objects.filter(kind=JobKind.SCHEDULE_CREATE).exists()
+    assert not writes(fake)
+    # The returns queue says why there is no retry, and shows the credit's store.
+    state = nsf.queue_states([Payment.objects.get(pk=held.pk)])[held.pk]
+    assert state.text == nsf.STATE_CREDIT and state.fee == fee.pk
+    row = returns.row(Payment.objects.get(pk=held.pk))
+    assert row.store is not None and row.store.pk == world.lease.store_id
+
+
+def test_a_split_debit_counts_its_whole_transaction_and_is_not_redebited(
+    fake: FakeProvider,
+) -> None:
+    world, payment, held = kept_part(fake)
+    assert bank_returns(fake, "R09") == "processed"
+    audit = return_audit(payment)
+    assert audit.after["transaction_total"] == "1500.00"
+    assert audit.after["retry"] == nsf.NO_RETRY_CREDIT
+    assert audit.after["credit_reversed"] == [str(held.credit_id)]
+    [fee] = OneOffCharge.objects.filter(category=OneOffCategory.NSF_FEE)
+    assert (fee.source_payment_id, fee.lease_id) == (payment.pk, world.lease.pk)
+    # One fee for the one bank debit: none for the split row.
+    assert not OneOffCharge.objects.filter(source_payment=held).exists()
+    assert not OneOffCharge.objects.filter(category=OneOffCategory.REDEBIT).exists()
+    assert not OutboundMessage.objects.filter(rule=MessageRule.F).exists()
+    replay_all()
+    assert OneOffCharge.objects.filter(category=OneOffCategory.NSF_FEE).count() == 1
+
+
+def test_a_debit_not_kept_as_a_credit_is_still_redebited(fake: FakeProvider) -> None:
+    _, payment = a_debit(fake)
+    assert bank_returns(fake, "R01") == "processed"
+    audit = return_audit(payment)
+    assert audit.after["retry"] == nsf.RETRY_AUTO
+    assert audit.after["credit_reversed"] == [] and audit.after["transaction_total"] == "1500.00"
+    assert OneOffCharge.objects.filter(category=OneOffCategory.REDEBIT).count() == 1
