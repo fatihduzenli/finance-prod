@@ -89,6 +89,9 @@ HEADERS: frozenset[str] = frozenset(
         "Installment of",
         # Profit and loss
         "Rent billed (USD)",
+        # PLAN-015d: the free-rent concessions (P&L and Revenue) and the P&L's net rent.
+        "Concessions (USD)",
+        "Net rent (USD)",
         "Rent collected (USD)",
         "Fees billed (USD)",
         "Fees collected (USD)",

@@ -188,7 +188,12 @@ OPERATOR_FACING_RULES: frozenset[str] = frozenset(
 )
 #: Statuses that close a charge to messages, whatever its balance.
 CLOSED_RENT: frozenset[str] = frozenset(
-    {RentChargeStatus.WAIVED, RentChargeStatus.PAID, RentChargeStatus.PENDING}
+    {
+        RentChargeStatus.WAIVED,
+        RentChargeStatus.VOID,
+        RentChargeStatus.PAID,
+        RentChargeStatus.PENDING,
+    }
 )
 CLOSED_ONE_OFF: frozenset[str] = frozenset(
     {OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED, OneOffChargeStatus.PAID}

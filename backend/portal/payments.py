@@ -317,6 +317,8 @@ def pay_page(user: PortalUser, store: Store, charge_raw: object, today: date) ->
     rows = [
         row
         for row in receivables.open_balances(today, user.operator_id)
+        # PLAN-015d §9.4: a deposit due on a date is payable like any other charge.
+        + receivables.dated_deposits(user.operator_id)
         if row.store_id == store.pk
     ]
     whole = charge_raw in (None, "")

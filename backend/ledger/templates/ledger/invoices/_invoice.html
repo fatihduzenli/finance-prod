@@ -28,6 +28,9 @@
       {% for line in preview.lines %}
         <tr class="invoice-line"><td><span class="line-item">{{ line.item }}</span>{% if line.description %}<br><span class="muted line-detail">{{ line.description }}</span>{% endif %}</td><td class="money">{{ line.quantity_text }}</td><td class="money">{{ line.unit_amount|money }}</td><td class="money">{{ line.line_total|money }}</td></tr>
       {% endfor %}
+      {% for discount in preview.discounts %}
+        <tr class="invoice-line invoice-discount"><td><span class="line-item">{{ discount.item }}</span></td><td class="money">1</td><td class="money">{{ discount.shown|money }}</td><td class="money">{{ discount.shown|money }}</td></tr>
+      {% endfor %}
     </tbody>
     <tfoot><tr><th scope="row" colspan="3">Total due (US dollars)</th><th class="money" id="invoice-total">{{ preview.total|money }}</th></tr></tfoot>
   </table>

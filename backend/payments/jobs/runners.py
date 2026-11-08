@@ -317,6 +317,33 @@ def invoice_delete_job(job: Job) -> Result:
     return one_off_invoices.delete(job.entity_id, job.requested_by)
 
 
+def invoice_void_job(job: Job) -> Result:
+    """PLAN-015d §3 (1): the void of a sent, unpaid invoice-builder invoice (its id in
+    ``params.invoice``) at the provider, then the ledger's side
+    (:func:`payments.one_off_invoices.void`)."""
+    return one_off_invoices.void(
+        uuid.UUID(str(job.params.get(one_off_invoices.VOID_INVOICE_PARAM))),
+        job.requested_by,
+        rent=str(job.params.get(one_off_invoices.VOID_RENT_PARAM) or ""),
+        redraft=job.params.get(one_off_invoices.VOID_REDRAFT_PARAM) is True,
+    )
+
+
+def autopay_move_job(job: Job) -> Result:
+    """PLAN-015d §3 (1): the lease's live rent autopay created again from its new start date
+    (``params.start``), keyed by the change (``params.key``)."""
+    outcome = leases.move_autopay(
+        job.entity_id,
+        seq=0,
+        skipped=date.fromisoformat(str(job.params["start"])),
+        plan_id=uuid.UUID(str(job.params["key"])),
+        actor=job.requested_by,
+        start=date.fromisoformat(str(job.params["start"])),
+    )
+    failed = (leases.AutopayAction.REFUSED, leases.AutopayAction.FAILED)
+    return outcome.action not in failed, outcome.message
+
+
 def schedule_create_job(job: Job) -> Result:
     """PLAN-010d D2: the one-occurrence schedule of an ``autopay_due`` charge. PLAN-012e
     D11: with :data:`ledger.services.installments.RESCHEDULE_PARAM`, the schedule of a
@@ -556,6 +583,8 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.INVOICE_CREATE: invoice_create_job,
     JobKind.INVOICE_SEND: invoice_send_job,
     JobKind.INVOICE_DELETE: invoice_delete_job,
+    JobKind.INVOICE_VOID: invoice_void_job,
+    JobKind.AUTOPAY_MOVE: autopay_move_job,
     JobKind.SCHEDULE_CREATE: schedule_create_job,
     JobKind.SCHEDULE_DELETE: schedule_delete_job,
     JobKind.INVOICE_PAY: invoice_pay_job,

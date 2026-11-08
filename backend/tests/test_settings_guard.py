@@ -227,16 +227,38 @@ def test_0069_leaves_an_admin_edited_d_alone_and_says_so() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_0069_reverse_turns_the_new_holds_into_a_known_reason() -> None:
+    """Re-pinned (Fable's run-2 finding on PLAN-015d): the held rows are written through the
+    models of 0069's state, as the other round trips write theirs, so that a later column of
+    a model (``leases.free_rent_days``) cannot break the test. That the guard holds a message
+    ``settings_incomplete`` is pinned in section 2."""
     leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
-    _d_at(_migrate(AFTER), _seeded_d_at_0068().replace(MIGRATION.SEEDED, "{pay_line}"))
-    support("")
-    lease = billed_lease(3110)
-    held = queue_d(lease, overdue(lease))
-    assert (held.status, held.held_reason) == (MessageStatus.HELD, HeldReason.SETTINGS_INCOMPLETE)
     try:
+        apps = _migrate(AFTER)
+        template = _d_at(apps, _seeded_d_at_0068().replace(MIGRATION.SEEDED, "{pay_line}"))
+        operator = apps.get_model("ledger", "Operator").objects.create(
+            display_name="Guard Reverse LLC", email="guard-reverse@example.com"
+        )
+        held = [
+            apps.get_model("ledger", "OutboundMessage").objects.create(
+                operator=operator,
+                template=template,
+                rule=MessageRule.D,
+                charge_entity_type="one_off_charge",
+                charge_entity_id=uuid.uuid4(),
+                to_address="guard-reverse@example.com",
+                status=MessageStatus.HELD,
+                held_reason=reason,
+            )
+            for reason in (HeldReason.SETTINGS_INCOMPLETE, HeldReason.MISSING_VALUE)
+        ]
         back = _migrate(BEFORE)
-        row = back.get_model("ledger", "OutboundMessage").objects.get(pk=held.pk)
-        assert (row.status, row.held_reason) == ("held", "not_set_up")
+        rows = back.get_model("ledger", "OutboundMessage").objects.filter(
+            pk__in=[row.pk for row in held]
+        )
+        assert sorted(rows.values_list("status", "held_reason")) == [
+            ("held", "not_set_up"),
+            ("held", "not_set_up"),
+        ]
     finally:
         _migrate(*leaves)
         OutboundMessage.objects.all().delete()

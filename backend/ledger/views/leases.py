@@ -48,6 +48,7 @@ from banking.models import ALIAS_MAX_LENGTH
 from finance.dates import day_text
 from ledger.forms import (
     SHOWN_WHEN,
+    ChangeStartDateForm,
     EnrolForm,
     LeaseBillingForm,
     LeaseCreateForm,
@@ -76,12 +77,14 @@ from ledger.models import (
 )
 from ledger.services import (
     csv_export,
+    deposits,
     detail_cards,
+    free_rent,
     insurance,
     list_filters,
-    one_off_charges,
     rent_run,
     search,
+    start_date,
     workspace,
 )
 from ledger.services import lease_end as lease_end_service
@@ -275,12 +278,14 @@ def _detail_context(request: HttpRequest, lease: Lease) -> dict[str, Any]:
     linked_states = set()
     # PLAN-012b-b D13: autopay moved past a split month starts on its new first debit.
     moved = service.autopay_move(lease, now)
+    # PLAN-015d: the next run is never in a month the free period touches (as the schedule).
+    floor = service.first_debit_floor(lease, now)
     for row in live:
         ref = service.schedule_ref(row)
         if ref:
             linked_states.add(row.state)
         next_run = (
-            service.next_debit_at(row.debit_day, now)
+            service.next_debit_at(row.debit_day, floor)
             if row.state == ScheduleState.ACTIVE and row.debit_day is not None
             else None
         )
@@ -486,12 +491,14 @@ def lease_create(request: HttpRequest) -> HttpResponse:
             has_operator = form.cleaned_data.get("operator") is not None
             account = form.cleaned_data["account"] if has_operator else service.ACCOUNT_LATER
             try:
-                lease, created, charges = one_off_charges.create_lease_with_checklist(
+                timing = form.deposit_timing()
+                lease, created, charges = deposits.create_lease_with_deposit(
                     form.cleaned_data,
                     rent=form.cleaned_data["rent"],
                     creation_key=form.cleaned_data["creation_key"],
                     items=form.setup_items(),
                     actor=_actor(request),
+                    timing=timing,
                     billing=form.billing_values() if has_operator else None,
                     account=account,
                 )
@@ -510,7 +517,13 @@ def lease_create(request: HttpRequest) -> HttpResponse:
                 # Decision 6: the move-in invoice, a draft; the lease stays saved without one.
                 move_in = move_in_service.create_draft(
                     lease,
-                    charges,
+                    # PLAN-015d §3 (3): a deposit due on a date or in installments is not a
+                    # move-in line.
+                    [
+                        charge
+                        for charge in charges
+                        if timing.on_invoice or not deposits.is_deposit(charge)
+                    ],
                     creation_key=form.cleaned_data["creation_key"],
                     actor=_actor(request),
                 )
@@ -662,6 +675,10 @@ def lease_edit(request: HttpRequest, pk: str) -> HttpResponse:
                 form.add_error(refusal.field, str(refusal))
             else:
                 messages.success(request, "Lease saved.")
+                # PLAN-015d §3 (2): months already billed keep their free rent; say which.
+                kept = free_rent.kept(Lease.objects.get(pk=lease.pk))
+                if kept:
+                    messages.warning(request, free_rent.Recomputed((), kept).warning)
                 return redirect(_saved_url(request, lease, context))
         _hold(request, target, form)
         return redirect(request.get_full_path())
@@ -704,6 +721,8 @@ def _edit_context(lease: Lease, today: date, first_charge: RentCharge | None) ->
         "first_month_billed_on": first_charge.created_at if first_charge else None,
         "can_change_holder": lease.ended_on is None
         and lease.collection_status != CollectionStatus.ENDED,
+        # PLAN-015d: the free rent in force ("30 days, Dec 10 – Jan 8"), or "".
+        "free_rent_text": free_rent.card_text(lease),
     }
 
 
@@ -1374,6 +1393,80 @@ def lease_activate(request: HttpRequest, pk: str) -> HttpResponse:
                 "activate_refusal": refusal,
                 "activate_today": today,
                 "activate_moves_start": lease.started_on is None or lease.started_on > today,
+            },
+        ),
+    )
+
+
+#: PLAN-015d §3 (1): Change start date.
+START_CHANGED = "Start date changed to {date}."
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_change_start(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:change_start`` (PLAN-015d §3 (1), §9.1): billing on a prospective lease,
+    admin on an active one. GET is the dialog over the store page: the new date (``?date=``
+    re-renders it with that date's effects, from :func:`ledger.services.start_date.preview`,
+    no script needed), the reason, the money's choice when rent paid moves, the deposit's
+    tick and the extra days' confirmation; POST applies it
+    (:func:`ledger.services.start_date.apply`, which queues the provider's work as jobs). A
+    refusal re-renders the dialog with its sentence; done, it returns to the store page."""
+    lease = _load(pk)
+    needed = Role.ADMIN if lease.collection_status == CollectionStatus.ACTIVE else Role.BILLING
+    if not meets(_role(request), needed):
+        return forbidden(request)
+    today = timezone.localdate()
+    refusal = "" if workspace.changeable_start(lease, today) else start_date.NOT_CHANGEABLE
+    form = ChangeStartDateForm(request.POST if request.method == "POST" else None)
+    wanted: date | None = None
+    if request.method == "POST":
+        valid = form.is_valid()
+        wanted = form.cleaned_data.get("new_start")
+        if valid and wanted is not None:
+            if not refusal:
+                try:
+                    start_date.apply_change(
+                        lease.pk,
+                        wanted,
+                        reason=form.cleaned_data["reason"],
+                        choice=form.cleaned_data["choice"] or None,
+                        move_deposit=form.cleaned_data["move_deposit"],
+                        actor=_actor(request),
+                        today=today,
+                        confirmed=form.cleaned_data["confirm"],
+                    )
+                except start_date.StartDateRefused as error:
+                    form.add_error(
+                        error.field if error.field in form.fields else None, error.message
+                    )
+                else:
+                    messages.success(request, START_CHANGED.format(date=day_text(wanted)))
+                    return redirect("ledger:stores:detail", pk=lease.store_id)
+    else:
+        raw = request.GET.get("date", "")
+        try:
+            wanted = date.fromisoformat(raw) if raw else None
+        except ValueError:
+            wanted = None
+        if wanted is not None:
+            form = ChangeStartDateForm(initial={"new_start": wanted})
+    change = (
+        start_date.preview(lease, wanted, today=today)
+        if wanted is not None and not refusal
+        else None
+    )
+    return render(
+        request,
+        "ledger/leases/change_start.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "start_form": form,
+                "start_refusal": refusal,
+                "start_change": change,
+                "start_today": today,
             },
         ),
     )

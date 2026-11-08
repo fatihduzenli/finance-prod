@@ -91,9 +91,12 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     ],
     "DocumentSource": ["docusign", "upload"],
     "EnrolmentStatus": ["enrolled", "not_enrolled"],
+    # PLAN-015d (ledger 0073): where a lease's free-rent days start.
+    "FreeRentFrom": ["move_in", "next_month"],
     # "yearly" added by PLAN-012f-b Batch D (settlements).
     "InstallmentCadence": ["biweekly", "monthly", "weekly", "yearly"],
-    "InstallmentOrigin": ["settlement", "split"],  # PLAN-012f-b Batch D
+    # "deposit" added by ledger 0074 (PLAN-015d: the New lease page's deposit installments).
+    "InstallmentOrigin": ["deposit", "settlement", "split"],  # PLAN-012f-b Batch D
     "InstallmentCollection": ["autopay_due", "email", "manual"],
     # "paused" added by PLAN-012f-b Batch D (D-3).
     "InstallmentPlanStatus": ["active", "attention", "cancelled", "completed", "paused"],
@@ -178,7 +181,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "PaymentMethod": ["ach", "cash", "check", "credit", "other", "wire", "zelle"],
     "PaymentStatus": ["pending", "returned", "settled", "voided"],
     "RefundMethod": ["check", "wire", "zelle"],
-    "RentChargeStatus": ["due", "paid", "partial", "pending", "unpaid", "waived"],
+    # "void" added by ledger 0072 (PLAN-015d: a charge that never fell due).
+    "RentChargeStatus": ["due", "paid", "partial", "pending", "unpaid", "void", "waived"],
     "RentSource": ["sheet_current", "sheet_inferred", "staff"],
     "ResolutionKind": ["note", "rescheduled"],
     "RetryState": ["auto_pending", "done", "scheduled", "stopped"],
@@ -245,8 +249,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: (ledger:leases:pause_collection, resume_collection and activate), PLAN-015b; 325 since the
 #: invoice PDF and the receipt PDF on the staff pages (ledger:invoices:pdf,
 #: ledger:payments:receipt), PLAN-015c; 327 since the portal's (portal:invoice_pdf,
-#: portal:receipt_pdf), PLAN-015c.
-FROZEN_ROUTES = (327, "ac7e9fb786c8fe48a86aa73767d182b8ce543f993c842c67bf51cd7616d5cc93")
+#: portal:receipt_pdf), PLAN-015c; 328 since the LEASE card's Change start date
+#: (ledger:leases:change_start), PLAN-015d.
+FROZEN_ROUTES = (328, "82a98b5db0a724d7e63af80760921656d2ab0586794b6771d35f26b3b8ecceaf")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

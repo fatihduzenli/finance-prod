@@ -128,6 +128,8 @@ STATUS_PENDING = RentChargeStatus.PENDING.value
 STATUS_PARTIAL = RentChargeStatus.PARTIAL.value
 STATUS_DUE = RentChargeStatus.DUE.value
 STATUS_WAIVED = RentChargeStatus.WAIVED.value
+#: PLAN-015d: a charge that never fell due (Change start date); shown grey, never filtered on.
+STATUS_VOID = RentChargeStatus.VOID.value
 STATUS_NOT_DUE = "not_due"
 #: The statuses the filter offers, in the legend's order (PLAN-012e-4 D2: the owner's order,
 #: "Unpaid" in its two shades in place of "Due" and "Unpaid").
@@ -149,6 +151,7 @@ STATUS_WORDS: dict[str, str] = {
     STATUS_PENDING: "Pending",
     STATUS_PARTIAL: "Partly paid",
     STATUS_WAIVED: "Waived",
+    STATUS_VOID: "Void",
     STATUS_NOT_DUE: "Not yet due",
 }
 
@@ -362,6 +365,8 @@ def _status_text(cell: Cell) -> str:
         return f"Partly paid {_amount(cell.amount_paid)} of {_amount(cell.amount_due)}"
     if cell.status == STATUS_WAIVED:
         return "Waived"
+    if cell.status == STATUS_VOID:
+        return "Void"
     if cell.status == STATUS_NOT_DUE:
         return "Not yet due"
     return ""
@@ -369,9 +374,9 @@ def _status_text(cell: Cell) -> str:
 
 def combined_status(statuses: list[str], amount_paid: Decimal) -> str:
     """The status of a cell from its charges' statuses (see the module docstring)."""
-    counted = [status for status in statuses if status != STATUS_WAIVED]
+    counted = [status for status in statuses if status not in (STATUS_WAIVED, STATUS_VOID)]
     if not counted:
-        return STATUS_WAIVED
+        return STATUS_WAIVED if STATUS_WAIVED in statuses or not statuses else STATUS_VOID
     if all(status == STATUS_PAID for status in counted):
         return STATUS_PAID
     if STATUS_PENDING in counted:

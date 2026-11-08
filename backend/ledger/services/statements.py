@@ -66,6 +66,7 @@ from django.utils import timezone
 
 from finance.dates import month_text
 from ledger.models import (
+    NOT_BILLED_RENT,
     ZERO,
     DeductionKind,
     LeaseCredit,
@@ -77,9 +78,8 @@ from ledger.models import (
     PaymentStatus,
     RefundMethod,
     RentCharge,
-    RentChargeStatus,
 )
-from ledger.services import one_off_charges, proration, receivables
+from ledger.services import deposits, proration, receivables
 from ledger.services.leases import debit_amounts, rent_on
 from ledger.services.rent_run import falls_on, months_catch_up_would_create
 from payments import lease_sync
@@ -475,7 +475,7 @@ def last_month(lease_end: LeaseEnd) -> LastMonth | None:
         part = proration.Prorated(total_days, total_days, rent.amount, "")
     charges = list(
         RentCharge.objects.filter(lease=lease, period_month=month)
-        .exclude(status=RentChargeStatus.WAIVED)
+        .exclude(status__in=NOT_BILLED_RENT)
         .order_by("seq")
     )
     changes: list[RentChange] = []
@@ -582,7 +582,7 @@ def after_end(lease_end: LeaseEnd) -> tuple[AfterEnd, ...]:
         return ()
     charges = (
         RentCharge.objects.filter(lease=lease_end.lease, period_month__gt=ended.replace(day=1))
-        .exclude(status=RentChargeStatus.WAIVED)
+        .exclude(status__in=NOT_BILLED_RENT)
         .order_by("period_month", "seq")
     )
     return tuple(
@@ -677,7 +677,7 @@ def _deposit_lines(lease_end: LeaseEnd) -> list[DepositLine]:
     (PLAN-012b-b D11; such a deposit blocks the lease end, so confirm never sees one)."""
     lines = []
     for charge in deposit_charges(lease_end):
-        held = one_off_charges.settled(charge)
+        held = deposits.collected(charge)
         owed = charge.status in (OneOffChargeStatus.OWED, OneOffChargeStatus.PARTIAL)
         if held > 0 or owed:
             lines.append(DepositLine(charge.pk, charge.label, held, Decimal(charge.price)))

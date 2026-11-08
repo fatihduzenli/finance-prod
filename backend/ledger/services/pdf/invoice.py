@@ -40,6 +40,7 @@ from django.db.models.functions import Coalesce
 from finance.dates import day_short_text, day_text, month_long_text
 from ledger.models import (
     Invoice,
+    InvoiceLineKind,
     InvoiceStatus,
     Lease,
     OneOffCharge,
@@ -240,13 +241,15 @@ def _source_line(invoice: Invoice, store: str) -> Line:
 
 
 def lines_of(invoice: Invoice, store: str) -> tuple[Line, ...]:
+    """The stored lines in order; a discount line (PLAN-015d: a free-rent concession) reads
+    negative, so that the lines sum to the subtotal."""
     stored = [
         Line(
             description=str(item.description),
             details=str(item.details),
             quantity=Decimal(item.quantity),
-            price=item.unit_price,
-            amount=item.line_total,
+            price=-item.unit_price if item.kind == InvoiceLineKind.DISCOUNT else item.unit_price,
+            amount=-item.line_total if item.kind == InvoiceLineKind.DISCOUNT else item.line_total,
         )
         for item in invoice.line_items.order_by("position")
     ]

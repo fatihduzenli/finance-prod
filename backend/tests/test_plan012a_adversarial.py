@@ -96,8 +96,10 @@ def test_fees_cannot_be_added_behind_the_total_and_only_charge_lines_are_written
         Invoice.objects.filter(pk=sent.invoice.pk).update(surcharge=D("-1.00"))
     with pytest.raises(IntegrityError), transaction.atomic():
         InvoiceLineItem.objects.filter(invoice=sent.invoice).update(kind="refund")
-    # No production code writes any kind but charge (D4): the only ``kind=`` assignments
-    # in ledger/ and payments/ name InvoiceLineKind.CHARGE.
+    # No production code writes any kind but charge (D4) and, since PLAN-015d §8/§9.2, the
+    # free-rent concession's discount line: the only ``kind=`` assignments in ledger/ and
+    # payments/ name InvoiceLineKind.CHARGE or DISCOUNT, the discount only in the invoice
+    # builder. No fee, surcharge or refund line is written.
     writes = []
     for path in list((BACKEND / "ledger").rglob("*.py")) + list(
         (BACKEND / "payments").rglob("*.py")
@@ -108,7 +110,10 @@ def test_fees_cannot_be_added_behind_the_total_and_only_charge_lines_are_written
             r"\bkind=InvoiceLineKind\.(\w+)", path.read_text(encoding="utf-8")
         ):
             writes.append((str(path.relative_to(BACKEND)), match.group(1)))
-    assert writes and {kind for _, kind in writes} == {"CHARGE"}, writes
+    assert writes and {kind for _, kind in writes} == {"CHARGE", "DISCOUNT"}, writes
+    assert {where for where, kind in writes if kind == "DISCOUNT"} == {
+        "ledger/services/invoice_builder.py"
+    }, writes
 
 
 def test_no_report_sums_fees_or_surcharge_into_a_figure_yet() -> None:

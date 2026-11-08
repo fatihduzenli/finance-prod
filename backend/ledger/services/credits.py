@@ -113,8 +113,10 @@ def create(
     note: str,
     allocation_group: uuid.UUID,
     actor: User | None,
+    context: dict[str, Any] | None = None,
 ) -> LeaseCredit:
-    """Keep ``amount`` as a credit on ``lease`` (in the caller's transaction), audited."""
+    """Keep ``amount`` as a credit on ``lease`` (in the caller's transaction), audited;
+    ``context`` joins the audit row's ``after`` (where the money came from)."""
     credit = LeaseCredit(
         lease=lease,
         amount=amount,
@@ -127,7 +129,7 @@ def create(
         allocation_group=allocation_group,
     )
     credit.save()
-    _audit(actor, CREATED_ACTION, credit, None, state(credit))
+    _audit(actor, CREATED_ACTION, credit, None, {**state(credit), **(context or {})})
     return credit
 
 

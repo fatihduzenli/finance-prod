@@ -131,6 +131,8 @@ _FAMILY_OF: dict[str, str] = {
     "partly paid": PARTIAL,
     "waived": WAIVED,
     "voided": NEUTRAL,
+    # PLAN-015d: a rent charge that never fell due reads "Void", grey.
+    "void": NEUTRAL,
     "not_due": NEUTRAL,
     "not due": NEUTRAL,
     "not yet due": NEUTRAL,

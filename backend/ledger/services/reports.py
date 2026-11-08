@@ -69,7 +69,7 @@ from ledger.models import (
 )
 from ledger.services import one_off_charges, pnl, receivables
 from ledger.services.csv_export import CsvWriter
-from ledger.services.payments_ledger import charge_lease, invoice_line_parts
+from ledger.services.payments_ledger import charge_lease, deposit_installment, invoice_line_parts
 from ledger.wording import provider_sentence
 from payments.models import Deposit, MismatchKind, ReconciliationMismatch
 from payments.provider import mask_identifier
@@ -136,6 +136,8 @@ class RevenueMonth:
     month: date | None
     rent_billed: Decimal = ZERO
     rent_collected: Decimal = ZERO
+    #: PLAN-015d: the free-rent concessions of the rent billed; the totals are net of them.
+    concessions: Decimal = ZERO
     insurance_billed: Decimal = ZERO
     insurance_collected: Decimal = ZERO
     #: Fees other than insurance (setup fees, adjustments, damage, other).
@@ -146,7 +148,7 @@ class RevenueMonth:
 
     @property
     def total_billed(self) -> Decimal:
-        return self.rent_billed + self.insurance_billed + self.fees_billed
+        return self.rent_billed - self.concessions + self.insurance_billed + self.fees_billed
 
     @property
     def total_collected(self) -> Decimal:
@@ -155,6 +157,7 @@ class RevenueMonth:
     def add(self, item: pnl.Figures) -> None:
         self.rent_billed += item.rent_billed
         self.rent_collected += item.rent_collected
+        self.concessions += item.concessions
         self.insurance_billed += item.insurance_billed
         self.insurance_collected += item.insurance_collected
         self.fees_billed += item.fees_billed - item.insurance_billed
@@ -181,6 +184,7 @@ def revenue_by_month(selected: ReportRange) -> Revenue:
 REVENUE_CSV_HEADER = (
     "Month",
     "Rent billed (USD)",
+    "Concessions (USD)",
     "Rent collected (USD)",
     "Insurance billed (USD)",
     "Insurance collected (USD)",
@@ -196,6 +200,7 @@ def _revenue_record(item: RevenueMonth) -> list[object]:
     return [
         f"{item.month:%Y-%m}" if item.month is not None else TOTAL,
         item.rent_billed,
+        item.concessions,
         item.rent_collected,
         item.insurance_billed,
         item.insurance_collected,
@@ -223,8 +228,14 @@ CARDS_NOTE = provider_sentence(
 
 
 def _deposit_payment() -> Q:
-    """A payment on a deposit (a refundable fee type), its refund, or a deposit refund."""
-    return Q(one_off_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
+    """A payment on a deposit (a refundable fee type), its refund, or a deposit refund; and
+    a payment on an installment of a deposit plan (PLAN-015d, :func:`ledger.services.
+    payments_ledger.deposit_installment`)."""
+    return (
+        Q(one_off_charge__fee_type__refundable=True)
+        | Q(kind=PaymentKind.REFUND_DEPOSIT)
+        | deposit_installment()
+    )
 
 
 def _credit_payment() -> Q:
