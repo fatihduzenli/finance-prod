@@ -21,7 +21,9 @@ import documents_storage
 from accounts.roles import Role
 from documents_storage.memory import MemoryDocumentStorage
 from ledger import merge
+from ledger.company_defaults import SEED
 from ledger.models import (
+    COMPANY_SETTINGS_ID,
     LOGO_PNG_MAX_BYTES,
     AuditLog,
     ChargeEntityType,
@@ -376,6 +378,11 @@ def test_0071_forward_and_back() -> None:
             .objects.filter(code__in=MIGRATION.SEEDED_CODES)
             .exists()
         )
+        # The row the new columns are added over: an earlier transactional test may have
+        # flushed the one the migrations seeded, so it is made here when it is missing.
+        old.get_model("ledger", "CompanySettings").objects.get_or_create(
+            pk=COMPANY_SETTINGS_ID, defaults=SEED
+        )
         new = _migrate(AFTER)
         codes = set(
             new.get_model("ledger", "MessageTemplate")
@@ -384,7 +391,7 @@ def test_0071_forward_and_back() -> None:
         )
         assert codes == {"invoice_sent", "receipt"}
         settings_model = new.get_model("ledger", "CompanySettings")
-        row = settings_model.objects.get(pk=1)
+        row = settings_model.objects.get(pk=COMPANY_SETTINGS_ID)
         assert (row.invoice_sender, row.city, bytes(row.logo_png)) == ("processor", "", b"")
         with pytest.raises(IntegrityError), transaction.atomic():
             settings_model.objects.filter(pk=1).update(invoice_sender="nobody")

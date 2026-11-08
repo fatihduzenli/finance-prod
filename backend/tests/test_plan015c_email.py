@@ -46,6 +46,7 @@ from tests.test_invoice_builder import a_draft, a_world, fresh, sent, two_lines
 from tests.test_one_off_charges import calls
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
+from tests.text_helpers import assert_present
 
 pytestmark = pytest.mark.django_db
 
@@ -266,7 +267,8 @@ def test_a_payment_recorded_by_hand_queues_its_receipt_and_it_goes_with_the_pdf(
     [attachment] = delivered.attachments
     assert attachment.filename.startswith("receipt-RCPT-") and attachment.data.startswith(b"%PDF")
     text = pdf_text(attachment.data)
-    assert "RECEIPT" in text and "ZL-778812-QX" not in text
+    assert_present(text, "RECEIPT")
+    assert "ZL-778812-QX" not in text
 
 
 def test_an_ach_payment_queues_no_receipt() -> None:

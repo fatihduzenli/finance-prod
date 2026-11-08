@@ -37,6 +37,7 @@ from tests.pdf_helpers import (
     settle,
 )
 from tests.receivables_helpers import a_rent_charge, an_invoice
+from tests.text_helpers import assert_absent
 
 pytestmark = pytest.mark.django_db
 
@@ -72,10 +73,10 @@ def three_line_invoice() -> tuple[Invoice, list[OneOffCharge]]:
 
 def test_an_invoice_without_payments_is_unpaid_with_the_whole_total_due() -> None:
     invoice, _ = three_line_invoice()
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert "UNPAID" in text
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert "UNPAID" in printed
     for word in ("PAID", "PARTLY PAID", "VOID"):
-        assert word not in text, word
+        assert word not in printed, word
     # The header, the panel, the three lines and the totals, in the mockup's words.
     for expected in (
         "INVOICE",
@@ -100,39 +101,39 @@ def test_an_invoice_without_payments_is_unpaid_with_the_whole_total_due() -> Non
         "Questions: billing@example.com",
         "Page 1 of 1",
     ):
-        assert expected in text, expected
-    paid = text.index("Paid")
-    assert text[paid + 1] == "$0.00"
-    assert text[text.index("Balance due") + 1] == "$2,800.00"
+        assert expected in printed, expected
+    paid = printed.index("Paid")
+    assert printed[paid + 1] == "$0.00"
+    assert printed[printed.index("Balance due") + 1] == "$2,800.00"
 
 
 def test_one_partial_payment_is_partly_paid_and_three_partial_payments_each_have_a_row() -> None:
     invoice, charges = three_line_invoice()
     settle(charges[0], "1000.00", date(2026, 11, 2), PaymentMethod.ZELLE)
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert "PARTLY PAID" in text and "UNPAID" not in text
-    assert text[text.index("Paid Nov 2 · Zelle") + 1] == "-$1,000.00"
-    assert text[text.index("Balance due") + 1] == "$1,800.00"
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert "PARTLY PAID" in printed and "UNPAID" not in printed
+    assert printed[printed.index("Paid Nov 2 · Zelle") + 1] == "-$1,000.00"
+    assert printed[printed.index("Balance due") + 1] == "$1,800.00"
     settle(charges[0], "1000.00", date(2026, 11, 9), PaymentMethod.WIRE)
     settle(charges[1], "250.00", date(2026, 11, 16))
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    rows = [line for line in text if line.startswith("Paid ")]
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    rows = [line for line in printed if line.startswith("Paid ")]
     # Oldest first, each with its method's label.
     assert rows == ["Paid Nov 2 · Zelle", "Paid Nov 9 · Wire", "Paid Nov 16 · Bank debit (ACH)"]
-    assert text[text.index("Paid Nov 16 · Bank debit (ACH)") + 1] == "-$250.00"
-    assert "PARTLY PAID" in text
-    assert text[text.index("Balance due") + 1] == "$550.00"
+    assert printed[printed.index("Paid Nov 16 · Bank debit (ACH)") + 1] == "-$250.00"
+    assert "PARTLY PAID" in printed
+    assert printed[printed.index("Balance due") + 1] == "$550.00"
 
 
 def test_payments_covering_the_total_are_paid_with_nothing_due() -> None:
     invoice, charges = three_line_invoice()
     for billed, (_, _, price) in zip(charges, THREE, strict=True):
         settle(billed, price, date(2026, 11, 28))
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert "PAID" in text
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert "PAID" in printed
     for word in ("UNPAID", "PARTLY PAID"):
-        assert word not in text, word
-    assert text[text.index("Balance due") + 1] == "$0.00"
+        assert word not in printed, word
+    assert printed[printed.index("Balance due") + 1] == "$0.00"
     found = facts(invoice)
     # The figures are the ledger's: the subtotal is the lines', the balance the total less
     # the payments.
@@ -145,9 +146,9 @@ def test_returned_voided_pending_and_refund_rows_do_not_count_as_paid() -> None:
     settle(charges[0], "500.00", date(2026, 11, 2), status="returned")
     settle(charges[0], "400.00", date(2026, 11, 3), status="voided")
     settle(charges[0], "300.00", date(2026, 11, 4), status="pending")
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert "UNPAID" in text
-    assert not [line for line in text if line.startswith("Paid ")]
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert "UNPAID" in printed
+    assert not [line for line in printed if line.startswith("Paid ")]
     assert facts(invoice).balance == D("2800.00")
 
 
@@ -157,21 +158,21 @@ def test_a_void_invoice_is_void_with_nothing_due_its_payments_listed_and_no_pay_
     settle(charges[0], "700.00", date(2026, 11, 5), PaymentMethod.CHECK)
     invoice.internal_status = InvoiceStatus.VOID
     invoice.save()
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert "VOID" in text and "UNPAID" not in text
-    assert text[text.index("Paid Nov 5 · Check") + 1] == "-$700.00"
-    assert text[text.index("Balance due") + 1] == "$0.00"
-    assert "How to pay" not in text
-    assert not [line for line in text if line.startswith("Online:")]
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert "VOID" in printed and "UNPAID" not in printed
+    assert printed[printed.index("Paid Nov 5 · Check") + 1] == "-$700.00"
+    assert printed[printed.index("Balance due") + 1] == "$0.00"
+    assert "How to pay" not in printed
+    assert not [line for line in printed if line.startswith("Online:")]
 
 
 def test_an_invoice_with_tax_shows_it_between_the_subtotal_and_the_payments() -> None:
     company()
     invoice, _ = builder_invoice(billed_store(), THREE[:1], tax=D("140.00"), total=D("2140.00"))
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert text[text.index("Subtotal") + 1] == "$2,000.00"
-    assert text[text.index("Tax") + 1] == "$140.00"
-    assert text[text.index("Balance due") + 1] == "$2,140.00"
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert printed[printed.index("Subtotal") + 1] == "$2,000.00"
+    assert printed[printed.index("Tax") + 1] == "$140.00"
+    assert printed[printed.index("Balance due") + 1] == "$2,140.00"
 
 
 # --- Invoices without stored lines -----------------------------------------------------------
@@ -191,11 +192,11 @@ def test_a_rent_run_invoice_without_lines_prints_its_rent_charge_as_one_line() -
         issue_date=date(2026, 10, 25),
         due_date=date(2026, 11, 1),
     )
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    row = text.index("Rent — November 2026")
-    assert text[row + 1 : row + 5] == ["#1991 Istanbul", "1", "$1,850.00", "$1,850.00"]
-    assert "#1991 Istanbul" in text[: text.index("ITEM QTY PRICE AMOUNT")]
-    assert "Fatih Trading LLC" in text
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    row = printed.index("Rent — November 2026")
+    assert printed[row + 1 : row + 5] == ["#1991 Istanbul", "1", "$1,850.00", "$1,850.00"]
+    assert "#1991 Istanbul" in printed[: printed.index("ITEM QTY PRICE AMOUNT")]
+    assert "Fatih Trading LLC" in printed
     assert pdf_filename(invoice) == "INV-2026-0077.pdf"
 
 
@@ -211,10 +212,10 @@ def test_a_rent_payment_names_the_invoice_or_only_the_charge_and_is_listed_once(
     by_invoice = a_payment(rent, "1000.00", date(2026, 11, 4))
     by_invoice.invoice = invoice
     by_invoice.save()
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    rows = [line for line in text if line.startswith("Paid ")]
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    rows = [line for line in printed if line.startswith("Paid ")]
     assert rows == ["Paid Nov 3 · Bank debit (ACH)", "Paid Nov 4 · Bank debit (ACH)"]
-    assert "PAID" in text
+    assert "PAID" in printed
     assert by_charge.invoice_id is None
 
 
@@ -268,17 +269,18 @@ def test_an_unreadable_logo_copy_falls_back_to_the_brand_logo() -> None:
 
 def test_the_band_prints_the_address_lines_that_are_set() -> None:
     invoice, _ = three_line_invoice()
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert text[text.index("Global Retail Group") + 1 : text.index("Global Retail Group") + 3] == [
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    name = printed.index("Global Retail Group")
+    assert printed[name + 1 : name + 3] == [
         "100 Main Street, Suite 200,",
         "Paterson, NJ 07501",
     ]
     company(address_line1="", address_line2="", state="", postal_code="", city="Paterson")
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert text[text.index("Global Retail Group") + 1] == "Paterson"
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert printed[printed.index("Global Retail Group") + 1] == "Paterson"
     company(address_line1="", address_line2="", state="", postal_code="", city="")
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert text[text.index("Global Retail Group") + 1] == "INVOICE"
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert printed[printed.index("Global Retail Group") + 1] == "INVOICE"
 
 
 def test_the_pay_link_is_the_stores_portal_pay_page_only_with_a_portal_account() -> None:
@@ -309,9 +311,9 @@ def billed_store_of(invoice: Invoice) -> Lease:
 def test_no_support_email_leaves_the_questions_line_and_the_footer_part_out() -> None:
     invoice, _ = three_line_invoice()
     company(support_email="")
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert not [line for line in text if line.startswith("Questions:")]
-    assert "Global Retail Group" in text[-2:]
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert not [line for line in printed if line.startswith("Questions:")]
+    assert "Global Retail Group" in printed[-2:]
 
 
 # --- Rule 1, determinism, fonts --------------------------------------------------------------
@@ -324,7 +326,7 @@ def test_the_pdf_text_holds_no_card_or_account_number() -> None:
     text = pdf_text(render_invoice(invoice, today=TODAY))
     validate_no_payment_data(text)
     # The cached last four of the bank is not on an invoice, nor the payment's reference.
-    assert "6789" not in text
+    assert_absent(text, "6789")
     assert "ZL-778812" not in text
 
 
@@ -361,14 +363,14 @@ def test_without_the_ttf_files_the_pdf_falls_back_to_helvetica(
     monkeypatch.setattr(frame, "_FONT_FILES", {"InterMissing": "Inter-Regular.ttf"})
     assert frame.fonts() == ("Helvetica", "Helvetica-Bold")
     invoice, _ = three_line_invoice()
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    assert "INV-2026-0012" in text and "Balance due" in text
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    assert "INV-2026-0012" in printed and "Balance due" in printed
 
 
 def test_a_long_company_name_and_description_are_cut_with_an_ellipsis() -> None:
     company(name="A Company Name So Long That It Could Never Fit In The Band Of The Page At All")
     invoice, _ = builder_invoice(billed_store(), [("D" * 120, "", "10.00")])
-    text = lines_of(render_invoice(invoice, today=TODAY))
-    cut = [line for line in text if line.startswith("A Company Name") and line.endswith("…")]
-    assert cut, text
-    assert [line for line in text if line.startswith("DDDD") and line.endswith("…")]
+    printed = lines_of(render_invoice(invoice, today=TODAY))
+    cut = [line for line in printed if line.startswith("A Company Name") and line.endswith("…")]
+    assert cut, printed
+    assert [line for line in printed if line.startswith("DDDD") and line.endswith("…")]

@@ -1851,13 +1851,15 @@ def test_the_company_settings_migration_over_existing_rows_on_sqlite(
             "REGEXP", 2, lambda pattern, text: re.search(pattern, text or "") is not None
         )
         with pytest.raises(sqlite3.IntegrityError, match="company_settings_singleton"):
+            # The address, invoice_sender and logo_png columns since ledger 0071 (PLAN-015c).
             scratch.execute(
                 "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
                 "logo, processor_name, updated_at, sender_email, reply_to_email, "
                 "manager_emails, sandbox_allowlist, bank_deposits_enabled, "
-                "bank_auto_confirm_exact) VALUES "
+                "bank_auto_confirm_exact, address_line1, address_line2, city, state, "
+                "postal_code, invoice_sender, logo_png) VALUES "
                 "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', '2026-10-16', "
-                "'', '', '', '', 0, 0)"
+                "'', '', '', '', 0, 0, '', '', '', '', '', 'processor', X'')"
             )
 
 
@@ -1870,12 +1872,15 @@ def test_the_company_settings_migration_over_existing_rows_on_postgresql(
     url = scratch_postgresql_url
     _company_round_trip(repo_root, url)
     with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        # The address, invoice_sender and logo_png columns since ledger 0071 (PLAN-015c).
         scratch.execute(
             "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
             "logo, processor_name, updated_at, sender_email, reply_to_email, manager_emails, "
-            "sandbox_allowlist, bank_deposits_enabled, bank_auto_confirm_exact) VALUES "
+            "sandbox_allowlist, bank_deposits_enabled, bank_auto_confirm_exact, "
+            "address_line1, address_line2, city, state, postal_code, invoice_sender, "
+            "logo_png) VALUES "
             "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', now(), '', '', '', '', "
-            "false, false)"
+            "false, false, '', '', '', '', '', 'processor', ''::bytea)"
         )
     with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
         scratch.execute("UPDATE company_settings SET logo = 'https://example.com/logo.svg'")
