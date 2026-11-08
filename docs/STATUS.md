@@ -1888,3 +1888,37 @@ Healthy and Running; `/healthz` answers 200 and reports the sandbox environment.
 finished 20 seconds under its 30-minute limit: the next push may time out, so Step 13 must start
 with that job (two jobs, or fewer round trips) before any other work lands. Step 12f-a (Batches A–E
 and slice F) is complete and on staging.
+
+## Paused 2026-11-07 (owner's shutdown) — exact state
+
+**Done and live on staging (main `d6425c5`):** PR #54 QA tools in `docs/qa/tools/`, PR #56 the stalled-runner
+test fix, PR #55 the Edit lease page (PLAN-015a). Design v2 Batches 2–6 still wait for the owner's dashboard review.
+
+**Mid-run, to be rerun from the start:** the PLAN-015b full gate on `design-v2/lease-status` at `9fd60af`
+(worktree `wt-lease-status`, clean). It had passed lint/format/mypy/lock/makemigrations/secrets, the full sqlite
+suite (9,968), PostgreSQL migrations (36), units (10,747) and e2e 104 ×4; it was stopped in the visual stage
+(regenerating edit-lease, store and new-lease baselines). The two half-written baselines were restored. Rerun:
+`QA_SCRATCH=$S bash docs/qa/tools/launch-gate.sh <wt-lease-status> lease-status "edit-lease or store or new-lease"`
+(the tools on main; the gate container is recreated by the scripts). Then: QA-015 entry (draft
+`$S/fable/qa-entry-lease-status.md`), PR, merge on green, verify staging — all approved by the owner.
+
+**Queue (owner's order):** 1. PLAN-015b gate → PR → merge. 2. PLAN-015c invoice/receipt PDFs: plan `86862b9` on
+`design-v2/invoice-pdfs` (STACKED on 015b's `9fd60af`; merge main into it after 015b lands); Opus's task 1 is a WIP
+commit `e831ae1` (not gated, not reviewed; brief `$S/fable/brief-invoice-pdfs.md`); its five owner decisions are
+recorded in the plan §8 and ADR-0020. 3. PLAN-015d Change start date / free rent / deposit timing: draft
+`$S/fable/PLAN-015d-start-date-free-rent-deposit.md` (+ `$S/fable/backup/`), spec verbatim
+`$S/fable/queue-015d-owner-spec.md`; not yet committed; Opus not started. 4. Docs-only PR when one arises: the
+launch-gate wait-pattern fix on `docs/qa-tools-wait` (`7a43c6c`, local).
+
+**Open for the owner:** PLAN-015d §9 — (1) role for changing an active lease's start date in its first month
+(billing or admin); (2) the processor's discount line vs. a net rent line; (3) a start moved earlier into a paid
+month: refuse or prorate; (4) may an operator pay a deposit charge/installment through the portal. PLAN-015b
+residuals in the QA draft: "Activate now" in an earlier month after the move-in invoice was sent leaves the
+later month prorated from the old start (question); a pause job that fails at the provider leaves autopay on.
+Design v2 Batches 2–6: the owner's dashboard review. Staging: the owner sets the support e-mail, company name
+and address.
+
+**Nothing is running.** No push, PR or merge happened after #55. All Docker containers removed. Worktrees:
+`wt-lease-status`, `wt-invoice-pdfs`, `wt-qa-tools` (branch docs/qa-tools-wait), `wt-baseline-timeout` (merged,
+removable), plus older ones. The main checkout stays on `step-14/checkpoint-2` with untracked design files that
+are already committed on their branches.
