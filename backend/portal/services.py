@@ -306,7 +306,8 @@ class PaymentRow:
     status: str
     method: str
     last4: str
-    #: PLAN-015c: the payment's id, and whether it has a receipt ("Receipt PDF").
+    #: PLAN-015c: the payment's id, and whether it carries its entry's "Receipt PDF" (the
+    #: first row of the entry on the page, ``ledger.services.pdf.receipt.first_of_entries``).
     pk: uuid.UUID | None = None
     has_receipt: bool = False
 
@@ -314,11 +315,14 @@ class PaymentRow:
 def payments(user: PortalUser, store: Store) -> list[PaymentRow]:
     """The settled, pending and returned payments billed to the operator on ``store``'s
     charges, newest first."""
-    from ledger.services.pdf.receipt import has_receipt
+    from ledger.services.pdf.receipt import first_of_entries
 
-    found = _billed_payments(user, store_of=store.pk).order_by(
-        F("on").desc(nulls_last=True), "-created_at"
+    found = list(
+        _billed_payments(user, store_of=store.pk).order_by(
+            F("on").desc(nulls_last=True), "-created_at"
+        )
     )
+    with_link = first_of_entries(found)
     last4 = bank_last4(lease_of(user, store))
     return [
         PaymentRow(
@@ -330,7 +334,7 @@ def payments(user: PortalUser, store: Store) -> list[PaymentRow]:
             method=str(payment.get_method_display()),
             last4=last4 if payment.method == PaymentMethod.ACH else "",
             pk=payment.pk,
-            has_receipt=has_receipt(payment),
+            has_receipt=payment.pk in with_link,
         )
         for payment in found
     ]

@@ -2166,6 +2166,10 @@ def _record(
                 prefix = LINE_PREFIX.format(line=item.position)
                 return Outcome(False, prefix + paid.message, paid.field, draft=converted.draft)
             payments.append(paid.payment)
+        # PLAN-015c: the entry's one receipt e-mail, once its rows are all written.
+        from ledger.services import invoice_messages
+
+        invoice_messages.queue_entry_receipt(payments, actor)
     return replace(
         converted,
         message=RECORDED.format(number=converted.invoice.invoice_number),

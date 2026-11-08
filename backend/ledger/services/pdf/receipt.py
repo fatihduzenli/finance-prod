@@ -1,19 +1,31 @@
-"""The receipt PDF of a settled payment (docs/qa/15/PLAN-015c-invoice-pdfs.md §3), rendered on
-request from stored data and never stored.
+"""The receipt PDF of a settled payment entry (docs/qa/15/PLAN-015c-invoice-pdfs.md §3),
+rendered on request from stored data and never stored.
+
+**One receipt per payment entry** (Fable's rework finding, 2026-11-07). An entry recorded
+across several charges (a wire against a two-line invoice, the store page's payment form) is
+stored as one ``Payment`` row per charge sharing ``allocation_group``; its receipt covers them
+all (:func:`entry_of`: the group's rows on the payment's lease that have a receipt, in the
+order they were written, the credits applied left out when the entry received money; a payment
+without a group is its own entry). A bank deposit split over several stores gives each store's
+entry the same group (``banking.services``), so the lease bounds the entry: a receipt never
+names another store's charges. Any row of the entry renders the same receipt, byte for byte.
 
 :func:`render_receipt` draws, inside the :class:`~.frame.Frame` (title RECEIPT, the number
-``RCPT-`` and the payment id's first eight characters — no stored counter — and the stamp
-PAID):
+``RCPT-`` and the first eight characters of the id of the entry's first row — the payment's own
+for a payment alone; the group's id is shared by a split deposit's stores, so it is not used —
+no stored counter — and the stamp PAID):
 
 - the info panel: Received from (the billing lease's company, else the operator's display
-  name, then the operator's full name), Store, Date (settled, else initiated), Amount;
+  name, then the operator's full name), Store, Date (settled, else initiated), Amount (the
+  entry's sum);
 - the payment: Method (its label; a bank debit reads "Bank debit ····<last four>" from the
   lease billing's cached last four only) and Reference (the processor's transaction reference,
   or the reference typed for a payment recorded by hand, always through
   ``payments.provider.mask_identifier``; never a routing or account number; left out when
   there is none);
-- "Applied to": the invoice the payment paid (its own, else the invoice billing its charge)
-  and the charge's words ("Rent — November 2026", a one-off charge's description);
+- "Applied to": for each row, the invoice it paid (its own, else the invoice billing its
+  charge) once, then the charge's words ("Rent — November 2026", a one-off charge's
+  description) with the row's amount;
 - "Remaining balance on the store" in the dark box: the open balances of the store billed to
   the payment's operator on ``today`` (``receivables.open_balances``).
 
@@ -24,6 +36,8 @@ none, and :func:`render_receipt` raises :class:`NoReceipt` for them.
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -59,6 +73,16 @@ class NoReceipt(Exception):  # noqa: N818 (an outcome)
 
 
 @dataclass(frozen=True, slots=True)
+class AppliedLine:
+    """One line of "Applied to": an invoice's number or a charge's words, with the amount
+    paid on it (``None``: an invoice heading whose charges follow)."""
+
+    text: str
+    amount: Decimal | None
+    bold: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ReceiptFacts:
     number: str
     received_from: tuple[str, ...]
@@ -67,7 +91,7 @@ class ReceiptFacts:
     amount: Decimal
     method: str
     reference: str
-    applied_to: tuple[str, ...]
+    applied_to: tuple[AppliedLine, ...]
     remaining: Decimal
 
 
@@ -80,9 +104,60 @@ def has_receipt(payment: Payment) -> bool:
     )
 
 
+def _lease_id(payment: Payment) -> uuid.UUID | None:
+    """The lease of the payment's rent, insurance or one-off charge (``None`` otherwise)."""
+    for charge in (payment.rent_charge, payment.insurance_charge, payment.one_off_charge):
+        if charge is not None:
+            return charge.lease_id
+    return None
+
+
+def entry_key(payment: Payment) -> tuple[uuid.UUID, uuid.UUID | None]:
+    """The entry the payment belongs to: its allocation group on its lease, else itself."""
+    if payment.allocation_group is None:
+        return payment.pk, None
+    return payment.allocation_group, _lease_id(payment)
+
+
+def entry_of(payment: Payment) -> list[Payment]:
+    """The rows the payment's receipt covers, oldest first (see the module docstring)."""
+    if payment.allocation_group is None:
+        return [payment]
+    lease = _lease_id(payment)
+    rows = [
+        row
+        for row in Payment.objects.filter(allocation_group=payment.allocation_group)
+        .select_related(
+            "invoice", "rent_charge", "one_off_charge", "insurance_charge", "charge_adjustment"
+        )
+        .order_by("created_at", "pk")
+        if has_receipt(row) and _lease_id(row) == lease
+    ]
+    money = [row for row in rows if row.method != PaymentMethod.CREDIT]
+    return money or rows or [payment]
+
+
+def first_of_entries(payments: Iterable[Payment]) -> set[uuid.UUID]:
+    """The ids of the rows that carry their entry's "Receipt PDF" link in a list: the first
+    row with a receipt of each entry, in the list's order."""
+    seen: set[tuple[uuid.UUID, uuid.UUID | None]] = set()
+    first: set[uuid.UUID] = set()
+    for payment in payments:
+        if not has_receipt(payment) or entry_key(payment) in seen:
+            continue
+        seen.add(entry_key(payment))
+        first.add(payment.pk)
+    return first
+
+
+def _number(first: Payment) -> str:
+    return f"RCPT-{str(first.pk)[:8].upper()}"
+
+
 def receipt_number(payment: Payment) -> str:
-    """``RCPT-`` and the payment id's first eight characters, upper case."""
-    return f"RCPT-{str(payment.pk)[:8].upper()}"
+    """``RCPT-`` and the first eight characters of the id of the entry's first row, upper
+    case."""
+    return _number(entry_of(payment)[0])
 
 
 def receipt_filename(payment: Payment) -> str:
@@ -152,18 +227,35 @@ def reference_text(payment: Payment) -> str:
     return mask_identifier(raw) if raw else ""
 
 
-def applied_to(payment: Payment) -> tuple[str, ...]:
-    """The invoice's number, then the charge's words."""
-    invoice = invoice_of(payment)
-    lines = [f"Invoice {invoice.invoice_number}"] if invoice is not None else []
+def charge_text(payment: Payment) -> str:
+    """The words of the charge the payment paid; ``""`` without one."""
     if payment.rent_charge is not None:
-        lines.append(charge_words(rent=payment.rent_charge))
-    elif payment.one_off_charge is not None:
-        lines.append(charge_words(one_off=payment.one_off_charge))
-    elif payment.insurance_charge is not None:
-        lines.append(charge_words(insurance_year=payment.insurance_charge.policy_year))
-    elif payment.charge_adjustment is not None:
-        lines.append(charge_words(adjustment=True))
+        return charge_words(rent=payment.rent_charge)
+    if payment.one_off_charge is not None:
+        return charge_words(one_off=payment.one_off_charge)
+    if payment.insurance_charge is not None:
+        return charge_words(insurance_year=payment.insurance_charge.policy_year)
+    if payment.charge_adjustment is not None:
+        return charge_words(adjustment=True)
+    return ""
+
+
+def applied_to(rows: Sequence[Payment]) -> tuple[AppliedLine, ...]:
+    """Each invoice the rows paid once (bold), then the words and amount of each charge it
+    billed; charges billed by no invoice are bold. A row naming no charge adds its amount to
+    its invoice's line."""
+    by_invoice: dict[str, list[tuple[str, Decimal]]] = {}
+    for row in rows:
+        invoice = invoice_of(row)
+        heading = f"Invoice {invoice.invoice_number}" if invoice is not None else ""
+        by_invoice.setdefault(heading, []).append((charge_text(row), row.amount))
+    lines: list[AppliedLine] = []
+    for heading, items in by_invoice.items():
+        named = [(text, amount) for text, amount in items if text]
+        unnamed = [amount for text, amount in items if not text]
+        if heading:
+            lines.append(AppliedLine(heading, sum(unnamed, ZERO) if unnamed else None, True))
+        lines.extend(AppliedLine(text, amount, not heading) for text, amount in named)
     return tuple(lines)
 
 
@@ -182,12 +274,14 @@ def facts(payment: Payment, today: date) -> ReceiptFacts:
 
     if not has_receipt(payment):
         raise NoReceipt(str(payment.pk))
-    lease = lease_of(payment)
+    rows = entry_of(payment)
+    first = rows[0]
+    lease = lease_of(first)
     operator = lease.operator if lease is not None else None
-    if operator is None and payment.one_off_charge is not None:
-        operator = payment.one_off_charge.operator
-    if operator is None and payment.invoice is not None:
-        operator = payment.invoice.operator
+    if operator is None and first.one_off_charge is not None:
+        operator = first.one_off_charge.operator
+    if operator is None and first.invoice is not None:
+        operator = first.invoice.operator
     billed = bill_to(lease, operator) if operator is not None else None
     who = (
         tuple(dict.fromkeys(part for part in (billed.company or billed.name, billed.name) if part))
@@ -195,14 +289,14 @@ def facts(payment: Payment, today: date) -> ReceiptFacts:
         else ()
     )
     return ReceiptFacts(
-        number=receipt_number(payment),
+        number=_number(first),
         received_from=who,
         store=store_text(lease.store if lease is not None else None),
-        on=payment.settled_on or payment.initiated_on,
-        amount=payment.amount,
-        method=method_text(payment, lease),
-        reference=reference_text(payment),
-        applied_to=applied_to(payment),
+        on=first.settled_on or first.initiated_on,
+        amount=sum((row.amount for row in rows), ZERO),
+        method=method_text(first, lease),
+        reference=reference_text(first),
+        applied_to=applied_to(rows),
         remaining=remaining_on_store(lease, today),
     )
 
@@ -233,11 +327,13 @@ def draw(found: ReceiptFacts, company: frame.CompanyFacts) -> bytes:
     page.label(LEFT, page.top, "Applied to")
     page.rule(page.top - 9)
     page.top -= 9
-    for index, line in enumerate(found.applied_to):
+    for line in found.applied_to:
         y = page.top - 15
-        page.text(LEFT, y, line, bold=index == 0, size=Fraction("10.5"), width=RIGHT - LEFT - 100)
-        if index == len(found.applied_to) - 1:
-            page.text(RIGHT, y, format_amount(found.amount), bold=True, size=10, align="right")
+        page.text(
+            LEFT, y, line.text, bold=line.bold, size=Fraction("10.5"), width=RIGHT - LEFT - 100
+        )
+        if line.amount is not None:
+            page.text(RIGHT, y, format_amount(line.amount), bold=True, size=10, align="right")
         page.top -= 22
         page.rule(page.top)
     width = 300

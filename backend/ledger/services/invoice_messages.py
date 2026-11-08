@@ -12,7 +12,7 @@ send of an invoice (``payments.one_off_invoices``) asks the processor for no e-m
 ``receipt``, about the payment), each to the billing e-mail of the lease the invoice or the
 payment bills, through the messaging engine's own store (``messaging._store``): the same
 holds (mail not set up, a company setting blank, the sandbox allowlist), the Outbox, the job,
-one row per invoice or payment (a second call finds it and queues nothing). Neither stores a
+one row per invoice or payment entry (a second call finds it and queues nothing). Neither stores a
 PDF: :func:`attachment` renders it when the message is delivered
 (``ledger.services.pdf``), and :func:`closed_reason` suppresses an invoice message whose
 invoice was voided, or a receipt whose payment is no longer settled money received, before it
@@ -23,11 +23,16 @@ date, ``{pay_link}`` (the portal's Pay page of the store, else a signed statemen
 every message's), ``{provider_pay_link}`` (the processor's hosted page of the invoice,
 :func:`payments.hosted_invoice_url`; every line of the template naming it is left out when the
 invoice has none), the support e-mail and the company's name. A receipt's: the operator, the
-store, the amount, the day it was paid and what it paid (``{applied_to}``: the invoice's number,
-else the charge's words).
+store, the entry's amount, the day it was paid and what it paid (``{applied_to}``: the invoices'
+numbers, else the charges' words).
 
-**Receipts.** :func:`queue_receipt_if_due` is called by the services that record a payment by
-hand (rent, one-off and insurance charges): a settled payment a staff member recorded with a
+**Receipts.** One receipt per payment entry (``ledger.services.pdf.receipt.entry_of``): the
+message is about the entry's first row, so any row of it finds the one message and queues
+nothing more. :func:`queue_receipt_if_due` is called by the services that record a payment by
+hand (rent, one-off and insurance charges) for a payment of no entry; an entry's rows (an
+``allocation_group``) are queued once by its writer after they are all written
+(:func:`queue_entry_receipt`: the store page's payment form, the invoice builder's "Record
+payment"). Either way, a settled payment a staff member recorded with a
 method in :data:`RECEIPT_METHODS` (Zelle, wire, check, cash) gets the receipt; a payment
 through the processor never does (the processor's receipt stays), nor a credit applied, an
 ``other`` payment (the lease end's deposit offsets) or a payment recorded by no one (an
@@ -41,8 +46,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
+from decimal import Decimal
 
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -133,18 +139,19 @@ def receipt_context(payment: Payment, lease: Lease, company: CompanySettings) ->
     """The values of ``receipt`` (``ledger.merge.RECEIPT_FIELDS``)."""
     store = lease.store
     operator = lease.operator
-    paid = receipt_pdf.invoice_of(payment)
-    words = receipt_pdf.applied_to(payment)
-    on = payment.settled_on or payment.initiated_on
+    rows = receipt_pdf.entry_of(payment)
+    numbers = [
+        str(paid.invoice_number) for paid in map(receipt_pdf.invoice_of, rows) if paid is not None
+    ]
+    words = [text for text in map(receipt_pdf.charge_text, rows) if text]
+    on = rows[0].settled_on or rows[0].initiated_on
     return {
         "operator_name": str(operator.display_name) if operator is not None else "",
         "store_number": str(store.store_number) if store.store_number is not None else "",
         "store_name": str(store.external_label),
-        "amount": format_amount(payment.amount),
+        "amount": format_amount(sum((row.amount for row in rows), Decimal("0.00"))),
         "paid_on": day_text(on) if on is not None else "",
-        "applied_to": str(paid.invoice_number)
-        if paid is not None
-        else (words[-1] if words else ""),
+        "applied_to": ", ".join(dict.fromkeys(numbers or words)),
         "support_email": str(company.support_email or ""),
         "company_name": str(company.name),
     }
@@ -225,19 +232,21 @@ def queue_invoice(
 def queue_receipt(
     payment: Payment, *, actor: User | None = None, now: datetime | None = None
 ) -> OutboundMessage | None:
-    """Queue the payment's receipt with its PDF; ``None`` when it is queued already.
-    ``ValueError`` and nothing written for a payment without a receipt or a lease, or with the
-    template inactive."""
+    """Queue the receipt of the payment's entry with its PDF, about the entry's first row;
+    ``None`` when it is queued already (by this row or another of the entry). ``ValueError``
+    and nothing written for a payment without a receipt or a lease, or with the template
+    inactive."""
     if not receipt_pdf.has_receipt(payment):
         raise ValueError(NO_RECEIPT)
-    lease = receipt_pdf.lease_of(payment)
+    first = receipt_pdf.entry_of(payment)[0]
+    lease = receipt_pdf.lease_of(first)
     if lease is None:
         raise ValueError(NO_LEASE)
     company = CompanySettings.read()
     return _queue(
         MessageKind.RECEIPT,
         ChargeEntityType.PAYMENT,
-        payment.pk,
+        first.pk,
         lease,
         _template(merge.RECEIPT_CODE),
         receipt_context(payment, lease, company),
@@ -246,14 +255,39 @@ def queue_receipt(
     )
 
 
+def _receipt_due(payment: Payment, actor: User | None) -> bool:
+    return (
+        actor is not None
+        and payment.method in RECEIPT_METHODS
+        and payment.status == PaymentStatus.SETTLED
+    )
+
+
 def queue_receipt_if_due(payment: Payment, actor: User | None = None) -> OutboundMessage | None:
     """The receipt of a settled payment a staff member (``actor``) recorded by hand in
     :data:`RECEIPT_METHODS`; ``None`` for any other payment (one recorded by no one: an
-    import, a bank deposit confirmed automatically), or when it cannot be queued (logged,
-    the payment kept)."""
-    if actor is None:
+    import, a bank deposit confirmed automatically), for a row of an entry (its writer queues
+    the entry's one receipt, :func:`queue_entry_receipt`), or when it cannot be queued
+    (logged, the payment kept)."""
+    if payment.allocation_group is not None:
         return None
-    if payment.method not in RECEIPT_METHODS or payment.status != PaymentStatus.SETTLED:
+    return _queue_receipt_quietly(payment, actor)
+
+
+def queue_entry_receipt(
+    payments: Sequence[Payment], actor: User | None = None
+) -> OutboundMessage | None:
+    """The one receipt of a payment entry, queued by its writer once all its rows are
+    written: the first row due (as :func:`queue_receipt_if_due`) queues it; ``None`` when no
+    row is due."""
+    for payment in payments:
+        if _receipt_due(payment, actor):
+            return _queue_receipt_quietly(payment, actor)
+    return None
+
+
+def _queue_receipt_quietly(payment: Payment, actor: User | None) -> OutboundMessage | None:
+    if not _receipt_due(payment, actor):
         return None
     try:
         return queue_receipt(payment, actor=actor)

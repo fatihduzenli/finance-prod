@@ -476,9 +476,9 @@ SETUP_THROUGH_BUILDER = {
 #: Record payment now (new in Batch A): the builder's lines as :data:`BUILDER_SEND` with
 #: collection ``manual``, one settled payment per line in line order at its line total
 #: with one allocation group, and the create job alone: its success queues the mark
-#: (``payments.jobs.runners``), never the builder. Since PLAN-015c each settled wire
-#: payment a staff member records queues its receipt e-mail (one per payment row), held here
-#: because mail is off: a ``message.held`` row before each ``payment_recorded``.
+#: (``payments.jobs.runners``), never the builder. Since PLAN-015c the entry (the two rows of
+#: one allocation group) queues ONE receipt e-mail once both rows are written, held here
+#: because mail is off: one ``message.held`` row after the two ``payment_recorded``.
 RECEIPT_HELD_KEYS = [
     "charge",
     "charge_type",
@@ -499,10 +499,9 @@ BUILDER_RECORD = {
     "audit": [
         ("one_off_charge.created", "charge-1", LINE_CREATED_KEYS),
         ("one_off_charge.created", "charge-2", LINE_CREATED_KEYS),
-        ("message.held", "other", RECEIPT_HELD_KEYS),
         ("one_off_charge.payment_recorded", "charge-1", PAYMENT_KEYS),
-        ("message.held", "other", RECEIPT_HELD_KEYS),
         ("one_off_charge.payment_recorded", "charge-2", PAYMENT_KEYS),
+        ("message.held", "other", RECEIPT_HELD_KEYS),
     ],
     "draft_audit": [("invoice_draft.sent", SENT_KEYS)],
     "payments": [

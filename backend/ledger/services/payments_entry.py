@@ -460,6 +460,11 @@ def _record(lease: Lease, entry: EntryInput, actor: User | None, day: date) -> E
             actor=actor,
         )
     applied_total = sum(applied.values(), ZERO)
+    # PLAN-015c: the entry's one receipt e-mail, once its rows are all written (imported here:
+    # the messaging engine imports the payment services).
+    from ledger.services import invoice_messages
+
+    invoice_messages.queue_entry_receipt(written, actor)
     AuditLog.objects.create(
         actor=actor,
         action=RECORDED_ACTION,
