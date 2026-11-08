@@ -48,6 +48,7 @@ from banking.models import ALIAS_MAX_LENGTH
 from finance.dates import day_text
 from ledger.forms import (
     SHOWN_WHEN,
+    ChangeStartDateForm,
     EnrolForm,
     LeaseBillingForm,
     LeaseCreateForm,
@@ -83,6 +84,7 @@ from ledger.services import (
     list_filters,
     rent_run,
     search,
+    start_date,
     workspace,
 )
 from ledger.services import lease_end as lease_end_service
@@ -1389,6 +1391,80 @@ def lease_activate(request: HttpRequest, pk: str) -> HttpResponse:
                 "activate_refusal": refusal,
                 "activate_today": today,
                 "activate_moves_start": lease.started_on is None or lease.started_on > today,
+            },
+        ),
+    )
+
+
+#: PLAN-015d §3 (1): Change start date.
+START_CHANGED = "Start date changed to {date}."
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_change_start(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:change_start`` (PLAN-015d §3 (1), §9.1): billing on a prospective lease,
+    admin on an active one. GET is the dialog over the store page: the new date (``?date=``
+    re-renders it with that date's effects, from :func:`ledger.services.start_date.preview`,
+    no script needed), the reason, the money's choice when rent paid moves, the deposit's
+    tick and the extra days' confirmation; POST applies it
+    (:func:`ledger.services.start_date.apply`, which queues the provider's work as jobs). A
+    refusal re-renders the dialog with its sentence; done, it returns to the store page."""
+    lease = _load(pk)
+    needed = Role.ADMIN if lease.collection_status == CollectionStatus.ACTIVE else Role.BILLING
+    if not meets(_role(request), needed):
+        return forbidden(request)
+    today = timezone.localdate()
+    refusal = "" if workspace.changeable_start(lease, today) else start_date.NOT_CHANGEABLE
+    form = ChangeStartDateForm(request.POST if request.method == "POST" else None)
+    wanted: date | None = None
+    if request.method == "POST":
+        valid = form.is_valid()
+        wanted = form.cleaned_data.get("new_start")
+        if valid and wanted is not None:
+            if not refusal:
+                try:
+                    start_date.apply_change(
+                        lease.pk,
+                        wanted,
+                        reason=form.cleaned_data["reason"],
+                        choice=form.cleaned_data["choice"] or None,
+                        move_deposit=form.cleaned_data["move_deposit"],
+                        actor=_actor(request),
+                        today=today,
+                        confirmed=form.cleaned_data["confirm"],
+                    )
+                except start_date.StartDateRefused as error:
+                    form.add_error(
+                        error.field if error.field in form.fields else None, error.message
+                    )
+                else:
+                    messages.success(request, START_CHANGED.format(date=day_text(wanted)))
+                    return redirect("ledger:stores:detail", pk=lease.store_id)
+    else:
+        raw = request.GET.get("date", "")
+        try:
+            wanted = date.fromisoformat(raw) if raw else None
+        except ValueError:
+            wanted = None
+        if wanted is not None:
+            form = ChangeStartDateForm(initial={"new_start": wanted})
+    change = (
+        start_date.preview(lease, wanted, today=today)
+        if wanted is not None and not refusal
+        else None
+    )
+    return render(
+        request,
+        "ledger/leases/change_start.html",
+        _store_dialog(
+            request,
+            lease,
+            {
+                "start_form": form,
+                "start_refusal": refusal,
+                "start_change": change,
+                "start_today": today,
             },
         ),
     )

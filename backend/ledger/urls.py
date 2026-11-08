@@ -221,6 +221,8 @@ lease_patterns = (
             name="resume_collection",
         ),
         path("<str:pk>/activate/", leases.lease_activate, name="activate"),
+        # PLAN-015d: the LEASE card's Change start date.
+        path("<str:pk>/change-start/", leases.lease_change_start, name="change_start"),
         path(
             "<str:pk>/setup-charges/new/",
             one_off_charges.lease_add_setup_charge,

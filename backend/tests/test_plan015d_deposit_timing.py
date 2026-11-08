@@ -294,3 +294,41 @@ def test_lease_end_and_transfer_still_read_the_deposits_own_settled_payments(
     _pay(deposit, "3000.00", date(2026, 11, 20))
     assert one_off_charges.settled(deposit) == D("3000.00")
     assert deposits.card_text(lease) == ""
+
+
+def test_change_start_with_the_tick_moves_only_the_installments_not_yet_paid(
+    admin: Client, today: date
+) -> None:
+    """Fable's adversarial case (§5): the deposit plan has collected one installment."""
+    from ledger.services import start_date
+    from tests.test_invoice_builder import user
+
+    lease = save(
+        admin,
+        deposit_when="installments",
+        deposit_count="3",
+        deposit_first_due="2026-11-15",
+        deposit_cadence="monthly",
+    )
+    assert lease is not None
+    plan = InstallmentPlan.objects.get(one_off_charge=the_deposit(lease))
+    first, second, third = installments.installments_of(plan)
+    _pay(first, "1000.00", date(2026, 11, 3))
+    from accounts.roles import Role
+
+    start_date.apply_change(
+        lease.pk,
+        date(2026, 11, 20),
+        reason="Keys handed over later.",
+        choice=None,
+        move_deposit=True,
+        actor=user(Role.BILLING),
+        today=today,
+    )
+    rows = installments.installments_of(plan)
+    assert [row.due_date for row in rows] == [
+        date(2026, 11, 15),
+        date(2026, 12, 20),
+        date(2027, 1, 20),
+    ]
+    assert second.pk == rows[1].pk and third.pk == rows[2].pk

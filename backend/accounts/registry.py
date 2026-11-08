@@ -174,6 +174,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:leases:pause_collection": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:leases:resume_collection": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:leases:activate": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Change start date (PLAN-015d §9.1): billing on a prospective lease, admin on an active
+    # one (the view checks the lease's status and refuses the GET below that role too).
+    "ledger:leases:change_start": RouteRule(min_role=Role.BILLING, methods=POST),
     # Ending a lease (PLAN-010b Batch C): admin. The view refuses the form's GET below
     # admin too, and sends an admin to the end-of-lease wizard (PLAN-012e D4).
     "ledger:leases:end": RouteRule(min_role=Role.ADMIN, methods=POST),

@@ -262,6 +262,8 @@ class Header:
     status_label: str = ""
     status_tone: str = ""
     pause: leases.CollectionPause | None = None
+    #: PLAN-015d: Change start date is offered for ``status_lease`` (:func:`changeable_start`).
+    start_changeable: bool = False
 
 
 #: The Status row's badge tone by collection status (PLAN-015b): Active paid, Paused pending,
@@ -512,7 +514,21 @@ def _status_fields(lease: Lease) -> dict[str, Any]:
         "status_label": lease.get_collection_status_display(),
         "status_tone": STATUS_TONES.get(lease.collection_status, "neutral"),
         "pause": leases.collection_pause(lease),
+        # PLAN-015d: whether the LEASE card offers Change start date (the role is the page's).
+        "start_changeable": changeable_start(lease, timezone.localdate()),
     }
+
+
+def changeable_start(lease: Lease, today: date) -> bool:
+    """Whether a lease's start date may be changed (PLAN-015d §3 (1)): a prospective lease,
+    or an active one while ``today`` is in its start month; never an ended one."""
+    if lease.ended_on is not None or lease.started_on is None:
+        return False
+    if lease.collection_status == CollectionStatus.PROSPECTIVE:
+        return True
+    return lease.collection_status == CollectionStatus.ACTIVE and lease.started_on.replace(
+        day=1
+    ) == today.replace(day=1)
 
 
 def upcoming_lease(store: Store) -> Lease | None:

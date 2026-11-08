@@ -1,7 +1,9 @@
-"""The void of a sent, unpaid invoice-builder invoice (docs/qa/15/PLAN-015d §3 (1)).
+"""Change start date's two jobs (docs/qa/15/PLAN-015d §3 (1)).
 
-Kind ``invoice_void`` (``payments.jobs.runners.invoice_void_job``), entity ``one_off_charge``
-or ``rent_charge``. Only the closed list of the ``jobs_kind_valid`` CHECK and the field's
+Kind ``invoice_void`` (``payments.jobs.runners.invoice_void_job``: the void of a sent, unpaid
+invoice-builder invoice), entity ``one_off_charge`` or ``rent_charge``; kind ``autopay_move``
+(``autopay_move_job``: the lease's rent autopay created again from its new start), entity
+``lease``. Only the closed list of the ``jobs_kind_valid`` CHECK and the field's
 choices change; no column, trigger or row (an empty ``GUARDED_COLUMNS``). The reverse refuses
 while a job of the new kind exists.
 """
@@ -17,7 +19,7 @@ from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 GUARDED_COLUMNS: dict[str, tuple[str, ...]] = {}
 _BEFORE = importlib.import_module("payments.migrations.0022_portal_pay_job")
 
-NEW_KINDS: tuple[str, ...] = ("invoice_void",)
+NEW_KINDS: tuple[str, ...] = ("invoice_void", "autopay_move")
 KINDS = [*_BEFORE.KINDS, *NEW_KINDS]
 CANNOT_REVERSE = "Invoice void jobs exist; this migration refuses to reverse."
 
@@ -81,6 +83,7 @@ class Migration(migrations.Migration):
                     ("lease_account_switch", "Switching to the lease's own account"),
                     ("portal_pay", "Paying from the portal"),
                     ("invoice_void", "Voiding the invoice"),
+                    ("autopay_move", "Moving autopay to the new start"),
                 ],
                 max_length=32,
             ),

@@ -258,10 +258,13 @@ END_AUTOPAY_ON = (
 ACTIVATED_ACTION = "lease.activated"
 COLLECTION_PAUSED_ACTION = "lease.collection_paused"
 COLLECTION_RESUMED_ACTION = "lease.collection_resumed"
+#: PLAN-015d §3 (1): Change start date (``ledger.services.start_date``), listed with them.
+START_DATE_CHANGED_ACTION = "lease.start_date_changed"
 STATUS_ACTIONS: tuple[str, ...] = (
     COLLECTION_PAUSED_ACTION,
     COLLECTION_RESUMED_ACTION,
     ACTIVATED_ACTION,
+    START_DATE_CHANGED_ACTION,
 )
 #: ``after["trigger"]`` of a ``lease.activated`` row: the daily job on the start date, or
 #: staff's "Activate now".
@@ -2136,9 +2139,14 @@ def move_autopay(
     plan_id: uuid.UUID,
     actor: User | None,
     now: datetime | None = None,
+    start: date | None = None,
 ) -> AutopayOutcome:
     """PLAN-012b-b D13: move the lease's active rent autopay past the debit due on
     ``skipped`` (debit ``seq``), split by plan ``plan_id``; see the module docstring.
+
+    PLAN-015d §3 (1), the ``start`` form: Change start date moved the lease's start to
+    ``start``; every debit is created again from the first debit after it (or after now,
+    whichever is later), ``plan_id`` being the change's key.
 
     Order: lease row lock; the lease's customer and linked bank method (refused, with
     no provider call, without them); the rent in effect on each new first debit; then
@@ -2188,6 +2196,8 @@ def move_autopay(
         start_from = {
             number: debit_instant(skipped) if number == seq else moment for number in missing
         }
+        if start is not None:
+            start_from = {number: max(moment, debit_instant(start)) for number in missing}
         planned = {
             debit.seq: debit
             for number in missing

@@ -1,0 +1,33 @@
+{% extends "ledger/stores/detail.html" %}
+{% load components dates money %}
+{% comment %}Change start date (docs/qa/15/PLAN-015d §3 (1); billing on a prospective lease, admin on an active one): the dialog over the lease's store page, in the pattern of pause_collection.html. ledger.views.leases.lease_change_start: the date is chosen in a GET form (#change-start-pick; "Show what changes" re-renders the dialog with ?date=, no script), then the effects from ledger.services.start_date.preview (#change-start-effects), the reason, the money's choice when rent already paid moves (Keep as credit / Refund), the extra days' tick when the start moves earlier into a paid month (§9.3), the deposit's tick when its date can move, and Cancel / "Change start date" (a POST that applies it). A refusal shows its sentence and no submit. The names are start_form, start_refusal, start_change and start_today so the store page's own stay its own.{% endcomment %}
+{% block title %}Change start date{% endblock %}
+{% block dialog %}{% url 'ledger:stores:detail' pk=status_lease.store_id as back_url %}{% url 'ledger:leases:change_start' pk=status_lease.pk as self_url %}{% dialog id="change-start-dialog" title="Change start date" size="sm" open=True return_url=back_url %}
+  <section class="confirm" aria-labelledby="change-start-question">
+  <h2 class="confirm-question" id="change-start-question">Starts {{ status_lease.started_on|day|default:"—" }}. Move it to:</h2>
+  {% if start_refusal %}<p id="change-start-refusal"><strong>{{ start_refusal }}</strong></p>{% else %}
+  <form method="get" action="{{ self_url }}" id="change-start-pick" class="change-start-pick">
+    <div class="field"><label for="change-start-date">New start date</label><input type="date" name="date" id="change-start-date" value="{{ start_change.new_start|date:'Y-m-d' }}" required></div>
+    <div class="form-actions"><button class="btn" type="submit" id="change-start-show">Show what changes</button></div>
+  </form>
+  {% if start_change %}
+  {% if start_change.refusal %}<p id="change-start-date-refusal"><strong>{{ start_change.refusal }}</strong></p>{% else %}
+  <div class="confirm-what">
+  <h3>What will happen</h3>
+  <ul id="change-start-effects">{% for line in start_change.effects %}<li>{{ line }}</li>{% endfor %}</ul>
+  </div>
+  <form method="post" action="{{ self_url }}" id="change-start-form" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    <input type="hidden" name="new_start" value="{{ start_change.new_start|date:'Y-m-d' }}">
+    {{ start_form.non_field_errors }}{{ start_form.new_start.errors }}
+    {% include "ledger/stores/_form_field.html" with field=start_form.reason label="Reason" mark=True %}
+    {% if start_change.needs_choice %}<fieldset class="field" id="change-start-choice"><legend>Rent already paid: {{ start_change.paid_back|money }}</legend>{% for radio in start_form.choice %}<label class="inline">{{ radio.tag }} {{ radio.choice_label }}</label>{% endfor %}{{ start_form.choice.errors }}</fieldset>{% endif %}
+    {% if start_change.extra %}<div class="field" id="change-start-confirm"><label class="inline">{{ start_form.confirm }} Bill the extra days: {{ start_change.extra_text }}</label>{{ start_form.confirm.errors }}</div>{% endif %}
+    {% if start_change.deposit_movable %}<div class="field" id="change-start-deposit"><label class="inline">{{ start_form.move_deposit }} Move the deposit schedule too</label></div>{% endif %}
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="change-start-cancel">Cancel</a> <button class="btn btn-primary" type="submit" id="change-start-submit">Change start date</button></div>
+  </form>
+  {% endif %}
+  {% else %}<div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="change-start-cancel">Cancel</a></div>{% endif %}
+  {% endif %}
+  </section>
+{% enddialog %}{% endblock %}

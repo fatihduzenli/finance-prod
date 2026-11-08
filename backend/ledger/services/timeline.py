@@ -25,6 +25,7 @@ from typing import Any, overload
 from django.db.models import QuerySet
 from django.utils import timezone
 
+from finance.dates import day_text
 from ledger.models import AuditLog, ContactEntry, Note, OutboundMessage, Store
 from ledger.services import contacts, leases, messaging, notes
 
@@ -60,6 +61,8 @@ ACTIVATED_TEXT = {
     leases.TRIGGER_START_DATE: "Lease activated (start date)",
     leases.TRIGGER_STAFF: "Lease activated (by staff)",
 }
+#: PLAN-015d: "Start date changed Nov 15, 2026 → Nov 20, 2026 — <reason>".
+START_CHANGED_TEXT = "Start date changed {old} → {new} — {reason}"
 EMPTY_EMAILS = "No e-mails yet."
 EMPTY_NOTES = "No notes yet."
 EMPTY_STATUS = "No status changes yet."
@@ -102,7 +105,8 @@ def _status(row: AuditLog) -> TimelineEntry:
 
 def status_changes(store: Store) -> QuerySet[AuditLog]:
     """The status changes of the store's leases (their ``lease.collection_paused``,
-    ``lease.collection_resumed`` and ``lease.activated`` audit rows), newest first, with
+    ``lease.collection_resumed``, ``lease.activated`` and, PLAN-015d,
+    ``lease.start_date_changed`` audit rows), newest first, with
     their staff member."""
     ids = [str(pk) for pk in store.leases.values_list("pk", flat=True)]
     return (
@@ -133,9 +137,26 @@ def status_words(row: AuditLog) -> StatusWords:
         return StatusWords(PAUSED_TEXT.format(reason=after.get("reason", "")), "Paused", "pending")
     if row.action == leases.COLLECTION_RESUMED_ACTION:
         return StatusWords(RESUMED_TEXT, "Active", "paid")
+    if row.action == leases.START_DATE_CHANGED_ACTION:
+        text = START_CHANGED_TEXT.format(
+            old=_day_words(after.get("old_start")),
+            new=_day_words(after.get("new_start")),
+            reason=after.get("reason", ""),
+        )
+        active = after.get("collection_status") == "active"
+        return StatusWords(
+            text, "Active" if active else "Prospective", "paid" if active else "neutral"
+        )
     trigger = str(after.get("trigger", ""))
     text = ACTIVATED_TEXT.get(trigger, ACTIVATED_TEXT[leases.TRIGGER_STAFF])
     return StatusWords(text, "Active", "paid")
+
+
+def _day_words(value: object) -> str:
+    try:
+        return day_text(date.fromisoformat(str(value)))
+    except ValueError:
+        return "—"
 
 
 def entries(

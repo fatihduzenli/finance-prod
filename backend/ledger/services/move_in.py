@@ -266,8 +266,9 @@ def after_void(
     the deposit) detached, its collection as it was before, so a new draft can take it; any
     other one-off line voided; each rent charge void (:data:`RENT_VOID`) or following the
     lease's start (:data:`RENT_FOLLOW_START`: before the start month void, the start month
-    re-priced); ``billed_by_invoice`` is kept as history. With ``redraft`` a new move-in draft
-    is made for the lease (its Rent line and the detached charges)."""
+    re-priced, a later month priced in full); ``billed_by_invoice`` is kept as history.
+    With ``redraft`` a new move-in draft is made for the lease (its Rent line and the
+    detached charges)."""
     from ledger.services import rent_run
 
     now = timezone.now()
@@ -333,10 +334,10 @@ def after_void(
         lease = charge.lease
         start = lease.started_on.replace(day=1) if lease.started_on is not None else None
         words = {"invoice_number": invoice.invoice_number}
-        if rent == RENT_FOLLOW_START and start is not None and charge.period_month == start:
+        if rent == RENT_FOLLOW_START and start is not None and charge.period_month >= start:
+            # The new start month re-priced; a month after it (the old start month of a
+            # start moved earlier) becomes a full month.
             rent_run.reamount_start_month(charge, actor, words)
-        elif rent == RENT_FOLLOW_START and start is not None and charge.period_month > start:
-            continue
         else:
             rent_run.void_charge(charge, actor, words)
     if lease is None:

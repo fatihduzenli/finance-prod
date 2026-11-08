@@ -249,8 +249,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: (ledger:leases:pause_collection, resume_collection and activate), PLAN-015b; 325 since the
 #: invoice PDF and the receipt PDF on the staff pages (ledger:invoices:pdf,
 #: ledger:payments:receipt), PLAN-015c; 327 since the portal's (portal:invoice_pdf,
-#: portal:receipt_pdf), PLAN-015c.
-FROZEN_ROUTES = (327, "ac7e9fb786c8fe48a86aa73767d182b8ce543f993c842c67bf51cd7616d5cc93")
+#: portal:receipt_pdf), PLAN-015c; 328 since the LEASE card's Change start date
+#: (ledger:leases:change_start), PLAN-015d.
+FROZEN_ROUTES = (328, "82a98b5db0a724d7e63af80760921656d2ab0586794b6771d35f26b3b8ecceaf")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

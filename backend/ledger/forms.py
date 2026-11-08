@@ -2160,6 +2160,37 @@ class PauseCollectionForm(forms.Form):
         return reason
 
 
+class ChangeStartDateForm(forms.Form):
+    """Change start date (PLAN-015d §3 (1)): the new date, the required reason, the money's
+    choice when rent paid moves (credit or refund), the deposit's tick and the extra days'
+    confirmation (§9.3)."""
+
+    new_start = forms.DateField(
+        label="New start date", widget=forms.DateInput(attrs={"type": "date"})
+    )
+    reason = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required: why the start date changes.",
+        error_messages={"required": "A reason is required: say why the start date changes."},
+    )
+    choice = forms.ChoiceField(
+        label="Rent already paid",
+        choices=[("credit", "Keep as credit"), ("refund", "Refund")],
+        required=False,
+        widget=forms.RadioSelect,
+    )
+    move_deposit = forms.BooleanField(label="Move the deposit schedule too", required=False)
+    confirm = forms.BooleanField(label="Bill the extra days", required=False)
+
+    def clean_reason(self) -> str:
+        reason = visible_text(self.cleaned_data["reason"])
+        if not reason:
+            raise forms.ValidationError(self.fields["reason"].error_messages["required"])
+        return reason
+
+
 class ResolveMismatchForm(forms.Form):
     """Resolve a reconciliation mismatch (PLAN-010 D10): a note, nothing else."""
 
