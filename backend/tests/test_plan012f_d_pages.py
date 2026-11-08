@@ -387,6 +387,8 @@ FORM_PAGES = (
     "ledger:leases:pause_collection",
     "ledger:leases:resume_collection",
     "ledger:leases:activate",
+    # PLAN-015d §3 (1): Change start date, a dialog over the store page (GET and POST).
+    "ledger:leases:change_start",
 )
 
 POST_ONLY = "a POST-only action (405 to a GET)"
@@ -519,6 +521,12 @@ AUTHOR_PAGES = (
 )
 
 
+#: Form pages whose view asks more than the route's registry role of the world's records:
+#: Change start date is billing on a prospective lease, admin on an active one (PLAN-015d
+#: §9.1), and the world's lease is active.
+VIEW_ROLES = {"ledger:leases:change_start": Role.ADMIN}
+
+
 def client_of(world: World, name: str, clients: dict[Role, Client]) -> Client:
     if name in AUTHOR_PAGES:
         return world.author
@@ -529,6 +537,8 @@ def client_of(world: World, name: str, clients: dict[Role, Client]) -> Client:
 def role_of(name: str) -> Role:
     if name in PAGES:
         return PAGES[name]
+    if name in VIEW_ROLES:
+        return VIEW_ROLES[name]
     rule = registry.rule_for(name)
     assert rule is not None and rule.min_role is not None, name
     return rule.min_role

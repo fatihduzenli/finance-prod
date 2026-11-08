@@ -174,6 +174,8 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             "pause_collection",
             "resume_collection",
             "activate",
+            # PLAN-015d §3 (1): the LEASE card's Change start date (a dialog page).
+            "change_start",
             *POST_ROUTES,
         )
     }
@@ -221,6 +223,10 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
         rule = registry.rule_for(f"ledger:leases:{name}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
     rule = registry.rule_for("ledger:leases:activate")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-015d §3 (1), §9.1: Change start date needs billing (a prospective lease); the view
+    # asks admin of an active one (test_plan015d_change_start pins the 403s).
+    rule = registry.rule_for("ledger:leases:change_start")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
 
 

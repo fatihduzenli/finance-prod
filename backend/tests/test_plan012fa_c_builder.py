@@ -389,10 +389,11 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
             ["Operator", "Terms", "Collection", "Billing details", "Move-in charges", "Documents"],
             "save-lease",
         ),
-        # Re-pinned (Opus, PLAN-015a): Edit lease's four cards in the New lease family.
+        # Re-pinned (Opus, PLAN-015a): Edit lease's four cards in the New lease family; PLAN-015d
+        # §3 (2): the Free rent card after Rent.
         (
             reverse("ledger:leases:edit", kwargs={"pk": lease.pk}),
-            ["Lease", "Rent", "Collection", "Billing details"],
+            ["Lease", "Rent", "Free rent", "Collection", "Billing details"],
             "save-lease",
         ),
         (
