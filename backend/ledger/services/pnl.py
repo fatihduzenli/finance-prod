@@ -130,6 +130,7 @@ from ledger.models import (
     ZERO,
     CollectionStatus,
     DepositResolution,
+    InstallmentOrigin,
     InsuranceCharge,
     InsurancePremium,
     Lease,
@@ -1022,9 +1023,17 @@ def deposits_held(query: PnlQuery) -> Decimal:
     """Deposits held at the end of the range: settled deposit payments (net of their
     settled refunds) less the deposits refunded, withheld or transferred by then. A
     payment on a multi-line invoice counts by the lines it paid: its part on a deposit
-    line is held (PLAN-012 D6). Not revenue; shown under the report only."""
+    line is held (PLAN-012 D6), and so is a payment on an installment of a deposit plan
+    (PLAN-015d: a deposit collected by installments). Not revenue; shown under the report
+    only."""
     end = query.end
-    deposit = Q(one_off_charge__fee_type__refundable=True, status=PaymentStatus.SETTLED)
+    deposit = Q(status=PaymentStatus.SETTLED) & (
+        Q(one_off_charge__fee_type__refundable=True)
+        | Q(
+            one_off_charge__plan__origin=InstallmentOrigin.DEPOSIT,
+            one_off_charge__plan__one_off_charge__fee_type__refundable=True,
+        )
+    )
     split = on_multi_line_invoice()
     held_by_lines = sum(
         (

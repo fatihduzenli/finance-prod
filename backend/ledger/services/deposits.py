@@ -17,8 +17,9 @@ Once its lease has ended, an admin resolves it once (:func:`resolve_deposit`, on
   every other charge.
 
 ``withheld_amount`` is the part of the paid deposit the business keeps: paid less the
-amount for a refund or a transfer, the amount itself when withheld. "Paid" is the
-deposit's settled ``one_off`` payments less their settled refunds.
+amount for a refund or a transfer, the amount itself when withheld. "Paid" is what was
+collected of the deposit (:func:`collected`): its settled ``one_off`` payments less their
+settled refunds, and the same of the installments of its deposit plan (PLAN-015d).
 
 **At a lease end** (PLAN-012e D5(d)) the wizard resolves each deposit with
 :func:`resolve_deposit_split`: one row whose ``amount`` is the part refunded (kind
@@ -42,6 +43,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from finance.dates import day_text
@@ -230,7 +232,7 @@ def resolve_deposit(
             refused = _charge_refusal(charge, kind, amount)
             if refused is not None:
                 return refused
-            paid = one_off_charges.settled(charge)
+            paid = collected(charge)
             target: Lease | None = None
             if to_lease is not None:
                 target = Lease.objects.select_for_update().get(pk=to_lease.pk)
@@ -342,7 +344,7 @@ def resolve_deposit_split(
                 return _refused(LEASE_NOT_ENDED)
             if DepositResolution.objects.filter(setup_charge=charge).exists():
                 return _refused(ALREADY_RESOLVED)
-            paid = one_off_charges.settled(charge)
+            paid = collected(charge)
             if refunded + withheld != paid:
                 return _refused(SPLIT_NOT_WHOLE.format(paid=format_amount(paid)), "amount")
             resolution = DepositResolution.objects.create(
@@ -396,7 +398,7 @@ def _charge_refusal(charge: OneOffCharge, kind: str, amount: Decimal) -> Outcome
         return _refused(LEASE_NOT_ENDED)
     if DepositResolution.objects.filter(setup_charge=charge).exists():
         return _refused(ALREADY_RESOLVED)
-    paid = one_off_charges.settled(charge)
+    paid = collected(charge)
     if amount > paid:
         return _refused(ABOVE_PAID.format(paid=format_amount(paid)), "amount")
     if kind == DepositResolutionKind.WITHHELD and amount != paid:
@@ -517,6 +519,26 @@ def _state(resolution: DepositResolution) -> dict[str, Any]:
         "to_lease": str(resolution.to_lease_id) if resolution.to_lease_id else None,
         "note": resolution.note,
     }
+
+
+def collected(charge: OneOffCharge) -> Decimal:
+    """What was collected of the deposit ``charge`` (Fable's finding 3 on PLAN-015d: the
+    lease-end and transfer wizards use only the deposit actually collected): its settled
+    ``one_off`` payments less their settled refunds (:func:`ledger.services.one_off_charges.
+    settled`), plus the same of the installments of its deposit plans (origin ``deposit``,
+    whatever their status), to the cent. A deposit refund (``refund_deposit``) is not
+    counted, as in ``settled``."""
+    rows = Payment.objects.filter(
+        one_off_charge__plan__one_off_charge=charge,
+        one_off_charge__plan__origin=InstallmentOrigin.DEPOSIT,
+        kind=PaymentKind.ONE_OFF,
+        status=PaymentStatus.SETTLED,
+    ).aggregate(
+        paid=Sum("amount", filter=Q(is_refund=False)),
+        refunded=Sum("amount", filter=Q(is_refund=True)),
+    )
+    plan = Decimal(rows["paid"] or 0) - Decimal(rows["refunded"] or 0)
+    return (one_off_charges.settled(charge) + plan).quantize(CENT)
 
 
 def lease_label(lease: Lease) -> str:
@@ -652,8 +674,10 @@ def create_lease_with_deposit(
 
 def card_text(lease: Lease) -> str:
     """The LEASE card's deposit when it is not on the move-in invoice: "$3,000.00 · due Dec 1"
-    for a dated deposit not yet collected, "$3,000.00 · 1 of 3 installments paid" for a
-    deposit plan; ``""`` otherwise (the row's usual words apply)."""
+    for a dated deposit nothing of which is collected yet, "$3,000.00 · 1 of 3 installments
+    paid" for a deposit plan (with what was collected before it, "$3,000.00 · $1,000.00
+    collected · 1 of 3 installments paid", once something is); ``""`` otherwise (the row's
+    usual words apply)."""
     from finance.dates import day_short_text
     from ledger.services import installments
 
@@ -673,7 +697,9 @@ def card_text(lease: Lease) -> str:
     price = format_amount(Decimal(deposit.price))
     if plan is not None:
         progress = installments.progress(plan)
-        return f"{price} · {progress.paid_count} of {progress.count} installments paid"
-    if riding_invoice(deposit) or deposit.balance <= 0:
+        held = collected(deposit)
+        so_far = f" · {format_amount(held)} collected" if held > 0 else ""
+        return f"{price}{so_far} · {progress.paid_count} of {progress.count} installments paid"
+    if riding_invoice(deposit) or deposit.balance <= 0 or collected(deposit) > 0:
         return ""
     return f"{price} · due {day_short_text(deposit.due_date)}"

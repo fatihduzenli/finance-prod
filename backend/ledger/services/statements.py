@@ -79,7 +79,7 @@ from ledger.models import (
     RefundMethod,
     RentCharge,
 )
-from ledger.services import one_off_charges, proration, receivables
+from ledger.services import deposits, proration, receivables
 from ledger.services.leases import debit_amounts, rent_on
 from ledger.services.rent_run import falls_on, months_catch_up_would_create
 from payments import lease_sync
@@ -677,7 +677,7 @@ def _deposit_lines(lease_end: LeaseEnd) -> list[DepositLine]:
     (PLAN-012b-b D11; such a deposit blocks the lease end, so confirm never sees one)."""
     lines = []
     for charge in deposit_charges(lease_end):
-        held = one_off_charges.settled(charge)
+        held = deposits.collected(charge)
         owed = charge.status in (OneOffChargeStatus.OWED, OneOffChargeStatus.PARTIAL)
         if held > 0 or owed:
             lines.append(DepositLine(charge.pk, charge.label, held, Decimal(charge.price)))

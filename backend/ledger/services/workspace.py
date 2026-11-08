@@ -412,19 +412,21 @@ def _debit_day_text(lease: Lease) -> str:
 
 
 def _deposit_text(lease: Lease) -> tuple[str, str]:
-    """The lease's deposit (its refundable one-off charges, not waived or voided; one
-    query): ``$3,000.00 · not collected``, ``· collected``, or what was collected so far,
+    """The lease's deposit (its refundable one-off charges, not waived or voided): what was
+    collected of it (:func:`ledger.services.deposits.collected`, its deposit plan's
+    installments included): ``$3,000.00 · not collected``, ``· collected``, or what so far,
     with its state's code (:data:`ledger.services.detail_cards.COLLECTED`, ``PARTIAL`` or
     ``UNCOLLECTED``; PLAN-014 I-b: the LEASE card colours the row by it); ``("", "")``
     without a deposit."""
-    found = (
-        OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True)
-        .exclude(status__in=_CLOSED_ONE_OFF)
-        .aggregate(price=Sum("price"), paid=Sum("amount_paid"))
+    found = list(
+        OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True).exclude(
+            status__in=_CLOSED_ONE_OFF
+        )
     )
-    if found["price"] is None:
+    if not found:
         return "", ""
-    price, paid = _money(found["price"]), _money(found["paid"])
+    price = sum((Decimal(charge.price) for charge in found), ZERO)
+    paid = sum((deposits.collected(charge) for charge in found), ZERO)
     if paid >= price:
         state, code = "collected", detail_cards.COLLECTED
     elif paid <= 0:

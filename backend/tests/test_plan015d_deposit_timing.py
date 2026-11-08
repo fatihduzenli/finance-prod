@@ -283,20 +283,104 @@ def test_a_deposit_installment_paid_is_not_revenue_in_the_pnl(admin: Client, tod
     _pay(first, "1000.00", date(2026, 11, 15))
     total = pnl.total(pnl.rows(pnl.PnlQuery(date(2026, 11, 1), date(2026, 11, 1))))
     assert total.fees_collected == D("0")
-    assert deposits.card_text(lease) == "$3,000.00 · 1 of 3 installments paid"
+    # Re-pinned (Fable's finding 3): the card names what was collected before the progress.
+    assert deposits.card_text(lease) == (
+        "$3,000.00 · $1,000.00 collected · 1 of 3 installments paid"
+    )
 
 
 def test_lease_end_and_transfer_still_read_the_deposits_own_settled_payments(
     admin: Client, today: date
 ) -> None:
-    """Pinned (§3 (3)): lease end and transfer keep ``one_off_charges.settled``."""
+    """Pinned: ``one_off_charges.settled`` itself is unchanged (Fable's finding 3: lease end
+    and transfer read :func:`ledger.services.deposits.collected`, which adds the deposit
+    plan's installments; for a dated deposit the two agree)."""
     lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
     assert lease is not None
     deposit = the_deposit(lease)
     assert one_off_charges.settled(deposit) == D("0.00")
     _pay(deposit, "3000.00", date(2026, 11, 20))
     assert one_off_charges.settled(deposit) == D("3000.00")
+    assert deposits.collected(deposit) == D("3000.00")
     assert deposits.card_text(lease) == ""
+
+
+def _installment_deposit(admin: Client) -> tuple[Lease, OneOffCharge, list[OneOffCharge]]:
+    lease = save(
+        admin,
+        deposit_when="installments",
+        deposit_count="3",
+        deposit_first_due="2026-11-15",
+        deposit_cadence="monthly",
+    )
+    assert lease is not None
+    deposit = the_deposit(lease)
+    plan = InstallmentPlan.objects.get(one_off_charge=deposit)
+    return lease, deposit, installments.installments_of(plan)
+
+
+def _held_everywhere(lease: Lease, deposit: OneOffCharge, end: date) -> list[Any]:
+    """What lease end, the transfer, the P&L footer and the LEASE card read as held."""
+    from ledger.models import LeaseTransfer
+    from ledger.services import lease_end, statements, transfer
+
+    [line] = statements._deposit_lines(lease_end.start(lease, None))
+    return [
+        deposits.collected(deposit),
+        line.held,
+        transfer.default_deposit(LeaseTransfer(outgoing_lease=lease)),
+        pnl.deposits_held(pnl.PnlQuery(date(2026, 11, 1), end)),
+        workspace._deposit_text(lease),
+    ]
+
+
+def test_one_of_three_installments_paid_is_held_at_lease_end_on_the_card_and_in_the_pnl(
+    admin: Client, today: date
+) -> None:
+    """Fable's finding 3: a deposit collected by installments reads as collected."""
+    lease, deposit, rows = _installment_deposit(admin)
+    assert one_off_charges.settled(deposit) == D("0.00")  # nothing on the deposit itself
+    _pay(rows[0], "1000.00", date(2026, 11, 15))
+    held = D("1000.00")
+    assert _held_everywhere(lease, deposit, date(2026, 11, 30)) == [
+        held,
+        held,
+        held,
+        held,
+        ("$3,000.00 · $1,000.00 collected · 1 of 3 installments paid", "partial"),
+    ]
+
+
+def test_all_installments_paid_hold_the_whole_deposit(admin: Client, today: date) -> None:
+    lease, deposit, rows = _installment_deposit(admin)
+    for row, day in zip(rows, (15, 16, 17), strict=True):
+        _pay(row, "1000.00", date(2026, 11, day))
+    held = D("3000.00")
+    assert _held_everywhere(lease, deposit, date(2026, 11, 30)) == [
+        held,
+        held,
+        held,
+        held,
+        ("$3,000.00 · collected", "collected"),
+    ]
+    # Lease end resolves it whole: what is refunded and withheld is what was collected.
+    assert deposits.collected(deposit) == held
+
+
+def test_a_dated_deposit_reads_its_own_payments_as_before(admin: Client, today: date) -> None:
+    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    assert lease is not None
+    deposit = the_deposit(lease)
+    _pay(deposit, "1200.00", date(2026, 11, 20))
+    held = D("1200.00")
+    assert _held_everywhere(lease, deposit, date(2026, 11, 30)) == [
+        held,
+        held,
+        held,
+        held,
+        ("$3,000.00 · $1,200.00 collected", "partial"),
+    ]
+    assert deposits.collected(deposit) == one_off_charges.settled(deposit)
 
 
 def test_change_start_with_the_tick_moves_only_the_installments_not_yet_paid(
