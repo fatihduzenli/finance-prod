@@ -37,12 +37,23 @@ lease's Needs review flag, and template F (:func:`ledger.services.nsf.on_return`
 F2); a settled automatic re-debit resolves the return it collected again
 (:func:`ledger.services.nsf.on_settled`). A void never messages the operator.
 
+A returned debit whose money staff kept as a credit (PLAN-015d's "Keep as credit", PLAN-015e)
+reverses that credit (:func:`ledger.services.credits.reverse_from_return`): the payment held as
+the credit (the row the transaction names, re-pointed whole, or a row split off it, which names
+it in ``split_from`` and is returned with it, resolved at once) has no charge, so its return
+reaches the credit; the credit payments that applied it are returned too and their charges
+owed again. A returned payment with neither a charge nor a credit is logged and audited
+``payment.return_unplaced``. An event that shows a payment returned already returns what its
+first return could not reach (a row split off it before ledger 0077 linked it, a credit not
+reversed yet); nothing else.
+
 ``returned`` and ``voided`` are final. Every write is keyed on provider IDs and every
 recomputation is pure, so a repeated or replayed event changes nothing.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
@@ -61,8 +72,9 @@ from ledger.models import (
     PaymentMethod,
     PaymentStatus,
     RentCharge,
+    ResolutionKind,
 )
-from ledger.services import contacts, one_off_charges, rent_run
+from ledger.services import contacts, credits, one_off_charges, rent_run
 from payments.models import ExternalRef, WebhookOutcome
 from payments.provider import (
     METHOD_BANK,
@@ -103,6 +115,14 @@ OTHER_OPERATOR = ignored("customer mismatch")
 NOT_SETTLED = ignored("not settled yet")
 
 _FINAL = (PaymentStatus.RETURNED, PaymentStatus.VOIDED)
+UNPLACED_ACTION = "payment.return_unplaced"
+#: PLAN-015e: a row split off a returned payment is returned with it and resolved at once;
+#: the payment the transaction names carries the return in the returns queue.
+SPLIT_RESOLVED = (
+    "Returned with the payment it was split from (the same bank debit); see that return."
+)
+
+logger = logging.getLogger(__name__)
 
 
 def handle(event_type: str, provider_object_id: str) -> str:
@@ -348,6 +368,8 @@ def _target(payment: Payment, record: TransactionRecord, *, settle: bool) -> Pay
 def _transition(payment: Payment, record: TransactionRecord, *, settle: bool) -> str:
     target = _target(payment, record, settle=settle)
     if target is None:
+        if record.returned and payment.status == PaymentStatus.RETURNED:
+            _return_missed(payment, record)
         not_yet = (
             settle
             and payment.status == PaymentStatus.PENDING
@@ -376,6 +398,8 @@ def _transition(payment: Payment, record: TransactionRecord, *, settle: bool) ->
     from ledger.services import nsf
 
     if target == PaymentStatus.RETURNED:
+        # PLAN-015e: the rows split off it are the same bank debit.
+        _return_split_rows(payment, record)
         # PLAN-014 F2: the NSF fee, the automatic re-debit or Needs review, and template F.
         nsf.on_return(payment, timezone.localdate())
     if target == PaymentStatus.SETTLED:
@@ -384,8 +408,68 @@ def _transition(payment: Payment, record: TransactionRecord, *, settle: bool) ->
     return WebhookOutcome.PROCESSED
 
 
-def _refresh_charge(payment: Payment, *, returned: bool) -> None:
-    """Recompute the rent or one-off charge, and on a return flag the charge for review."""
+def _return_split_rows(payment: Payment, record: TransactionRecord) -> list[credits.CreditReversal]:
+    """Return the rows split off the returned ``payment`` (PLAN-015e: held as a credit, so
+    each reverses its credit), with the payment's return code and reason, resolved at once
+    (:data:`SPLIT_RESOLVED`), each audited; the credits reversed."""
+    reversals: list[credits.CreditReversal] = []
+    rows = (
+        Payment.objects.select_for_update()
+        .filter(split_from=payment)
+        .exclude(status__in=_FINAL)
+        .order_by("created_at", "id")
+    )
+    for row in rows:
+        before = _state(row)
+        moment = timezone.now()
+        row.status = PaymentStatus.RETURNED
+        row.returned_at = payment.returned_at or moment
+        row.return_code = payment.return_code or record.return_code
+        row.return_reason = payment.return_reason or record.return_reason
+        row.resolved_at = moment
+        row.resolved_by = None
+        row.resolution_note = SPLIT_RESOLVED
+        row.resolution_kind = ResolutionKind.NOTE
+        row.save()
+        audit(
+            "payment.status_changed",
+            ENTITY_PAYMENT,
+            row.pk,
+            before,
+            {
+                **_state(row),
+                "split_from": str(payment.pk),
+                "provider_transaction": mask_identifier(record.external_id),
+            },
+        )
+        reversal = _refresh_charge(row, returned=True)
+        if reversal is not None:
+            reversals.append(reversal)
+    return reversals
+
+
+def _return_missed(payment: Payment, record: TransactionRecord) -> list[credits.CreditReversal]:
+    """An event showing ``payment`` returned already (a replay, the nightly check): what its
+    first return could not reach is returned now (PLAN-015e): its credit not reversed yet,
+    the rows split off it before ledger 0077 linked them. Nothing when there is none."""
+    reversals = _return_split_rows(payment, record)
+    if payment.credit_id is not None and payment.rent_charge_id is None:
+        reversal = credits.reverse_from_return(payment, _refresh_returned)
+        if reversal is not None:
+            reversals.insert(0, reversal)
+    return reversals
+
+
+def _refresh_returned(payment: Payment) -> None:
+    """A credit payment returned with its credit: its charge reopened and flagged."""
+    _refresh_charge(payment, returned=True)
+
+
+def _refresh_charge(payment: Payment, *, returned: bool) -> credits.CreditReversal | None:
+    """Recompute the rent or one-off charge, and on a return flag the charge for review; on
+    the return of a payment held as a credit, reverse the credit (PLAN-015e), which is
+    returned. A returned payment with neither a charge nor a credit is logged and audited
+    (:data:`UNPLACED_ACTION`)."""
     context = {"payment": str(payment.pk), "payment_status": payment.status}
     if returned:
         context |= {"return_code": payment.return_code, "return_reason": payment.return_reason}
@@ -428,19 +512,29 @@ def _refresh_charge(payment: Payment, *, returned: bool) -> None:
             )
         _allocate_to_companions(one_off, context)
         _apply_to_sources(one_off, sources, context)
-    elif payment.insurance_charge_id is not None and returned:
-        insurance = InsuranceCharge.objects.select_for_update().get(pk=payment.insurance_charge_id)
-        flagged = insurance.needs_review
-        if not flagged:
-            insurance.needs_review = True
-            insurance.save(update_fields=["needs_review", "updated_at"])
-        audit(
-            "insurance_charge.ach_returned",
-            ENTITY_INSURANCE_CHARGE,
-            insurance.pk,
-            {"needs_review": flagged},
-            {"needs_review": True, "policy_year": insurance.policy_year} | context,
-        )
+    elif payment.insurance_charge_id is not None:
+        if returned:
+            insurance = InsuranceCharge.objects.select_for_update().get(
+                pk=payment.insurance_charge_id
+            )
+            flagged = insurance.needs_review
+            if not flagged:
+                insurance.needs_review = True
+                insurance.save(update_fields=["needs_review", "updated_at"])
+            audit(
+                "insurance_charge.ach_returned",
+                ENTITY_INSURANCE_CHARGE,
+                insurance.pk,
+                {"needs_review": flagged},
+                {"needs_review": True, "policy_year": insurance.policy_year} | context,
+            )
+    elif payment.credit_id is not None:
+        if returned:
+            return credits.reverse_from_return(payment, _refresh_returned)
+    elif returned:
+        logger.warning("Returned payment %s has neither a charge nor a credit", payment.pk)
+        audit(UNPLACED_ACTION, ENTITY_PAYMENT, payment.pk, None, _state(payment) | context)
+    return None
 
 
 def _allocate_to_companions(charge: OneOffCharge, context: dict[str, Any]) -> None:
