@@ -59,6 +59,7 @@ from ledger.models import (
     ChargeNote,
     DepositResolution,
     DepositResolutionKind,
+    InstallmentOrigin,
     InvoiceLineItem,
     Lease,
     OneOffChargeStatus,
@@ -438,6 +439,15 @@ def invoice_line_parts(payments: QuerySet[Payment]) -> dict[uuid.UUID, list[Line
     return parts
 
 
+def deposit_installment() -> Q:
+    """A payment (or its refund) on an installment of a deposit plan (PLAN-015d: a deposit
+    collected by installments): money held, as a payment on the deposit itself is."""
+    return Q(
+        one_off_charge__plan__origin=InstallmentOrigin.DEPOSIT,
+        one_off_charge__plan__one_off_charge__fee_type__refundable=True,
+    )
+
+
 def totals(rows: QuerySet[Payment]) -> Totals:
     """Settled (collected), pending, returned and refunded totals, kept apart, and the
     deposits held.
@@ -448,9 +458,14 @@ def totals(rows: QuerySet[Payment]) -> Totals:
     released (:func:`deposits_released`), whatever the resolution's date. A settled
     payment on a multi-line invoice counts by the lines it paid
     (:func:`invoice_line_parts`): its part on a deposit line is held, the rest collected
-    (refunded, for a refund).
+    (refunded, for a refund). A payment on an installment of a deposit plan is a deposit
+    row (:func:`deposit_installment`), held as the P&L footer holds it.
     """
-    deposit = Q(one_off_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
+    deposit = (
+        Q(one_off_charge__fee_type__refundable=True)
+        | Q(kind=PaymentKind.REFUND_DEPOSIT)
+        | deposit_installment()
+    )
     split = on_multi_line_invoice()
     # A credit paid back at the lease end (PLAN-012d D6b) is money held going out: in none
     # of the four.
@@ -488,6 +503,12 @@ def totals(rows: QuerySet[Payment]) -> Totals:
     released = deposits_released(
         DepositResolution.objects.filter(
             Q(setup_charge__in=rows.filter(held_in).order_by().values("one_off_charge_id"))
+            # A deposit collected by installments is resolved on the deposit, the plan's parent.
+            | Q(
+                setup_charge__in=rows.filter(held_in & deposit_installment())
+                .order_by()
+                .values("one_off_charge__plan__one_off_charge_id")
+            )
             | Q(setup_charge__in=held_charges)
         )
     )

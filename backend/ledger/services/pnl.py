@@ -130,7 +130,6 @@ from ledger.models import (
     ZERO,
     CollectionStatus,
     DepositResolution,
-    InstallmentOrigin,
     InsuranceCharge,
     InsurancePremium,
     Lease,
@@ -148,6 +147,7 @@ from ledger.models import (
 from ledger.services.csv_export import CsvWriter
 from ledger.services.payments_ledger import (
     RENT_LINE,
+    deposit_installment,
     deposits_released,
     invoice_line_parts,
     multi_line_charges,
@@ -1028,11 +1028,7 @@ def deposits_held(query: PnlQuery) -> Decimal:
     only."""
     end = query.end
     deposit = Q(status=PaymentStatus.SETTLED) & (
-        Q(one_off_charge__fee_type__refundable=True)
-        | Q(
-            one_off_charge__plan__origin=InstallmentOrigin.DEPOSIT,
-            one_off_charge__plan__one_off_charge__fee_type__refundable=True,
-        )
+        Q(one_off_charge__fee_type__refundable=True) | deposit_installment()
     )
     split = on_multi_line_invoice()
     held_by_lines = sum(

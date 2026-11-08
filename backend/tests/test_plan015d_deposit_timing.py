@@ -419,3 +419,55 @@ def test_change_start_with_the_tick_moves_only_the_installments_not_yet_paid(
         date(2027, 1, 20),
     ]
     assert second.pk == rows[1].pk and third.pk == rows[2].pk
+
+
+def _ledger_and_reports(end: date) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    """The payments ledger's deposits held and collected, the P&L footer's deposits held,
+    and the payments-by-method report's total, for November 2026."""
+    from ledger.services import payments_ledger, reports
+
+    found = payments_ledger.totals(payments_ledger.ledger_payments(payments_ledger.PaymentFilter()))
+    by_method = reports.payments_by_method(reports.ReportRange(date(2026, 11, 1), end))
+    return (
+        found.deposits_held,
+        found.settled,
+        pnl.deposits_held(pnl.PnlQuery(date(2026, 11, 1), end)),
+        sum(by_method.total.amounts.values(), D("0")),
+    )
+
+
+def test_the_payments_ledger_and_the_reports_hold_deposit_installments_as_the_pnl_does(
+    admin: Client, today: date
+) -> None:
+    """Fable's review: the payments ledger's deposits held and the reports' deposit
+    exclusion count a deposit plan's installments, so the three figures agree."""
+    lease, deposit, rows = _installment_deposit(admin)
+    _pay(rows[0], "1000.00", date(2026, 11, 15))
+    held = deposits.collected(deposit)
+    assert held == D("1000.00")
+    # Held in the ledger and the P&L, never collected or counted by method.
+    assert _ledger_and_reports(date(2026, 11, 1)) == (held, D("0.00"), held, D("0"))
+
+
+def test_a_withheld_installment_deposit_is_released_in_the_ledger_and_the_pnl(
+    admin: Client, today: date
+) -> None:
+    lease, deposit, rows = _installment_deposit(admin)
+    for row, day in zip(rows, (15, 16, 17), strict=True):
+        _pay(row, "1000.00", date(2026, 11, day))
+    assert _ledger_and_reports(date(2026, 11, 1))[0::2] == (D("3000.00"), D("3000.00"))
+    Lease.objects.filter(pk=lease.pk).update(ended_on=date(2026, 11, 20))
+    outcome = deposits.resolve_deposit_split(
+        deposit,
+        D("0.00"),
+        D("3000.00"),
+        method="",
+        resolved_on=date(2026, 11, 20),
+        reference="",
+        note="Withheld for damages.",
+        actor=None,
+        today=date(2026, 11, 20),
+    )
+    assert outcome.ok, outcome.message
+    # Withheld: no longer held, in either.
+    assert _ledger_and_reports(date(2026, 11, 1))[0::2] == (D("0.00"), D("0.00"))

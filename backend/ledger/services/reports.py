@@ -69,7 +69,7 @@ from ledger.models import (
 )
 from ledger.services import one_off_charges, pnl, receivables
 from ledger.services.csv_export import CsvWriter
-from ledger.services.payments_ledger import charge_lease, invoice_line_parts
+from ledger.services.payments_ledger import charge_lease, deposit_installment, invoice_line_parts
 from ledger.wording import provider_sentence
 from payments.models import Deposit, MismatchKind, ReconciliationMismatch
 from payments.provider import mask_identifier
@@ -228,8 +228,14 @@ CARDS_NOTE = provider_sentence(
 
 
 def _deposit_payment() -> Q:
-    """A payment on a deposit (a refundable fee type), its refund, or a deposit refund."""
-    return Q(one_off_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
+    """A payment on a deposit (a refundable fee type), its refund, or a deposit refund; and
+    a payment on an installment of a deposit plan (PLAN-015d, :func:`ledger.services.
+    payments_ledger.deposit_installment`)."""
+    return (
+        Q(one_off_charge__fee_type__refundable=True)
+        | Q(kind=PaymentKind.REFUND_DEPOSIT)
+        | deposit_installment()
+    )
 
 
 def _credit_payment() -> Q:
