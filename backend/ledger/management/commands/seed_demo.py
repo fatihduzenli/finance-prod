@@ -126,6 +126,8 @@ ENROLLED_OPERATORS = range(8)
 #: August and due in September.
 CHARGE_STATUS_OVERRIDES = {
     (5, 0): RentChargeStatus.WAIVED,
+    # PLAN-015d: a charge that never fell due (its lease's start moved past it).
+    (4, 0): RentChargeStatus.VOID,
     (6, 0): RentChargeStatus.UNPAID,
     (7, 1): RentChargeStatus.PARTIAL,
     (8, 1): RentChargeStatus.PARTIAL,

@@ -86,6 +86,7 @@ from finance.us_states import state_name
 from ledger.models import (
     BANK_DEBIT_LABEL,
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     InstallmentPlanStatus,
     InsuranceCharge,
@@ -200,7 +201,7 @@ def _rent_description(
 def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
     rows = (
         RentCharge.objects.filter(balance__gt=0)
-        .exclude(status=RentChargeStatus.WAIVED)
+        .exclude(status__in=NOT_BILLED_RENT)
         .exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
     )
     if operator is not None:

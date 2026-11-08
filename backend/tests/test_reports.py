@@ -380,7 +380,9 @@ class _World:
             status=status,
         )
         self.rent.append(charge)
-        owed = ZERO if status == RentChargeStatus.WAIVED else amount - paid
+        # PLAN-015d: a void charge (never due) is owed nothing, as a waived one.
+        not_owed = (RentChargeStatus.WAIVED, RentChargeStatus.VOID)
+        owed = ZERO if status in not_owed else amount - paid
         self.owed[charge.pk] = _Owed(due, owed)
 
     def pay_rent(self) -> None:

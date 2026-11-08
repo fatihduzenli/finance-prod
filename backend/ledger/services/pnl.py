@@ -126,6 +126,7 @@ from django.utils import timezone
 
 from finance.dates import month_text
 from ledger.models import (
+    NOT_BILLED_RENT,
     ZERO,
     CollectionStatus,
     DepositResolution,
@@ -140,7 +141,6 @@ from ledger.models import (
     PaymentKind,
     PaymentStatus,
     RentCharge,
-    RentChargeStatus,
     Store,
     StoreCost,
 )
@@ -519,7 +519,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
     """Rent and fees billed and collected, withheld deposits and fee costs (8 queries)."""
     rent_charges = (
         RentCharge.objects.filter(period_month__gte=start, period_month__lte=end)
-        .exclude(status=RentChargeStatus.WAIVED)
+        .exclude(status__in=NOT_BILLED_RENT)
         .values(store=F("lease__store"), operator=F("lease__operator"), month=F("period_month"))
         .annotate(total=Sum("amount_due"))
         .order_by()

@@ -56,6 +56,7 @@ from finance.dates import day_text, month_text
 from ledger.models import (
     LIVE_AUTOPAY_STATES,
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     AutopayEndRule,
     AutopayPlan,
@@ -690,7 +691,7 @@ def _rent_rows(owner: Owner, chosen: str) -> QuerySet[RentCharge]:
         on_plan=_on_live_plan("rent_charge"), plan_origin=_live_plan_origin("rent_charge")
     )
     if chosen == FILTER_OPEN:
-        rows = rows.filter(balance__gt=0).exclude(status=RentChargeStatus.WAIVED)
+        rows = rows.filter(balance__gt=0).exclude(status__in=NOT_BILLED_RENT)
     elif chosen == FILTER_PAID:
         rows = rows.filter(status=RentChargeStatus.PAID)
     return rows.select_related("lease__operator", "lease__store").order_by("-due_on", "-seq", "id")

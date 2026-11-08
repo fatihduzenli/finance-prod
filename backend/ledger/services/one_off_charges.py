@@ -179,6 +179,7 @@ from ledger.models import (
     BANK_DEBIT_LABEL,
     DESCRIPTION_MAX_LENGTH,
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     NSF_FEE_CODES,
     ZERO,
     AuditLog,
@@ -1807,7 +1808,7 @@ def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDeb
     method = _bank_method(charge.lease)
     balance = max(Decimal(charge.balance), ZERO).quantize(CENT)
     reason_more = reason_url = ""
-    if charge.status == RentChargeStatus.WAIVED:
+    if charge.status in NOT_BILLED_RENT:
         reason = DEBIT_CLOSED
     elif charge.status == RentChargeStatus.PAID or balance <= 0:
         reason = DEBIT_PAID
@@ -2879,12 +2880,12 @@ def _paid_rows(charge: OneOffCharge, *, lock: bool = False) -> list[LineRow]:
 
 def _is_billed(row: LineRow) -> bool:
     if isinstance(row, RentCharge):
-        return bool(row.status != RentChargeStatus.WAIVED)
+        return bool(row.status not in NOT_BILLED_RENT)
     return row.status not in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
 
 
 def _price(row: LineRow) -> Decimal:
-    return Decimal(row.amount_due if isinstance(row, RentCharge) else row.price)
+    return Decimal(row.net_due if isinstance(row, RentCharge) else row.price)
 
 
 def _own_paid(row: LineRow) -> Decimal:
@@ -3000,7 +3001,7 @@ def _billed_rents(invoice: Invoice) -> list[RentCharge]:
     """The rent charges of the invoice's Rent lines that are not waived (PLAN-012b-b D5)."""
     return list(
         RentCharge.objects.filter(invoice_lines__invoice=invoice).exclude(
-            status=RentChargeStatus.WAIVED
+            status__in=NOT_BILLED_RENT
         )
     )
 
@@ -3181,9 +3182,9 @@ def parent_paid_on_plan(plan: InstallmentPlan) -> Decimal:
     parent, or nothing paid."""
     if plan.rent_charge_id is not None:
         rent = RentCharge.objects.get(pk=plan.rent_charge_id)
-        if rent.status == RentChargeStatus.WAIVED:
+        if rent.status in NOT_BILLED_RENT:
             return ZERO
-        price, paid = Decimal(rent.amount_due), rent_run.own_paid(rent) + rent_share(rent)
+        price, paid = rent.net_due, rent_run.own_paid(rent) + rent_share(rent)
     elif plan.one_off_charge_id is not None:
         parent = OneOffCharge.objects.get(pk=plan.one_off_charge_id)
         if parent.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):

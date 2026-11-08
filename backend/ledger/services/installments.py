@@ -124,6 +124,7 @@ from ledger.models import (
     INSTALLMENTS_MAX,
     INSTALLMENTS_MIN,
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     AuditLog,
     CollectionMethod,
@@ -631,7 +632,7 @@ def _autopay_will_debit(charge: RentCharge, today: date) -> bool:
 
 
 def _rent_refusal(charge: RentCharge, today: date) -> str:
-    if charge.status == RentChargeStatus.WAIVED:
+    if charge.status in NOT_BILLED_RENT:
         return CLOSED
     if charge.status == RentChargeStatus.PENDING:
         return PENDING

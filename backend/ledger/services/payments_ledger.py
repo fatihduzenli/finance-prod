@@ -54,6 +54,7 @@ from django.db.models import CharField, Exists, F, OuterRef, Q, QuerySet, Sum
 from django.db.models.functions import Cast, Coalesce
 
 from ledger.models import (
+    NOT_BILLED_RENT,
     ZERO,
     ChargeNote,
     DepositResolution,
@@ -66,7 +67,6 @@ from ledger.models import (
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
-    RentChargeStatus,
     Store,
 )
 from ledger.services import installments, search
@@ -381,7 +381,7 @@ def invoice_line_parts(payments: QuerySet[Payment]) -> dict[uuid.UUID, list[Line
         InvoiceLineItem.objects.filter(
             invoice__one_off_charge__in=charges, rent_charge__isnull=False
         )
-        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
+        .exclude(rent_charge__status__in=NOT_BILLED_RENT)
         .values(
             "rent_charge",
             "position",

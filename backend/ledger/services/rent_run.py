@@ -108,6 +108,7 @@ import payments
 from finance.dates import month_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     AuditLog,
     CollectionSchedule,
@@ -224,6 +225,7 @@ PAY_FUTURE = "The payment date cannot be in the future."
 PAY_NOTE_REQUIRED = "A note is required: say what was received."
 PAY_NOTE_PAYMENT_DATA = "This text may not contain card or account numbers."
 PAY_WAIVED = "This charge is waived. Nothing was recorded."
+PAY_VOID = "This charge is void: it never fell due. Nothing was recorded."
 PAY_NOTHING_DUE = "Nothing is due on this charge. Nothing was recorded."
 PAY_ALREADY = "This payment was already recorded. Nothing was changed."
 PAY_RECORDED = "Payment recorded."
@@ -1578,14 +1580,16 @@ def record_manual_payment(
             return PaymentOutcome(True, PAY_ALREADY, replayed=True)
         if charge.status == RentChargeStatus.WAIVED:
             return PaymentOutcome(False, PAY_WAIVED)
+        if charge.status == RentChargeStatus.VOID:
+            return PaymentOutcome(False, PAY_VOID)
         if on_live_plan(rent_charge=charge):
             return PaymentOutcome(False, PAY_ON_PLAN)
-        balance = charge.amount_due - _paid(charge)
+        balance = charge.net_due - _paid(charge)
         if balance <= 0:
             return PaymentOutcome(False, PAY_NOTHING_DUE)
         if amount > balance:
             return PaymentOutcome(False, PAY_OVER_BALANCE, "amount")
-        whole = balance == charge.amount_due and amount == balance
+        whole = balance == charge.net_due and amount == balance
         before = _charge(charge)
         payment = Payment(
             rent_charge=charge,
@@ -1610,7 +1614,7 @@ def record_manual_payment(
         charge.amount_paid = _paid(charge)
         charge.status = (
             RentChargeStatus.PAID
-            if charge.amount_paid >= charge.amount_due
+            if charge.amount_paid >= charge.net_due
             else RentChargeStatus.PARTIAL
         )
         charge.save(update_fields=["amount_paid", "status", "updated_at"])
@@ -2003,11 +2007,11 @@ def recompute_charge(charge: RentCharge) -> None:
     the move, PLAN-012b-b D13) brings the plan's status up to date, as for a one-off
     parent (PLAN-012b-a D4): the plan's row lock is taken after the charge's.
     """
-    if charge.status == RentChargeStatus.WAIVED:
+    if charge.status in NOT_BILLED_RENT:
         return
     paid = _paid(charge)
     payments = Payment.objects.filter(rent_charge=charge, is_refund=False)
-    if paid >= charge.amount_due and paid > 0:
+    if paid >= charge.net_due and paid > 0:
         status = RentChargeStatus.PAID
     elif paid > 0:
         status = RentChargeStatus.PARTIAL

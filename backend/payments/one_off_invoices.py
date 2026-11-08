@@ -102,6 +102,7 @@ import payments
 from finance.dates import day_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
+    NOT_BILLED_RENT,
     ZERO,
     AuditLog,
     CollectionMethod,
@@ -115,7 +116,6 @@ from ledger.models import (
     Payment,
     PaymentStatus,
     RentCharge,
-    RentChargeStatus,
     SyncFailure,
     format_quantity,
 )
@@ -398,7 +398,7 @@ def _builder_lines(charge: OneOffCharge) -> list[InvoiceLineItem]:
         InvoiceLineItem.objects.filter(invoice__one_off_charge=charge)
         .filter(Q(one_off_charge__isnull=False) | Q(rent_charge__isnull=False))
         .exclude(one_off_charge__status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
-        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
+        .exclude(rent_charge__status__in=NOT_BILLED_RENT)
         .select_related("one_off_charge")
         .order_by("position")
     )
@@ -408,7 +408,7 @@ def _rent_lines(invoice: Invoice) -> list[InvoiceLineItem]:
     """The Rent lines of an invoice of rent alone, not waived, in line order."""
     return list(
         InvoiceLineItem.objects.filter(invoice=invoice, rent_charge__isnull=False)
-        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
+        .exclude(rent_charge__status__in=NOT_BILLED_RENT)
         .order_by("position")
     )
 

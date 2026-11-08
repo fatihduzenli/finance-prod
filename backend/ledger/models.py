@@ -460,6 +460,18 @@ class PaymentChannel(models.TextChoices):
 LATER_CHANNELS: tuple[str, ...] = (PaymentChannel.INVOICE,)
 
 
+class FreeRentFrom(models.TextChoices):
+    """Where a lease's free-rent days start (PLAN-015d §3 (2)): its move-in date, or the 1st
+    of the month after its start month."""
+
+    MOVE_IN = "move_in", "From the move-in date"
+    NEXT_MONTH = "next_month", "From the 1st of the following month"
+
+
+#: The most free-rent days a lease may carry (PLAN-015d §3).
+FREE_RENT_DAYS_MAX = 366
+
+
 class Lease(GuardedModel):
     store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="leases")
     operator = models.ForeignKey(
@@ -477,6 +489,10 @@ class Lease(GuardedModel):
     #: PLAN-012e D2: the first rent charge of a lease that starts after the 1st is for
     #: the days used. Leases billed before the switch existed are never rewritten.
     prorate_first_month = models.BooleanField(default=True)
+    #: PLAN-015d §3 (2): free rent by days, counted from the move-in date or from the 1st of
+    #: the following month (:mod:`ledger.services.free_rent`); 0 is none.
+    free_rent_days = models.SmallIntegerField(default=0)
+    free_rent_from = _choice(FreeRentFrom, default=FreeRentFrom.MOVE_IN)
     #: PLAN-014 C2: where the lease stands with the payment provider, whose customer is
     #: now per lease (``payments.lease_sync``); the operator's columns of PLAN-006 D7 are
     #: kept for history and no longer written.
@@ -519,6 +535,11 @@ class Lease(GuardedModel):
             _valid_choice("leases", "payment_channel", PaymentChannel),
             _valid_choice("leases", "sync_status", SyncStatus),
             _valid_choice("leases", "sync_failure", SyncFailure, blank=True),
+            models.CheckConstraint(
+                condition=Q(free_rent_days__gte=0, free_rent_days__lte=FREE_RENT_DAYS_MAX),
+                name="leases_free_rent_days_range",
+            ),
+            _valid_choice("leases", "free_rent_from", FreeRentFrom),
         ]
 
     def __str__(self) -> str:
@@ -670,6 +691,25 @@ class RentChargeStatus(models.TextChoices):
     PARTIAL = "partial", "Partially paid"
     UNPAID = "unpaid", "Unpaid"
     WAIVED = "waived", "Waived"
+    #: PLAN-015d §3: a charge that never fell due (Change start date moved the start past its
+    #: month). Its balance is zero; waived means forgiven, void means never owed.
+    VOID = "void", "Void"
+
+
+#: The rent charge statuses that are not a bill (PLAN-015d §3): waived (forgiven) and void
+#: (never due). Billed figures, open balances and invoice bodies leave them out alike.
+NOT_BILLED_RENT: tuple[str, ...] = (RentChargeStatus.WAIVED.value, RentChargeStatus.VOID.value)
+
+
+#: PLAN-015d §3: a rent charge's balance, the generated column: what is due less the free-rent
+#: concession and what was paid; zero for a void charge.
+RENT_BALANCE = models.Case(
+    models.When(status="void", then=models.Value(Decimal("0.00"))),
+    default=F("amount_due") - F("concession") - F("amount_paid"),
+    output_field=models.DecimalField(
+        max_digits=MONEY_MAX_DIGITS, decimal_places=MONEY_DECIMAL_PLACES
+    ),
+)
 
 
 class RentCharge(GuardedModel):
@@ -679,8 +719,13 @@ class RentCharge(GuardedModel):
     due_on = models.DateField()
     amount_due = MoneyField()
     amount_paid = MoneyField(default=ZERO)
+    #: PLAN-015d §3 (2): the free rent of this charge's days (``0 ≤ concession ≤ amount_due``);
+    #: the amount due is kept and the concession nets it, with its text
+    #: ("Free rent per lease agreement (Dec 10 – Jan 8)"), empty when none.
+    concession = MoneyField(default=ZERO)
+    concession_text = free_text(default="")
     balance = models.GeneratedField(
-        expression=F("amount_due") - F("amount_paid"),
+        expression=RENT_BALANCE,
         output_field=models.DecimalField(
             max_digits=MONEY_MAX_DIGITS, decimal_places=MONEY_DECIMAL_PLACES
         ),
@@ -722,8 +767,18 @@ class RentCharge(GuardedModel):
             models.CheckConstraint(condition=Q(seq__in=[1, 2]), name="rent_charges_seq_valid"),
             _not_negative("rent_charges", "amount_due"),
             _not_negative("rent_charges", "amount_paid"),
+            _not_negative("rent_charges", "concession"),
+            models.CheckConstraint(
+                condition=Q(concession__lte=F("amount_due")),
+                name="rent_charges_concession_within_amount",
+            ),
             _valid_choice("rent_charges", "status", RentChargeStatus),
         ]
+
+    @property
+    def net_due(self) -> Decimal:
+        """What the charge bills: the amount due less its free-rent concession (PLAN-015d)."""
+        return Decimal(self.amount_due) - Decimal(self.concession)
 
 
 class InsurancePremium(GuardedModel):
@@ -1440,6 +1495,8 @@ class InstallmentOrigin(models.TextChoices):
 
     SPLIT = "split", "Split into installments"
     SETTLEMENT = "settlement", "Settlement plan"
+    #: PLAN-015d §3 (3): the New lease page's deposit paid in installments.
+    DEPOSIT = "deposit", "Deposit installments"
 
 
 class InstallmentCollection(models.TextChoices):
