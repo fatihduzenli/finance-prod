@@ -4,9 +4,9 @@
 Schema:
 
 - ``lease_credits``: ``reversed_at`` (timestamp, null) and ``reversed_reason`` (text, default
-  ``""``, guarded): when the credit was reversed because the bank debit it held was returned,
-  and the return's code and reason; ``lease_credits_reversed_holds_nothing`` (a reversed
-  credit's ``remaining`` is 0).
+  ``""`` in the model and in the database, guarded): when the credit was reversed because the
+  bank debit it held was returned, and the return's code and reason;
+  ``lease_credits_reversed_holds_nothing`` (a reversed credit's ``remaining`` is 0).
 - ``payments``: ``split_from`` (a payment, null): on a payment held as a credit that "Keep as
   credit" split off another, the payment it came from (the row the processor's transaction
   names); ``payments_split_from_held_row`` (only such a row names one).
@@ -221,7 +221,10 @@ class Migration(migrations.Migration):
             model_name="leasecredit",
             name="reversed_reason",
             field=models.TextField(
-                blank=True, default="", validators=[ledger.validators.validate_no_payment_data]
+                blank=True,
+                db_default="",
+                default="",
+                validators=[ledger.validators.validate_no_payment_data],
             ),
         ),
         migrations.AddField(

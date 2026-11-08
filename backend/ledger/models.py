@@ -2239,7 +2239,8 @@ class LeaseCredit(GuardedModel):
     #: was reversed (``remaining`` 0, its applications returned), and the return's code and
     #: reason. Null and empty otherwise.
     reversed_at = models.DateTimeField(null=True, blank=True)
-    reversed_reason = free_text(default="")
+    #: A database default too: rows written without naming it (SQL of before) read "".
+    reversed_reason = free_text(default="", db_default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
