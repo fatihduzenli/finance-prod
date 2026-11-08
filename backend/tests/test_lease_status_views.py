@@ -17,6 +17,7 @@ import pytest
 from django.test import Client
 
 from accounts.roles import Role
+from finance.dates import day_text
 from ledger.models import (
     AuditLog,
     CollectionSchedule,
@@ -162,7 +163,12 @@ def test_a_paused_lease_shows_paused_since_its_reason_and_resume(admin: Client) 
     row = status_row(body(admin, store_url(lease)))
     assert 'class="badge badge-pending"' in row and "Paused</span>" in row
     assert f'id="resume-collection" href="{resume_url(lease)}">Resume</a>' in row
-    assert 'id="pause-reason">Paused since Nov 7, 2026 — Store closed for repairs.</span>' in row
+    # The pause's own day, as the card words it (the audit row is stamped by the real clock,
+    # which the pinned ``today`` does not move: a fixed "Nov 7, 2026" broke after midnight).
+    pause = service.collection_pause(Lease.objects.get(pk=lease.pk))
+    assert pause is not None
+    since = day_text(pause.at)
+    assert f'id="pause-reason">Paused since {since} — Store closed for repairs.</span>' in row
     assert_absent(row, "pause-collection")
 
 
