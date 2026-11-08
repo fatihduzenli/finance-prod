@@ -927,6 +927,12 @@ LEDGER_CASES: list[ConstraintCase] = [
     ConstraintCase(
         "leases_debit_day_range", lambda: new_lease(debit_day=31), lambda: new_lease(debit_day=32)
     ),
+    # PLAN-015d: free rent of 0 to 366 days.
+    ConstraintCase(
+        "leases_free_rent_days_range",
+        lambda: new_lease(free_rent_days=366),
+        lambda: new_lease(free_rent_days=367),
+    ),
     ConstraintCase(
         "leases_second_debit_day_range",
         lambda: new_lease(debit_day=1, second_debit_day=15),
@@ -1057,6 +1063,17 @@ LEDGER_CASES: list[ConstraintCase] = [
         "rent_charges_amount_paid_not_negative",
         lambda: new_rent_charge(amount_paid=D("0.00")),
         lambda: new_rent_charge(amount_paid=D("-0.01")),
+    ),
+    # PLAN-015d: a concession is never negative and never more than the rent.
+    ConstraintCase(
+        "rent_charges_concession_not_negative",
+        lambda: new_rent_charge(concession=D("0.00")),
+        lambda: new_rent_charge(concession=D("-0.01")),
+    ),
+    ConstraintCase(
+        "rent_charges_concession_within_amount",
+        lambda: new_rent_charge(concession=D("2450.00")),
+        lambda: new_rent_charge(concession=D("2450.01")),
     ),
     _field_unique("rent_charges", "local_ref", new_rent_charge, _UUID_1, _UUID_2),
     # insurance_premiums
