@@ -31,11 +31,13 @@ from ledger.models import (
     CONSENT_FIELDS,
     DESCRIPTION_MAX_LENGTH,
     EVIDENCE_NAME_MAX_LENGTH,
+    FREE_RENT_DAYS_MAX,
     INSTALLMENTS_MAX,
     INSTALLMENTS_MIN,
     NAME_MAX_LENGTH,
     NOTE_BODY_MAX_LENGTH,
     NOTE_DELETE_REASON_MAX_LENGTH,
+    ZERO,
     AutopayCadence,
     AutopayEndRule,
     Brand,
@@ -47,6 +49,7 @@ from ledger.models import (
     DepositResolutionKind,
     DocumentKind,
     FeeType,
+    FreeRentFrom,
     InstallmentCadence,
     Lease,
     LeaseBilling,
@@ -60,6 +63,7 @@ from ledger.models import (
 )
 from ledger.services import (
     autopay_plans,
+    free_rent,
     installments,
     invoice_builder,
     one_off_charges,
@@ -518,6 +522,43 @@ def _twice_monthly(second_debit_day: forms.BoundField) -> bool:
     return bool(str(second_debit_day.value() or "").strip()) or bool(second_debit_day.errors)
 
 
+#: PLAN-015d §3 (2): the "Free rent" fields of New lease and Edit lease.
+FREE_RENT_DAYS_LABEL = "Free rent (days)"
+FREE_RENT_FROM_LABEL = "Free rent starts"
+FREE_RENT_CHANGE_LABEL = "Free rent"
+#: The Starts select's short words (the field fits a third of the Terms row).
+FREE_RENT_FROM_CHOICES = [
+    (FreeRentFrom.MOVE_IN.value, "Move-in date"),
+    (FreeRentFrom.NEXT_MONTH.value, "1st of next month"),
+]
+
+
+def _free_rent_fields(form: forms.BaseForm) -> None:
+    """The free-rent days (0 to 366; empty is none) and where they start."""
+    form.fields["free_rent_days"] = forms.IntegerField(
+        label=FREE_RENT_DAYS_LABEL,
+        min_value=0,
+        max_value=FREE_RENT_DAYS_MAX,
+        required=False,
+        initial=0,
+        widget=forms.NumberInput(attrs={"min": 0, "max": FREE_RENT_DAYS_MAX, "step": 1}),
+    )
+    form.fields["free_rent_from"] = forms.ChoiceField(
+        label=FREE_RENT_FROM_LABEL,
+        choices=FREE_RENT_FROM_CHOICES,
+        initial=FreeRentFrom.MOVE_IN,
+        # Not posted (an older form, a script-less post): from the move-in date.
+        required=False,
+    )
+
+
+def _clean_free_rent(data: dict[str, Any]) -> None:
+    if data.get("free_rent_days") is None:
+        data["free_rent_days"] = 0
+    if not data.get("free_rent_from"):
+        data["free_rent_from"] = FreeRentFrom.MOVE_IN
+
+
 class LeaseForm(_LeaseFormBase):
     """A new lease's own fields (the New lease page builds on it, :class:`LeaseCreateForm`).
     Rent is a separate field: the service writes its first history row (D5). The Edit lease
@@ -557,6 +598,8 @@ class LeaseForm(_LeaseFormBase):
             "payment_channel",
             "started_on",
             "prorate_first_month",
+            "free_rent_days",
+            "free_rent_from",
         )
         widgets = {"started_on": forms.DateInput(attrs={"type": "date"})}
         labels = {
@@ -572,6 +615,7 @@ class LeaseForm(_LeaseFormBase):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        _free_rent_fields(self)
         store = self.fields["store"]
         operator = self.fields["operator"]
         if isinstance(store, forms.ModelChoiceField):
@@ -588,6 +632,7 @@ class LeaseForm(_LeaseFormBase):
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
+        _clean_free_rent(data)
         active = data.get("collection_status", self.fixed_status) == CollectionStatus.ACTIVE
         if active and data.get("operator") is None:
             self.add_error("operator", "An active lease needs an operator.")
@@ -796,6 +841,15 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             first = proration.prorated(rent, month, start.day, proration.days_in(month)).amount
             prorated = True
         moving_in = self.setup_total()
+        free = ZERO
+        if first is not None:
+            free = free_rent.first_month_concession(
+                start,
+                int(self._value("free_rent_days") or 0),
+                str(self["free_rent_from"].value() or FreeRentFrom.MOVE_IN),
+                first,
+                prorate=bool(self._value("prorate_first_month")),
+            )
         return {
             "operator": operator.display_name if isinstance(operator, Operator) else NO_VALUE,
             "starts": day_text(start) if start is not None else NO_VALUE,
@@ -811,7 +865,9 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             "first_month_label": "First month (prorated)" if prorated else "First month",
             "first_month": format_amount(first) if first is not None else NO_VALUE,
             "move_in": format_amount(moving_in),
-            "total": format_amount(first + moving_in) if first is not None else NO_VALUE,
+            # PLAN-015d: the first month's free rent, "" without any.
+            "free_rent": format_amount(-free) if free > 0 else "",
+            "total": format_amount(first - free + moving_in) if first is not None else NO_VALUE,
         }
 
     def deposit_field(self) -> forms.BoundField | None:
@@ -901,7 +957,12 @@ CURRENT_SUFFIX = " (current)"
 #: The muted line of the card of a channel outside the three cards.
 CURRENT_CHANNEL_NOTE = "This lease's channel today. Not offered for a new lease."
 #: The Changes card's words where they differ from the field's label.
-CHANGE_LABELS = {"rent": "Monthly rent", "rent_effective_from": "From"}
+CHANGE_LABELS = {
+    "rent": "Monthly rent",
+    "rent_effective_from": "From",
+    "free_rent_days": FREE_RENT_CHANGE_LABEL,
+    "free_rent_from": FREE_RENT_FROM_LABEL,
+}
 #: A lease with no rent row and no rent typed (a lease the service always gives one).
 RENT_REQUIRED = "Enter the monthly rent: this lease has none yet."
 
@@ -951,7 +1012,14 @@ class LeaseEditForm(_LeaseFormBase):
     class Meta:
         model = Lease
         formfield_callback = _quiet_formfield
-        fields = ("debit_day", "second_debit_day", "payment_channel", "prorate_first_month")
+        fields = (
+            "debit_day",
+            "second_debit_day",
+            "payment_channel",
+            "prorate_first_month",
+            "free_rent_days",
+            "free_rent_from",
+        )
         labels = {"prorate_first_month": "Prorate the first month"}
 
     def __init__(
@@ -1004,12 +1072,18 @@ class LeaseEditForm(_LeaseFormBase):
             prorate.widget.attrs.update({"class": "switch", "role": "switch"})
         if rent_default is not None:
             self.fields["rent_effective_from"].initial = rent_default
+        _free_rent_fields(self)
+        self.fields["free_rent_days"].initial = lease.free_rent_days
+        self.fields["free_rent_from"].initial = lease.free_rent_from
+        self.fields["free_rent_days"].widget.attrs["data-suffix"] = " days"
         initial: dict[str, Any] = {
             "debit_day": lease.debit_day,
             "second_debit_day": lease.second_debit_day,
             "prorate_first_month": "true" if lease.prorate_first_month else "false",
             "rent": "",
             "rent_effective_from": rent_default.isoformat() if rent_default else "",
+            "free_rent_days": lease.free_rent_days,
+            "free_rent_from": lease.free_rent_from,
         }
         for name, value in initial.items():
             field = self.fields.get(name)
@@ -1036,6 +1110,7 @@ class LeaseEditForm(_LeaseFormBase):
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
+        _clean_free_rent(data)
         active = self.instance.collection_status == CollectionStatus.ACTIVE
         _check_debits(self, data, active=active)
         if "rent" in self.errors:

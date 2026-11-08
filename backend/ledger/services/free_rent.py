@@ -90,6 +90,25 @@ def card_text(lease: Lease) -> str:
     )
 
 
+def first_month_concession(
+    start: date | None, days: int, start_from: str, first_amount: Decimal, *, prorate: bool
+) -> Decimal:
+    """The free rent of the start month from the terms alone (the New lease Summary, before
+    anything is saved): what :func:`concession_for` gives that month. Zero when the free days
+    start the month after."""
+    if start is None or days <= 0 or start_from == FreeRentFrom.NEXT_MONTH:
+        return ZERO
+    month = start.replace(day=1)
+    last = proration.last_day(month)
+    billed_from = start if prorate and start.day > 1 else month
+    free_last = min(start + timedelta(days=days - 1), last)
+    free = (free_last - start).days + 1
+    billed = (last - billed_from).days + 1
+    if free >= billed:
+        return first_amount
+    return (first_amount * free / billed).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
 def _next_month(month: date) -> date:
     return date(month.year + month.month // 12, month.month % 12 + 1, 1)
 

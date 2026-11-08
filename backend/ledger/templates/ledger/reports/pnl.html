@@ -24,7 +24,7 @@
     <p class="warning" id="pnl-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
   <section class="kpi-row pnl-kpis" id="pnl-kpis" aria-label="Figures">
-    <div class="kpi" id="kpi-billed"><span class="kpi-label">Billed</span><span class="kpi-value">{{ kpis.billed|money }}</span><span class="kpi-note">rent {{ total.rent_billed|money }} · fees {{ total.fees_billed|money }}</span></div>
+    <div class="kpi" id="kpi-billed"><span class="kpi-label">Billed</span><span class="kpi-value">{{ kpis.billed|money }}</span><span class="kpi-note">rent {{ total.net_rent|money }} · fees {{ total.fees_billed|money }}</span></div>
     <div class="kpi" id="kpi-collected"><span class="kpi-label">Collected</span><span class="kpi-value tone-paid">{{ kpis.collected|money }}</span>{% if total.withheld_deposits %}<span class="kpi-note">incl. {{ total.withheld_deposits|money }} withheld deposit</span>{% endif %}</div>
     <div class="kpi" id="kpi-costs"><span class="kpi-label">Costs</span><span class="kpi-value">{% if total.costs is None %}<span class="unknown">unknown</span>{% else %}{{ total.costs|money }}{% endif %}</span><span class="kpi-note">landlord {% if total.landlord_rent is None %}unknown{% else %}{{ total.landlord_rent|money }}{% endif %}{% if total.other_costs is None or total.other_costs %} · other {% if total.other_costs is None %}unknown{% else %}{{ total.other_costs|money }}{% endif %}{% endif %} · fee costs {% if total.fee_costs is None %}unknown{% else %}{{ total.fee_costs|money }}{% endif %}</span></div>
     <div class="kpi" id="kpi-margin"><span class="kpi-label">Margin (collected)</span><span class="kpi-value{% if total.margin_collected is None %}{% elif total.margin_collected < 0 %} tone-unpaid{% else %} tone-paid{% endif %}">{% if total.margin_collected is None %}<span class="unknown">unknown</span>{% else %}{{ total.margin_collected|money }}{% endif %}</span>{% if kpis.unknown_stores %}<span class="kpi-note" id="kpi-unknown">{{ kpis.unknown_stores }} store{{ kpis.unknown_stores|pluralize }} unknown · <a href="#pnl-explained">why</a></span>{% endif %}</div>
@@ -40,8 +40,8 @@
     {% responsive_table %}
     <table id="pnl" class="pnl-table">
       <thead>
-        <tr><th rowspan="2" scope="col">{{ group_label }}</th><th colspan="2" scope="colgroup" class="grp-head grp-start">Rent</th><th colspan="2" scope="colgroup" class="grp-head grp-start">Fees</th><th colspan="3" scope="colgroup" class="grp-head grp-start">Costs</th><th colspan="2" scope="colgroup" class="grp-head grp-start">Margin</th><th rowspan="2" scope="col" class="grp-start">Flags</th></tr>
-        <tr><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th><th scope="col" class="money grp-start">Landlord</th><th scope="col" class="money">Other</th><th scope="col" class="money">Fee costs</th><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th></tr>
+        <tr><th rowspan="2" scope="col">{{ group_label }}</th><th colspan="4" scope="colgroup" class="grp-head grp-start">Rent</th><th colspan="2" scope="colgroup" class="grp-head grp-start">Fees</th><th colspan="3" scope="colgroup" class="grp-head grp-start">Costs</th><th colspan="2" scope="colgroup" class="grp-head grp-start">Margin</th><th rowspan="2" scope="col" class="grp-start">Flags</th></tr>
+        <tr><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Concessions</th><th scope="col" class="money">Net</th><th scope="col" class="money">Collected</th><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th><th scope="col" class="money grp-start">Landlord</th><th scope="col" class="money">Other</th><th scope="col" class="money">Fee costs</th><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th></tr>
       </thead>
       <tbody>
         {% for group, title, subline in group_lines %}
@@ -60,7 +60,7 @@
             {% endfor %}
           {% endif %}
         {% empty %}
-          <tr><td colspan="11" class="muted empty">Nothing billed, collected or held in these months.</td></tr>
+          <tr><td colspan="13" class="muted empty">Nothing billed, collected or held in these months.</td></tr>
         {% endfor %}
       </tbody>
       <tfoot>

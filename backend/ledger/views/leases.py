@@ -77,6 +77,7 @@ from ledger.models import (
 from ledger.services import (
     csv_export,
     detail_cards,
+    free_rent,
     insurance,
     list_filters,
     one_off_charges,
@@ -662,6 +663,10 @@ def lease_edit(request: HttpRequest, pk: str) -> HttpResponse:
                 form.add_error(refusal.field, str(refusal))
             else:
                 messages.success(request, "Lease saved.")
+                # PLAN-015d §3 (2): months already billed keep their free rent; say which.
+                kept = free_rent.kept(Lease.objects.get(pk=lease.pk))
+                if kept:
+                    messages.warning(request, free_rent.Recomputed((), kept).warning)
                 return redirect(_saved_url(request, lease, context))
         _hold(request, target, form)
         return redirect(request.get_full_path())
@@ -704,6 +709,8 @@ def _edit_context(lease: Lease, today: date, first_charge: RentCharge | None) ->
         "first_month_billed_on": first_charge.created_at if first_charge else None,
         "can_change_holder": lease.ended_on is None
         and lease.collection_status != CollectionStatus.ENDED,
+        # PLAN-015d: the free rent in force ("30 days, Dec 10 – Jan 8"), or "".
+        "free_rent_text": free_rent.card_text(lease),
     }
 
 

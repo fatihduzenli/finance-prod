@@ -5,7 +5,8 @@
 // - The Changes card (aside#lease-changes): one li per control whose value differs from its
 //   data-initial, worded "<data-label> <old> → <new>" ("Debit day 1st → 5th"; a select by its
 //   options' text, a channel by its card's data-short, the switch On/Off, the rent from the
-//   input's data-current-text with "from <date>"). Nothing changed: #changes-empty shows and
+//   input's data-current-text with "from <date>", a number by its value and its data-suffix:
+//   "Free rent 0 → 30 days", PLAN-015d; an empty number reads 0). Nothing changed: #changes-empty shows and
 //   Save (#save-lease) is disabled; reverting a change disables it again. A hidden control
 //   (ledger/shown_when.js disables it, so it is not sent) counts as empty.
 // - #autopay-warning (only in the page when the lease has a live provider schedule) shows
@@ -75,6 +76,14 @@
         var on = initial === "true";
         if (control.checked !== on) {
           found.push({ field: name, label: label, text: (on ? "On" : "Off") + ARROW + (control.checked ? "On" : "Off") });
+        }
+        return;
+      }
+      if (control.tagName === "INPUT" && control.type === "number") {
+        var was = initial || "0";
+        var now = current(control).trim() || "0";
+        if (now !== was) {
+          found.push({ field: name, label: label, text: was + ARROW + now + (control.getAttribute("data-suffix") || "") });
         }
         return;
       }

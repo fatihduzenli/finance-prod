@@ -193,8 +193,13 @@ def test_the_header_has_two_rows_with_the_column_groups() -> None:
         "Flags",
     ]
     assert '<th colspan="3" scope="colgroup" class="grp-head grp-start">Costs</th>' in first
+    # PLAN-015d: the Rent group shows the concessions and the net rent between billed and
+    # collected.
+    assert '<th colspan="4" scope="colgroup" class="grp-head grp-start">Rent</th>' in first
     assert re.findall(r"<th[^>]*>([^<]*)</th>", second) == [
         "Billed",
+        "Concessions",
+        "Net",
         "Collected",
         "Billed",
         "Collected",
@@ -221,13 +226,15 @@ def test_a_row_shows_the_store_bold_with_its_operator_and_amounts_without_the_do
     assert [text_of(cell) for cell in cells] == [
         "3,500.00",
         "0.00",
+        "3,500.00",
+        "0.00",
         "1,000.00",
         "0.00",
         "2,500.00",
-        text_of(cells[5]),
-        "500.00",
         text_of(cells[7]),
-        text_of(cells[8]),
+        "500.00",
+        text_of(cells[9]),
+        text_of(cells[10]),
     ]
     assert all("$" not in cell for cell in cells)
     assert '<td class="money grp-start margin-billed" data-label="Margin billed"' in row
@@ -358,9 +365,15 @@ def test_the_phone_draws_the_rows_as_two_line_cards() -> None:
         assert roles.count("amount") == 1 and roles[-1] == "meta-badge"
         assert set(roles[1:-1]) == {"meta", "amount"}
         labels = re.findall(r'<td[^>]*data-label="([^"]+)"', row)
-        assert labels[1:4] == ["Rent billed", "Rent collected", "Fees billed"]
+        assert labels[1:6] == [
+            "Rent billed",
+            "Concessions",
+            "Net rent",
+            "Rent collected",
+            "Fees billed",
+        ]
     total = between(page, '<tr class="totals" id="pnl-total">', "</tr>")
-    assert len(re.findall(r'data-label="', total)) == 10
+    assert len(re.findall(r'data-label="', total)) == 12
 
 
 def test_the_style_sheet_carries_the_report_family_rules() -> None:

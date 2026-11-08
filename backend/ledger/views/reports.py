@@ -186,7 +186,7 @@ def _kpis(total: pnl.Figures, rows: list[pnl.PnlRow]) -> dict[str, Any]:
     when any input is); ``unknown_stores`` counts the stores with an unknown input, for the
     Margin card's "why" line."""
     return {
-        "billed": total.rent_billed + total.fees_billed,
+        "billed": total.net_rent + total.fees_billed,
         "collected": total.rent_collected + total.fees_collected,
         "unknown_stores": len({row.store_id for row in rows if row.unknown}),
     }

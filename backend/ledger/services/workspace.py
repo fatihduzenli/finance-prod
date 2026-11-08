@@ -95,6 +95,7 @@ from ledger.services import (
     contacts,
     credits,
     detail_cards,
+    free_rent,
     installments,
     lease_end,
     leases,
@@ -244,6 +245,8 @@ class Header:
     #: The Deposit row's colour (PLAN-014 I-b: ``paid``, ``partial`` or ``unpaid``, as the
     #: Sign fee row's), "" without a deposit.
     deposit_tone: str = ""
+    #: PLAN-015d: the lease's free rent, "30 days, Dec 10 – Jan 8", or "".
+    free_rent_text: str = ""
     next_rent: date | None = None
     next_insurance: date | None = None
     #: The Sign fee and Insurance rows under Deposit (PLAN-014 B3), with a lease.
@@ -490,6 +493,7 @@ def _header(
         debit_day_text=_debit_day_text(lease),
         deposit_text=deposit_text,
         deposit_tone=detail_cards.TONES[deposit_code] if deposit_code else "",
+        free_rent_text=free_rent.card_text(lease),
         next_rent=_next_rent(schedules, moved, now) or _next_debit_day(lease, today),
         next_insurance=_next_insurance(lease, today),
         collections=detail_cards.lease_collections(lease, today),
