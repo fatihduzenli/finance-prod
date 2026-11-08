@@ -5,10 +5,12 @@ rendered on request from stored data and never stored.
 across several charges (a wire against a two-line invoice, the store page's payment form) is
 stored as one ``Payment`` row per charge sharing ``allocation_group``; its receipt covers them
 all (:func:`entry_of`: the group's rows on the payment's lease that have a receipt, in the
-order they were written, the credits applied left out when the entry received money; a payment
-without a group is its own entry). A bank deposit split over several stores gives each store's
-entry the same group (``banking.services``), so the lease bounds the entry: a receipt never
-names another store's charges. Any row of the entry renders the same receipt, byte for byte.
+order they were written — ``created_at``, then the smallest id when timestamps tie, so the
+entry's first row does not depend on which row the database returns first — the credits
+applied left out when the entry received money; a payment without a group is its own entry).
+A bank deposit split over several stores gives each store's entry the same group
+(``banking.services``), so the lease bounds the entry: a receipt never names another store's
+charges. Any row of the entry renders the same receipt, byte for byte.
 
 :func:`render_receipt` draws, inside the :class:`~.frame.Frame` (title RECEIPT, the number
 ``RCPT-`` and the first eight characters of the id of the entry's first row — the payment's own
@@ -25,7 +27,8 @@ no stored counter — and the stamp PAID):
   there is none);
 - "Applied to": for each row, the invoice it paid (its own, else the invoice billing its
   charge) once, then the charge's words ("Rent — November 2026", a one-off charge's
-  description) with the row's amount;
+  description) with the row's amount — in the invoice's order, never the rows' timestamps
+  (:func:`applied_order`);
 - "Remaining balance on the store" in the dark box: the open balances of the store billed to
   the payment's operator on ``today`` (``receivables.open_balances``).
 
@@ -48,6 +51,7 @@ from django.db.models import Q
 from finance.dates import day_text
 from ledger.models import (
     Invoice,
+    InvoiceLineItem,
     InvoiceStatus,
     Lease,
     Payment,
@@ -120,7 +124,8 @@ def entry_key(payment: Payment) -> tuple[uuid.UUID, uuid.UUID | None]:
 
 
 def entry_of(payment: Payment) -> list[Payment]:
-    """The rows the payment's receipt covers, oldest first (see the module docstring)."""
+    """The rows the payment's receipt covers, oldest first: by ``created_at``, then by the
+    smallest id when timestamps tie (the first row names the receipt and carries the link)."""
     if payment.allocation_group is None:
         return [payment]
     lease = _lease_id(payment)
@@ -240,13 +245,71 @@ def charge_text(payment: Payment) -> str:
     return ""
 
 
-def applied_to(rows: Sequence[Payment]) -> tuple[AppliedLine, ...]:
-    """Each invoice the rows paid once (bold), then the words and amount of each charge it
-    billed; charges billed by no invoice are bold. A row naming no charge adds its amount to
-    its invoice's line."""
-    by_invoice: dict[str, list[tuple[str, Decimal]]] = {}
+#: The order of a row's charge kind when it is billed by no invoice line.
+KIND_ORDER = ("rent", "insurance", "one_off", "adjustment", "")
+
+
+def _charge_kind(payment: Payment) -> str:
+    if payment.rent_charge_id is not None:
+        return "rent"
+    if payment.insurance_charge_id is not None:
+        return "insurance"
+    if payment.one_off_charge_id is not None:
+        return "one_off"
+    if payment.charge_adjustment_id is not None:
+        return "adjustment"
+    return ""
+
+
+def _line_position(payment: Payment, invoice: Invoice | None) -> int | None:
+    """The position of the invoice's line billing the row's rent or one-off charge."""
+    if invoice is None:
+        return None
+    if payment.rent_charge_id is not None:
+        which = Q(rent_charge_id=payment.rent_charge_id)
+    elif payment.one_off_charge_id is not None:
+        which = Q(one_off_charge_id=payment.one_off_charge_id)
+    else:
+        return None
+    return (
+        InvoiceLineItem.objects.filter(which, invoice=invoice)
+        .order_by("position")
+        .values_list("position", flat=True)
+        .first()
+    )
+
+
+def applied_order(
+    rows: Sequence[Payment],
+) -> list[tuple[Payment, Invoice | None]]:
+    """The rows with the invoice each paid, in the order a reader expects, never by the rows'
+    timestamps: the invoice (by number; rows paying no invoice last), then the position of
+    the invoice line billing the row's charge, then the charge's words, then the row's id; a
+    row billed by no invoice line sorts after the lines by (charge kind, words, id)."""
+    keyed = []
     for row in rows:
         invoice = invoice_of(row)
+        position = _line_position(row, invoice)
+        key = (
+            invoice is None,
+            invoice.invoice_number if invoice is not None else "",
+            position is None,
+            position if position is not None else 0,
+            KIND_ORDER.index(_charge_kind(row)) if position is None else 0,
+            charge_text(row),
+            row.pk,
+        )
+        keyed.append((key, row, invoice))
+    keyed.sort(key=lambda item: item[0])
+    return [(row, invoice) for _, row, invoice in keyed]
+
+
+def applied_to(rows: Sequence[Payment]) -> tuple[AppliedLine, ...]:
+    """Each invoice the rows paid once (bold), then the words and amount of each charge it
+    billed, in :func:`applied_order`; charges billed by no invoice are bold. A row naming no
+    charge adds its amount to its invoice's line."""
+    by_invoice: dict[str, list[tuple[str, Decimal]]] = {}
+    for row, invoice in applied_order(rows):
         heading = f"Invoice {invoice.invoice_number}" if invoice is not None else ""
         by_invoice.setdefault(heading, []).append((charge_text(row), row.amount))
     lines: list[AppliedLine] = []

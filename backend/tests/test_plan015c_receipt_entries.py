@@ -11,11 +11,12 @@ bank deposit split over two stores shares one group, and each store gets its own
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
 import pytest
+from django.db import transaction
 from django.utils import timezone
 
 from accounts.roles import Role
@@ -113,7 +114,7 @@ def test_a_two_line_wire_has_one_receipt_with_both_charges_and_their_sum() -> No
     number, (first, second), _ = a_two_line_wire()
     data = render_receipt(first, today=TODAY)
     assert render_receipt(second, today=TODAY) == data
-    # The entry's first row in write order (a frozen clock leaves the id to decide).
+    # The entry's first row in write order (tied timestamps leave the smallest id to decide).
     opening = entry_of(first)[0]
     assert entry_of(second) == entry_of(first) and {row.pk for row in entry_of(first)} == {
         first.pk,
@@ -125,6 +126,7 @@ def test_a_two_line_wire_has_one_receipt_with_both_charges_and_their_sum() -> No
     printed = lines_of(data)
     assert printed.count(receipt_number(first)) == 1
     applied = printed.index("APPLIED TO")
+    # The invoice's line order (Rent, then Access fee), whatever the rows' timestamps.
     assert printed[applied + 1 : applied + 6] == [
         f"Invoice {number}",
         "Rent — December 2026",
@@ -134,6 +136,56 @@ def test_a_two_line_wire_has_one_receipt_with_both_charges_and_their_sum() -> No
     ]
     assert [line for line in printed if line.startswith("Invoice ")] == [f"Invoice {number}"]
     assert printed[printed.index("Remaining balance on the store") + 1] == "$0.00"
+
+
+def test_the_entry_renders_the_same_bytes_whichever_row_was_written_first() -> None:
+    """The same entry written in the opposite order (same ids, tied timestamps, then the
+    second row written later) renders the same receipt: the Applied-to lines follow the
+    invoice's lines and the number the smallest id, never the order the rows were written."""
+    company()
+    lease = billed_store()
+    _, charges = builder_invoice(lease, TWO)
+    for billed, (_, _, price) in zip(charges, TWO, strict=True):
+        paid(billed, price)
+    group = uuid.uuid4()
+    ids = sorted(uuid.uuid4() for _ in TWO)
+    tied = timezone.now()
+
+    def write(order: list[int], *, stagger: bool) -> bytes:
+        with transaction.atomic():
+            for step, index in enumerate(order):
+                row = settle(
+                    charges[index],
+                    TWO[index][2],
+                    PAID_ON,
+                    PaymentMethod.WIRE,
+                    reference="WIRE-1001",
+                    allocation_group=group,
+                    id=ids[index],
+                )
+                Payment.objects.filter(pk=row.pk).update(
+                    created_at=tied + timedelta(seconds=step if stagger else 0)
+                )
+            data = render_receipt(Payment.objects.get(pk=ids[0]), today=TODAY)
+            transaction.set_rollback(True)
+        return data
+
+    forward = write([0, 1], stagger=False)
+    backward = write([1, 0], stagger=False)
+    assert forward == backward
+    printed = lines_of(backward)
+    assert f"RCPT-{str(ids[0])[:8].upper()}" in printed
+    applied = printed.index("APPLIED TO")
+    assert printed[applied + 2 : applied + 6] == [
+        "Rent — December 2026",
+        "$2,000.00",
+        "Access fee",
+        "$800.00",
+    ]
+    # Distinct timestamps in the opposite order keep the invoice's line order too.
+    staggered = lines_of(write([1, 0], stagger=True))
+    applied = staggered.index("APPLIED TO")
+    assert staggered[applied + 2 : applied + 6] == printed[applied + 2 : applied + 6]
 
 
 def test_a_payment_alone_keeps_its_own_receipt() -> None:
