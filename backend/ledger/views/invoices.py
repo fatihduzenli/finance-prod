@@ -146,7 +146,7 @@ def _load(pk: str) -> InvoiceDraft:
     return get_object_or_404(
         InvoiceDraft.objects.select_related(
             "operator", "lease", "lease__store", "lease__operator", "sent_invoice"
-        ),
+        ).prefetch_related(invoice_builder.sent_lines_prefetch()),
         pk=_key(pk),
     )
 

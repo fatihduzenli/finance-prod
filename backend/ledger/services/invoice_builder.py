@@ -184,7 +184,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Max
+from django.db.models import Max, Prefetch
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -773,11 +773,30 @@ def net_total(lines: Sequence[InvoiceDraftLine | CleanLine]) -> Decimal:
     return total_of(lines) - sum((line.amount for line in discounts_for(lines)), ZERO)
 
 
+def sent_lines_prefetch() -> Prefetch[Any, Any, Any]:
+    """The sent invoice's lines of a draft, read once with their one-off charges: the pages
+    of a draft load it with this (PLAN-015d), so that :func:`sent_charges` and
+    :func:`invoice_discounts` share one read."""
+    return Prefetch(
+        "sent_invoice__line_items",
+        queryset=InvoiceLineItem.objects.select_related("one_off_charge").order_by("position"),
+    )
+
+
+def _invoice_lines(invoice: Invoice) -> list[InvoiceLineItem]:
+    """``invoice``'s lines in line order, their one-off charges with them: the prefetch of
+    :func:`sent_lines_prefetch` when the caller made it, else one read here."""
+    if "line_items" in getattr(invoice, "_prefetched_objects_cache", {}):
+        return list(invoice.line_items.all())
+    return list(invoice.line_items.select_related("one_off_charge").order_by("position"))
+
+
 def invoice_discounts(invoice: Invoice) -> tuple[DiscountLine, ...]:
     """The discount lines of a sent invoice (kind ``discount``), in line order."""
     return tuple(
         DiscountLine(str(item.description), Decimal(item.line_total))
-        for item in invoice.line_items.filter(kind=InvoiceLineKind.DISCOUNT).order_by("position")
+        for item in _invoice_lines(invoice)
+        if item.kind == InvoiceLineKind.DISCOUNT
     )
 
 
@@ -824,16 +843,11 @@ def preview(
 
 def sent_charges(draft: InvoiceDraft) -> list[OneOffCharge]:
     """The charges of a sent draft's invoice, in line order."""
-    if draft.sent_invoice_id is None:
+    invoice = draft.sent_invoice
+    if invoice is None:
         return []
     return [
-        line.one_off_charge
-        for line in InvoiceLineItem.objects.filter(
-            invoice_id=draft.sent_invoice_id, one_off_charge__isnull=False
-        )
-        .select_related("one_off_charge")
-        .order_by("position")
-        if line.one_off_charge is not None
+        line.one_off_charge for line in _invoice_lines(invoice) if line.one_off_charge is not None
     ]
 
 
