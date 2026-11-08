@@ -91,6 +91,8 @@ from ledger.models import (
     InstallmentPlanStatus,
     InsuranceCharge,
     Invoice,
+    InvoiceDraftLine,
+    InvoiceDraftStatus,
     InvoiceLineItem,
     InvoiceStatus,
     LegacyStatus,
@@ -995,10 +997,30 @@ def owed_deposits() -> QuerySet[OneOffCharge]:
     )
 
 
-def _deposit_balances() -> list[OpenBalance]:
-    """:func:`owed_deposits` as receivables rows, in one query."""
+def dated_deposits(operator: uuid.UUID | None = None) -> list[OpenBalance]:
+    """The deposits owed that do not ride an invoice (PLAN-015d §3 (3): the New lease page's
+    "Due on a date"; a deposit on a sent invoice or on a draft not yet sent goes with it), as
+    receivables rows: the reminders follow their due dates and the portal offers Pay for them.
+    They stay out of :func:`open_balances` (money held, not revenue)."""
+    drafted = InvoiceDraftLine.objects.filter(
+        draft__status=InvoiceDraftStatus.DRAFT, existing_charge__isnull=False
+    ).values("existing_charge")
     rows = (
         owed_deposits()
+        .filter(invoice_lines__isnull=True, invoices__isnull=True)
+        .exclude(pk__in=drafted)
+    )
+    if operator is not None:
+        rows = rows.filter(
+            Q(operator=operator) | Q(operator__isnull=True, lease__operator=operator)
+        )
+    return _deposit_balances(rows)
+
+
+def _deposit_balances(found: QuerySet[OneOffCharge] | None = None) -> list[OpenBalance]:
+    """:func:`owed_deposits` (or ``found``) as receivables rows, in one query."""
+    rows = (
+        (owed_deposits() if found is None else found)
         .values(
             "pk",
             "due_date",

@@ -63,6 +63,7 @@ from ledger.models import (
 )
 from ledger.services import (
     autopay_plans,
+    deposits,
     free_rent,
     installments,
     invoice_builder,
@@ -800,6 +801,37 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             )
         if self.deposit_type is not None:
             self.fields[f"{_setup_name(self.deposit_type)}_price"].label = DEPOSIT_LABEL
+        # PLAN-015d §3 (3): when the deposit is collected.
+        self.fields["deposit_when"] = forms.ChoiceField(
+            label="When",
+            choices=deposits.DEPOSIT_WHEN_CHOICES,
+            initial=deposits.DepositWhen.WITH_INVOICE,
+            required=False,
+        )
+        on_date = {SHOWN_WHEN: "id_deposit_when=on_date"}
+        plan = {SHOWN_WHEN: "id_deposit_when=installments"}
+        self.fields["deposit_on"] = forms.DateField(
+            label="Due on", required=False, widget=forms.DateInput({"type": "date", **on_date})
+        )
+        self.fields["deposit_count"] = forms.IntegerField(
+            label="Installments",
+            min_value=INSTALLMENTS_MIN,
+            max_value=INSTALLMENTS_MAX,
+            required=False,
+            widget=forms.NumberInput(
+                {"min": INSTALLMENTS_MIN, "max": INSTALLMENTS_MAX, "step": 1, **plan}
+            ),
+        )
+        self.fields["deposit_first_due"] = forms.DateField(
+            label="First due", required=False, widget=forms.DateInput({"type": "date", **plan})
+        )
+        self.fields["deposit_cadence"] = forms.ChoiceField(
+            label="Every",
+            choices=deposits.DEPOSIT_CADENCES,
+            initial=InstallmentCadence.MONTHLY,
+            required=False,
+            widget=forms.Select(plan),
+        )
 
     def channel_cards(self) -> list[dict[str, Any]]:
         """The three channel cards, each a radio with its title and muted line."""
@@ -841,6 +873,10 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             first = proration.prorated(rent, month, start.day, proration.days_in(month)).amount
             prorated = True
         moving_in = self.setup_total()
+        if self._deposit_off_invoice() and self.deposit_type is not None:
+            # PLAN-015d §3 (3): a deposit due on a date or in installments is its own charge.
+            deposit = self._value(f"{_setup_name(self.deposit_type)}_price")
+            moving_in -= deposit if isinstance(deposit, Decimal) else ZERO
         free = ZERO
         if first is not None:
             free = free_rent.first_month_concession(
@@ -909,10 +945,63 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         """The sum of the prices typed so far (the move-in charges, the deposit included)."""
         return _setup_total(self, self.fee_types)
 
+    def deposit_timing(self) -> deposits.DepositTiming:
+        """The deposit's timing of a valid form (PLAN-015d §3 (3))."""
+        data = self.cleaned_data
+        return deposits.DepositTiming(
+            when=data.get("deposit_when") or deposits.DepositWhen.WITH_INVOICE,
+            due_on=data.get("deposit_on"),
+            count=int(data.get("deposit_count") or 0),
+            first_due=data.get("deposit_first_due"),
+            cadence=data.get("deposit_cadence") or InstallmentCadence.MONTHLY,
+        )
+
+    def _deposit_off_invoice(self) -> bool:
+        return str(self["deposit_when"].value() or "") in (
+            deposits.DepositWhen.ON_DATE,
+            deposits.DepositWhen.INSTALLMENTS,
+        )
+
+    def _clean_deposit(self, data: dict[str, Any], started: date | None) -> None:
+        """The deposit's timing (PLAN-015d §3 (3)): a date not in the past for "Due on a
+        date"; 2 to 12 installments from a first date, not before the start date nor today,
+        for "In installments"; either needs the deposit's amount."""
+        when = data.get("deposit_when") or deposits.DepositWhen.WITH_INVOICE
+        data["deposit_when"] = when
+        if when == deposits.DepositWhen.WITH_INVOICE:
+            return
+        price = (
+            data.get(f"{_setup_name(self.deposit_type)}_price")
+            if self.deposit_type is not None
+            else None
+        )
+        if price is None:
+            self.add_error("deposit_when", deposits.DEPOSIT_REQUIRED)
+            return
+        if when == deposits.DepositWhen.ON_DATE:
+            due = data.get("deposit_on")
+            if due is None:
+                self.add_error("deposit_on", "Enter the date the deposit is due.")
+            elif due < self.today:
+                self.add_error("deposit_on", deposits.DUE_BEFORE_TODAY)
+            return
+        if data.get("deposit_count") is None:
+            self.add_error("deposit_count", installments.COUNT_RANGE)
+        first = data.get("deposit_first_due")
+        if first is None:
+            self.add_error("deposit_first_due", installments.FIRST_REQUIRED)
+        elif started is not None and first < started:
+            self.add_error("deposit_first_due", deposits.FIRST_BEFORE_START)
+        elif first < self.today:
+            self.add_error("deposit_first_due", installments.FIRST_IN_PAST)
+        if not data.get("deposit_cadence"):
+            data["deposit_cadence"] = InstallmentCadence.MONTHLY
+
     def clean(self) -> dict[str, Any]:
         self.cleaned_data["collection_status"] = CollectionStatus.ACTIVE
         data = super().clean()
         started = data.get("started_on")
+        self._clean_deposit(data, started)
         if started is not None and started > self.today:
             # PLAN-015b §9.1: checked by the active lease's rules, saved prospective.
             data["collection_status"] = CollectionStatus.PROSPECTIVE
@@ -935,6 +1024,9 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             if price is None:
                 continue
             due = data.get(f"{name}_due_date") or started
+            if fee_type == self.deposit_type:
+                # PLAN-015d §3 (3): a deposit off the move-in invoice is due on its own date.
+                due = self.deposit_timing().due_date or due
             if due is None:  # refused by clean()
                 continue
             items.append(

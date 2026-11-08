@@ -118,7 +118,10 @@ class StoreRow:
 
 
 def _open_rows(user: PortalUser, today: date) -> list[receivables.OpenBalance]:
-    return receivables.open_balances(today, operator=user.operator_id)
+    # PLAN-015d §9.4: a deposit due on a date is owed and payable like any other charge.
+    return receivables.open_balances(today, operator=user.operator_id) + receivables.dated_deposits(
+        user.operator_id
+    )
 
 
 def home(user: PortalUser, today: date) -> list[StoreRow]:

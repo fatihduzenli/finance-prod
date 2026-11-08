@@ -18,7 +18,10 @@ with no rent in force on the day gets no charge from the rent run and no message
 
 **Which charges.** The open balances (:func:`ledger.services.receivables.open_balances`):
 rent, insurance and one-off charges with something owed, an installment plan's rows each on
-its own due date (its parent is not open while the plan is live), deposits never. A charge
+its own due date (its parent is not open while the plan is live), a deposit with an invoice
+never (it rides the invoice) but a deposit due on a date by that date
+(:func:`ledger.services.receivables.dated_deposits`, PLAN-015d §3 (3)), and a deposit plan's
+installments each on its own date, as any plan's. A charge
 whose status closes it to messages (rent ``pending``, ``paid`` or ``waived``; one-off
 ``paid``, ``waived`` or ``voided``, :data:`ledger.services.messaging.CLOSED_RENT` and
 ``CLOSED_ONE_OFF``) gets nothing.
@@ -510,7 +513,7 @@ def plan(today: date) -> list[Planned]:
     lease months first (:func:`rent_months_due`), then the open charges, each with its
     outcome. :func:`queue_due` queues exactly the items that :attr:`Planned.queues`."""
     months = rent_months_due(today)
-    rows = receivables.open_balances(today)
+    rows = receivables.open_balances(today) + receivables.dated_deposits()
     autopay = on_autopay(rows)
     due = [
         (row, rule)

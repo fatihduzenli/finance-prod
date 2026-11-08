@@ -695,6 +695,8 @@ def _add_installments(acc: dict[_Key, _Acc], start: date, end: date) -> None:
             settled_on__lte=end,
             one_off_charge__category=OneOffCategory.INSTALLMENT,
         )
+        # PLAN-015d: a deposit paid in installments is money held, not revenue.
+        .exclude(**{f"{plan}__one_off_charge__fee_type__refundable": True})
         .values(
             store=F("one_off_charge__lease__store"),
             operator=Coalesce("one_off_charge__operator", "one_off_charge__lease__operator"),

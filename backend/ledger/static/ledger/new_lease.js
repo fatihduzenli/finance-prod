@@ -176,11 +176,14 @@
       text: MONTHS[day.month - 1] + " " + span + ": " + used + " of " + day.last + " days = " + money(value)
     };
   }
+  // PLAN-015d: a deposit due on a date or in installments is not on the first invoice.
+  var depositWhen = byId("id_deposit_when");
   function moveIn() {
     var sum = 0;
     form.querySelectorAll("input.js-total").forEach(function (input) {
       var row = input.closest(".movein-row");
       if (input.disabled || (row && row.hidden)) { return; }
+      if (input === deposit && depositWhen && depositWhen.value && depositWhen.value !== "with_invoice") { return; }
       var value = cents(input.value);
       if (value !== null) { sum += value; }
     });

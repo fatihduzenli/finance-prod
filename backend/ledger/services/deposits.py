@@ -36,6 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 
 from django.contrib.auth.models import User
@@ -51,6 +52,13 @@ from ledger.models import (
     DepositResolution,
     DepositResolutionKind,
     FeeType,
+    InstallmentCadence,
+    InstallmentOrigin,
+    InstallmentPlanStatus,
+    Invoice,
+    InvoiceDraftLine,
+    InvoiceDraftStatus,
+    InvoiceLineItem,
     Lease,
     OneOffCategory,
     OneOffCharge,
@@ -514,3 +522,158 @@ def _state(resolution: DepositResolution) -> dict[str, Any]:
 def lease_label(lease: Lease) -> str:
     started = day_text(lease.started_on) if lease.started_on else "no start date"
     return f"Lease {lease.store.external_label} from {started}"
+
+
+# --- Deposit timing on New lease (PLAN-015d §3 (3)) -------------------------------------------
+
+
+class DepositWhen(StrEnum):
+    """When the New lease page's deposit is collected."""
+
+    WITH_INVOICE = "with_invoice"
+    ON_DATE = "on_date"
+    INSTALLMENTS = "installments"
+
+
+DEPOSIT_WHEN_CHOICES = [
+    (DepositWhen.WITH_INVOICE.value, "With the invoice"),
+    (DepositWhen.ON_DATE.value, "On a date"),
+    (DepositWhen.INSTALLMENTS.value, "In installments"),
+]
+#: The cadences a deposit plan offers (Split's three; yearly is the settlement's).
+DEPOSIT_CADENCES = [
+    (InstallmentCadence.MONTHLY.value, "Monthly"),
+    (InstallmentCadence.BIWEEKLY.value, "Every two weeks"),
+    (InstallmentCadence.WEEKLY.value, "Weekly"),
+]
+FIRST_BEFORE_START = "The first installment cannot be before the lease's start date."
+DUE_BEFORE_TODAY = "The deposit's due date cannot be in the past."
+DEPOSIT_REQUIRED = "Enter the deposit's amount to collect it on a date or in installments."
+
+
+@dataclass(frozen=True, slots=True)
+class DepositTiming:
+    """The New lease page's choice: with the move-in invoice (the deposit is a move-in line),
+    on a date (``due_on``; its own charge, not a move-in line), or in ``count`` installments
+    from ``first_due`` every ``cadence`` (a plan of origin ``deposit``)."""
+
+    when: str = DepositWhen.WITH_INVOICE
+    due_on: date | None = None
+    count: int = 0
+    first_due: date | None = None
+    cadence: str = InstallmentCadence.MONTHLY
+
+    @property
+    def on_invoice(self) -> bool:
+        return self.when == DepositWhen.WITH_INVOICE
+
+    @property
+    def due_date(self) -> date | None:
+        """The deposit charge's own due date: the chosen date, or the first installment's."""
+        if self.when == DepositWhen.ON_DATE:
+            return self.due_on
+        if self.when == DepositWhen.INSTALLMENTS:
+            return self.first_due
+        return None
+
+
+def riding_invoice(charge: OneOffCharge) -> bool:
+    """Whether the deposit goes with an invoice (a line of a sent invoice, the invoice's own
+    charge, or a line of a draft not yet sent): such a deposit rides the invoice and gets no
+    reminder of its own (PLAN-015d §3 (3))."""
+    return (
+        InvoiceLineItem.objects.filter(one_off_charge=charge).exists()
+        or Invoice.objects.filter(one_off_charge=charge).exists()
+        or InvoiceDraftLine.objects.filter(
+            existing_charge=charge, draft__status=InvoiceDraftStatus.DRAFT
+        ).exists()
+    )
+
+
+def create_lease_with_deposit(
+    fields: Any,
+    *,
+    rent: Decimal,
+    creation_key: Any,
+    items: Any,
+    actor: User | None,
+    timing: DepositTiming,
+    billing: Any = None,
+    account: str = "",
+    today: date | None = None,
+) -> tuple[Lease, bool, list[OneOffCharge]]:
+    """The New lease save (:func:`ledger.services.one_off_charges.create_lease_with_checklist`)
+    and, in the same transaction, the deposit's plan when it is paid in installments
+    (:func:`ledger.services.installments.create_plan`, origin ``deposit``, collected as the
+    lease's channel). A refused plan raises
+    :class:`~ledger.services.one_off_charges.SetupRefused` and nothing is saved."""
+    from ledger.services import installments, leases
+
+    day = today or timezone.localdate()
+    with transaction.atomic():
+        lease, created, charges = one_off_charges.create_lease_with_checklist(
+            fields,
+            rent=rent,
+            creation_key=creation_key,
+            items=items,
+            actor=actor,
+            billing=billing,
+            account=account or leases.ACCOUNT_LATER,
+        )
+        if not created or timing.when != DepositWhen.INSTALLMENTS:
+            return lease, created, charges
+        deposit = next((charge for charge in charges if is_deposit(charge)), None)
+        if deposit is None or timing.first_due is None:
+            raise one_off_charges.SetupRefused("deposit_when", DEPOSIT_REQUIRED, None)
+        if lease.started_on is not None and timing.first_due < lease.started_on:
+            raise one_off_charges.SetupRefused(
+                "deposit_first_due", FIRST_BEFORE_START, deposit.fee_type
+            )
+        lines, refused = installments.preview(
+            deposit, timing.count, timing.first_due, timing.cadence, day
+        )
+        made = refused or installments.create_plan(
+            deposit,
+            timing.count,
+            timing.first_due,
+            timing.cadence,
+            lines,
+            actor,
+            confirmed=True,
+            today=day,
+            origin=InstallmentOrigin.DEPOSIT,
+        )
+        if not made.ok:
+            raise one_off_charges.SetupRefused(
+                f"deposit_{made.field}" if made.field else None, made.message, deposit.fee_type
+            )
+    return lease, created, charges
+
+
+def card_text(lease: Lease) -> str:
+    """The LEASE card's deposit when it is not on the move-in invoice: "$3,000.00 · due Dec 1"
+    for a dated deposit not yet collected, "$3,000.00 · 1 of 3 installments paid" for a
+    deposit plan; ``""`` otherwise (the row's usual words apply)."""
+    from finance.dates import day_short_text
+    from ledger.services import installments
+
+    deposit = (
+        OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True)
+        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .order_by("created_at")
+        .first()
+    )
+    if deposit is None:
+        return ""
+    plan = (
+        deposit.installment_plans.filter(origin=InstallmentOrigin.DEPOSIT)
+        .exclude(status=InstallmentPlanStatus.CANCELLED)
+        .first()
+    )
+    price = format_amount(Decimal(deposit.price))
+    if plan is not None:
+        progress = installments.progress(plan)
+        return f"{price} · {progress.paid_count} of {progress.count} installments paid"
+    if riding_invoice(deposit) or deposit.balance <= 0:
+        return ""
+    return f"{price} · due {day_short_text(deposit.due_date)}"

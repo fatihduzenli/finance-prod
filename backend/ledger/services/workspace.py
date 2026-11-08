@@ -94,6 +94,7 @@ from ledger.services import (
     audit,
     contacts,
     credits,
+    deposits,
     detail_cards,
     free_rent,
     installments,
@@ -426,7 +427,9 @@ def _deposit_text(lease: Lease) -> tuple[str, str]:
         state, code = "not collected", detail_cards.UNCOLLECTED
     else:
         state, code = f"{format_amount(paid)} collected", detail_cards.PARTIAL
-    return f"{format_amount(price)} · {state}", code
+    # PLAN-015d §3 (3): a deposit due on a date or in installments says so while owed.
+    timed = deposits.card_text(lease) if code != detail_cards.COLLECTED else ""
+    return timed or f"{format_amount(price)} · {state}", code
 
 
 def _next_debit_day(lease: Lease, today: date) -> date | None:
