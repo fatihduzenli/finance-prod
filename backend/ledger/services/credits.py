@@ -24,7 +24,8 @@ deposit, never revenue:
   back at the lease end is only marked reversed (``reversed_after_refund``): the money went
   out, and staff decide.
 
-:func:`balance` is the store header's "Credit $X"; :func:`held` the P&L footer's
+:func:`balance` is the credit held ("Credit $X"; the store header reads it with any
+reversed credit's line in one query, :func:`credit_row`); :func:`held` the P&L footer's
 "Credits held" (what was received by a date less what was applied or paid back by then, a
 credit reversed by then counting for nothing);
 :func:`rows_for_store` the Payments tab's list. Every change is audited (entity
@@ -41,7 +42,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.contrib.auth.models import User
-from django.db.models import Q, QuerySet, Sum
+from django.db.models import Q, QuerySet, Subquery, Sum
 from django.utils import timezone
 
 from finance.dates import day_text
@@ -389,22 +390,30 @@ def reverse_from_return(
 REVERSED_TEXT = "Credit of {amount} reversed {date}"
 
 
-def reversed_text(lease: Lease) -> str:
-    """ "Credit of $1,500.00 reversed Nov 6, 2026": the lease's latest credit a returned debit
-    reversed, while the lease is flagged Needs review (the LEASE card's Credit row,
-    PLAN-015e); ``""`` otherwise (one query when flagged)."""
-    if not lease.needs_review:
-        return ""
-    credit = (
-        LeaseCredit.objects.filter(lease=lease, reversed_at__isnull=False)
-        .order_by("-reversed_at", "-id")
-        .first()
-    )
-    if credit is None or credit.reversed_at is None:
-        return ""
-    return REVERSED_TEXT.format(
-        amount=format_amount(credit.amount), date=day_text(timezone.localdate(credit.reversed_at))
-    )
+def credit_row(lease: Lease) -> tuple[Decimal, str]:
+    """The LEASE card's Credit row (PLAN-015e), in one query: the credit held on ``lease``
+    (:func:`balance`) and, while the lease is flagged Needs review, "Credit of $1,500.00
+    reversed Nov 6, 2026" for its latest credit a returned debit reversed (``""`` otherwise).
+    The read is the lease's credits not reversed and, while flagged, its latest reversed one."""
+    wanted = Q(reversed_at__isnull=True)
+    if lease.needs_review:
+        latest = (
+            LeaseCredit.objects.filter(lease=lease, reversed_at__isnull=False)
+            .order_by("-reversed_at", "-id")
+            .values("pk")[:1]
+        )
+        wanted |= Q(pk=Subquery(latest))
+    held_total = ZERO
+    text = ""
+    rows = LeaseCredit.objects.filter(lease=lease).filter(wanted)
+    for remaining, amount, reversed_at in rows.values_list("remaining", "amount", "reversed_at"):
+        if reversed_at is None:
+            held_total += remaining
+        else:
+            text = REVERSED_TEXT.format(
+                amount=format_amount(amount), date=day_text(timezone.localdate(reversed_at))
+            )
+    return Decimal(held_total).quantize(CENT), text
 
 
 def _return_application(application: Payment, source: Payment, moment: datetime) -> None:

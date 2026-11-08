@@ -429,18 +429,36 @@ def _returned(today: date, operator: uuid.UUID | None) -> list[Item]:
     return found
 
 
-def _credits_returned(operator: uuid.UUID | None) -> list[Item]:
-    """PLAN-015e: one item per credit a returned bank debit reversed, while its lease is
-    flagged Needs review, earliest reversal first (two queries): the reversals' audit rows,
-    then their credits with their leases still flagged."""
-    rows = (
-        AuditLog.objects.filter(action=credits.REVERSED_ACTION, entity_type=credits.ENTITY)
+#: An audit row the audit-driven kinds read: its action, entity id, ``after`` and time.
+AuditRow = tuple[str, str, dict[str, Any] | None, datetime]
+
+
+def _audit_rows() -> list[AuditRow]:
+    """The audit rows the audit-driven kinds start from, earliest first, in one query shared
+    by them (PLAN-015e kept the page's query count): the manual voids that name a marked
+    invoice (:func:`_marked_paid_voids`) and the credit reversals (:func:`_credits_returned`)."""
+    return list(
+        AuditLog.objects.filter(
+            Q(
+                action=refunds.VOIDED_MANUAL_ACTION,
+                after__provider_marking=refunds.PROVIDER_MARKING_TO_UNMARK,
+            )
+            | Q(action=credits.REVERSED_ACTION, entity_type=credits.ENTITY)
+        )
         .order_by("at", "id")
-        .values_list("entity_id", "after", "at")
+        .values_list("action", "entity_id", "after", "at")
     )
+
+
+def _credits_returned(operator: uuid.UUID | None, audit: list[AuditRow]) -> list[Item]:
+    """PLAN-015e: one item per credit a returned bank debit reversed, while its lease is
+    flagged Needs review, earliest reversal first (one query past ``audit``, the shared
+    :func:`_audit_rows`, while a reversal is there): the credits with their leases still
+    flagged."""
     reversed_: dict[str, tuple[dict[str, Any], datetime]] = {}
-    for entity_id, after, at in rows:
-        reversed_.setdefault(entity_id, (after or {}, at))
+    for action, entity_id, after, at in audit:
+        if action == credits.REVERSED_ACTION:
+            reversed_.setdefault(entity_id, (after or {}, at))
     if not reversed_:
         return []
     found_credits = LeaseCredit.objects.filter(
@@ -519,20 +537,15 @@ def _redebits_pending(operator: uuid.UUID | None) -> list[Item]:
     return found
 
 
-def _marked_paid_voids(operator: uuid.UUID | None) -> list[Item]:
+def _marked_paid_voids(operator: uuid.UUID | None, audit: list[AuditRow]) -> list[Item]:
     """One item per manual payment voided while its charge's provider invoice stays marked
-    paid by it (PLAN-012f-c D3), earliest void first (three queries): the void's audit
-    rows that name a marked invoice, those invoices still shown paid, their payments."""
-    voids = (
-        AuditLog.objects.filter(
-            action=refunds.VOIDED_MANUAL_ACTION,
-            after__provider_marking=refunds.PROVIDER_MARKING_TO_UNMARK,
-        )
-        .order_by("at", "id")
-        .values_list("entity_id", "after", "at")
-    )
+    paid by it (PLAN-012f-c D3), earliest void first (two queries past ``audit``, the shared
+    :func:`_audit_rows` holding the void's audit rows that name a marked invoice): those
+    invoices still shown paid, their payments."""
     wanted: dict[str, tuple[str, datetime]] = {}
-    for entity_id, after, at in voids:
+    for action, entity_id, after, at in audit:
+        if action != refunds.VOIDED_MANUAL_ACTION:
+            continue
         invoice_id = str((after or {}).get("marked_invoice") or "")
         if invoice_id:
             wanted.setdefault(entity_id, (invoice_id, at))
@@ -1256,12 +1269,13 @@ def attention(
         leases = _leases(operator)
     if balances is None or operator is not None:
         balances = receivables.open_balances(today, operator=operator)
+    audit = _audit_rows()
     sources: list[Callable[[], list[Item]]] = [
         lambda: _overdue(today, balances),
         lambda: _returned(today, operator),
-        lambda: _credits_returned(operator),
+        lambda: _credits_returned(operator, audit),
         lambda: _redebits_pending(operator),
-        lambda: _marked_paid_voids(operator),
+        lambda: _marked_paid_voids(operator, audit),
         lambda: _installments_returned(operator),
         lambda: _split_charges_paid(operator),
         lambda: _plans_paused(today, operator),

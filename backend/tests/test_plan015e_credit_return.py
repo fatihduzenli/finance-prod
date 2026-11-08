@@ -19,13 +19,14 @@ import functools
 import importlib
 import uuid
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 import pytest
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -64,6 +65,7 @@ from ledger.services import (
     messaging,
     nsf,
     receivables,
+    refunds,
     rent_run,
     returns,
     start_date,
@@ -907,6 +909,102 @@ def test_the_lease_card_reads_the_reversal_while_flagged(told: FakeProvider) -> 
     Lease.objects.filter(pk=world.lease.pk).update(needs_review=False, review_reason="")
     page = client.get(store_page).content.decode()
     assert 'id="header-credit"' not in page and "header-credit-reversed" not in page
+
+
+def a_credit(lease: Lease, amount: str, remaining: str, reversed_at: Any = None) -> LeaseCredit:
+    return LeaseCredit.objects.create(
+        lease=lease,
+        amount=D(amount),
+        remaining=D(remaining),
+        method=PaymentMethod.ZELLE,
+        received_on=date(2026, 10, 1),
+        note="Kept as a credit.",
+        allocation_group=uuid.uuid4(),
+        reversed_at=reversed_at,
+        reversed_reason="R01: Insufficient Funds" if reversed_at is not None else "",
+    )
+
+
+def test_the_credit_rows_data_costs_one_query_and_names_the_latest_reversal() -> None:
+    """The LEASE card's Credit row (the credit held and the reversed credit's line) is one
+    read, flagged or not, however many credits the lease holds (Fable's gate on PLAN-015e)."""
+    lease = make_lease(started_on=date(2026, 1, 1))
+    a_credit(lease, "100.00", "40.00")
+    a_credit(lease, "25.00", "25.00")
+    a_credit(lease, "700.00", "0.00", reversed_at=timezone.make_aware(datetime(2026, 10, 2)))
+    a_credit(lease, "900.00", "0.00", reversed_at=timezone.make_aware(datetime(2026, 11, 3)))
+    a_credit(lease, "800.00", "0.00", reversed_at=timezone.make_aware(datetime(2026, 10, 9)))
+
+    def read() -> tuple[tuple[Decimal, str], int]:
+        fresh = Lease.objects.get(pk=lease.pk)
+        with CaptureQueriesContext(connection) as queries:
+            row = credits.credit_row(fresh)
+        return row, len(queries)
+
+    assert read() == ((D("65.00"), ""), 1)
+    Lease.objects.filter(pk=lease.pk).update(needs_review=True, review_reason="credit_returned")
+    assert read() == ((D("65.00"), "Credit of $900.00 reversed Nov 3, 2026"), 1)
+    assert credits.credit_row(Lease.objects.get(pk=lease.pk))[0] == credits.balance(lease)
+    # A lease with no credit at all: $0.00, no line, still one read.
+    bare = make_lease(operator=lease.operator, started_on=date(2026, 1, 1))
+    Lease.objects.filter(pk=bare.pk).update(needs_review=True)
+    bare = Lease.objects.get(pk=bare.pk)
+    with CaptureQueriesContext(connection) as queries:
+        assert credits.credit_row(bare) == (D("0.00"), "")
+    assert len(queries) == 1
+
+
+def test_the_attention_reversals_share_the_void_audit_read() -> None:
+    """The reversals' audit rows come in the one audit read the marked-paid voids already made
+    (so the dashboard and the operator page keep their query budgets), and each kind takes
+    only its own rows."""
+    lease = make_lease(started_on=date(2026, 1, 1))
+    credit = a_credit(lease, "200.00", "0.00", reversed_at=timezone.now())
+    AuditLog.objects.create(
+        action=credits.REVERSED_ACTION,
+        entity_type=credits.ENTITY,
+        entity_id=str(credit.pk),
+        before=None,
+        after={"applications": [], "debit_date": "2026-10-01", "return_code": "R01"},
+    )
+    # Not read: another lease_credit action, and a void that names no marked invoice.
+    AuditLog.objects.create(
+        action=credits.CREATED_ACTION, entity_type=credits.ENTITY, entity_id=str(credit.pk)
+    )
+    AuditLog.objects.create(
+        action=refunds.VOIDED_MANUAL_ACTION,
+        entity_type="payment",
+        entity_id=str(uuid.uuid4()),
+        after={"provider_marking": "none"},
+    )
+    void = AuditLog.objects.create(
+        action=refunds.VOIDED_MANUAL_ACTION,
+        entity_type="payment",
+        entity_id=str(uuid.uuid4()),
+        after={
+            "provider_marking": refunds.PROVIDER_MARKING_TO_UNMARK,
+            "marked_invoice": str(uuid.uuid4()),
+        },
+    )
+    with CaptureQueriesContext(connection) as queries:
+        rows = attention._audit_rows()
+    assert len(queries) == 1
+    assert [(action, entity_id) for action, entity_id, _, _ in rows] == [
+        (credits.REVERSED_ACTION, str(credit.pk)),
+        (refunds.VOIDED_MANUAL_ACTION, void.entity_id),
+    ]
+    # The void's row is no reversal: no credit item from it, and no void item from the
+    # reversal (its invoice is not there, so the void kind reads one more query and stops).
+    Lease.objects.filter(pk=lease.pk).update(needs_review=True)
+    [item] = attention._credits_returned(None, rows)
+    assert item.kind == attention.CREDIT_RETURNED and item.amount == D("200.00")
+    assert attention._marked_paid_voids(None, rows) == []
+    assert (
+        attention._credits_returned(
+            None, [row for row in rows if row[0] != credits.REVERSED_ACTION]
+        )
+        == []
+    )
 
 
 def test_the_payments_tab_shows_the_held_row_the_reversal_and_the_returned_application(

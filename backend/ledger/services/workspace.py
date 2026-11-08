@@ -7,7 +7,8 @@
   (:func:`ledger.services.leases.live_schedules`, moved past a split month by
   :func:`ledger.services.leases.autopay_move`), the **open balance** (the store's rows of
   :func:`ledger.services.receivables.open_balances`, for every operator the store's
-  leases bill), the **credit** held (:func:`ledger.services.credits.balance`), the **next
+  leases bill), the **credit** held (:func:`ledger.services.credits.credit_row`, with a
+  reversed credit's line, PLAN-015e), the **next
   scheduled payment** (the earliest of the next rent debit, the next one-off autopay due
   date, the next installment due and the next re-debit of a returned payment) and the
   **open promise** (:func:`ledger.services.contacts.open_promise`);
@@ -267,7 +268,7 @@ class Header:
     #: PLAN-015d: Change start date is offered for ``status_lease`` (:func:`changeable_start`).
     start_changeable: bool = False
     #: PLAN-015e: "Credit of $1,500.00 reversed Nov 6, 2026" while the lease is flagged after
-    #: a returned debit reversed its credit (:func:`ledger.services.credits.reversed_text`).
+    #: a returned debit reversed its credit (:func:`ledger.services.credits.credit_row`).
     credit_reversed: str = ""
 
 
@@ -494,6 +495,7 @@ def _header(
     schedules = leases.live_schedules(lease)
     moved = leases.autopay_move(lease, now)
     deposit_text, deposit_code = _deposit_text(lease)
+    credit, credit_reversed = credits.credit_row(lease)
     return Header(
         lease=lease,
         operator=lease.operator,
@@ -501,7 +503,7 @@ def _header(
         autopay=_autopay_state(schedules),
         autopay_moved=moved.text if moved is not None else "",
         open_balance=balance,
-        credit=credits.balance(lease),
+        credit=credit,
         next_payment=_next_payment(lease, schedules, moved, today, now),
         open_promise=contacts.open_promise(lease.operator, lease),
         open_count=open_count,
@@ -516,7 +518,7 @@ def _header(
         next_insurance=_next_insurance(lease, today),
         collections=detail_cards.lease_collections(lease, today),
         account=detail_cards.lease_account(lease),
-        credit_reversed=credits.reversed_text(lease),
+        credit_reversed=credit_reversed,
         **_status_fields(lease),
     )
 
