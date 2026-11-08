@@ -512,8 +512,9 @@ def _deposit(lease: Any, operator: Any, paid: str) -> None:
     [
         ("3000.00", "$3,000.00 · collected", "side-paid"),
         ("1000.00", "$3,000.00 · $1,000.00 collected", "side-partial"),
-        # PLAN-015d §3 (3): a deposit off any invoice, nothing collected, shows its due date.
-        ("0.00", "$3,000.00 · due Sep 1", "side-unpaid"),
+        # PLAN-015d: only a deposit marked dated at creation shows its due date (767d749); this
+        # one is a plain setup charge, so, uncollected, it keeps the usual words.
+        ("0.00", "$3,000.00 · not collected", "side-unpaid"),
     ],
 )
 def test_the_deposit_row_is_coloured_by_its_state(paid: str, text: str, tone: str) -> None:
