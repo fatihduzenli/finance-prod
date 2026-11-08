@@ -74,7 +74,7 @@ def test_the_summary_agrees_with_the_concession_the_charge_gets(today: date) -> 
     from ledger.models import LeaseRentHistory, RentSource
 
     LeaseRentHistory.objects.create(
-        lease=lease, amount=leases_rent, effective_from=lease.started_on, source=RentSource.STAFF
+        lease=lease, amount=leases_rent, effective_from=date(2026, 11, 15), source=RentSource.STAFF
     )
     first = D("1066.67")
     assert free_rent.concession_for(lease, date(2026, 11, 1), first)[0] == (
@@ -241,7 +241,7 @@ def test_the_csvs_carry_the_concessions_columns(admin: Client) -> None:
     rent(lease, MAY, "3000.00", concession=D("1000.00"))
     query = {"from": "2026-05", "to": "2026-05"}
     response = admin.get("/reports/pnl/export.csv", query)
-    body = b"".join(response.streaming_content).decode().lstrip("\ufeff")
+    body = b"".join(response.streaming_content).decode().lstrip("\ufeff")  # type: ignore[attr-defined]
     pnl_rows = list(csv.reader(io.StringIO(body)))
     header = pnl_rows[0]
     assert header[4:8] == [

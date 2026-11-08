@@ -60,7 +60,7 @@ CANNOT_REVERSE = (
 _MONEY = models.DecimalField(decimal_places=2, max_digits=12)
 
 
-def _balance(expression: models.Expression | models.CombinedExpression) -> models.GeneratedField:
+def _balance(expression: models.Case) -> models.GeneratedField:
     return models.GeneratedField(db_persist=True, expression=expression, output_field=_MONEY)
 
 

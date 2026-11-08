@@ -132,10 +132,10 @@ def _month_amount(lease: Lease, month: date) -> Decimal:
     """What ``month`` bills in all (both debits of a twice-monthly lease): the rent in effect
     on the first debit's date, prorated as :func:`ledger.services.rent_run.first_month`;
     zero when no rent is in effect."""
-    from ledger.services import rent_run  # rent_run uses this module when it makes a charge
+    from ledger.services import leases, rent_run  # rent_run uses this module
 
     debit_day = lease.debit_day or 1
-    rent = rent_run.rent_on(lease, rent_run.debit_date(lease, month, debit_day))
+    rent = leases.rent_on(lease, rent_run.debit_date(lease, month, debit_day))
     if rent is None:
         return ZERO
     return Decimal(rent_run.first_month(lease, month, Decimal(rent.amount)).amount)

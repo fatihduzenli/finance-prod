@@ -329,7 +329,7 @@ def test_the_deposit_moves_only_when_ticked_and_only_its_future_installments(
         move_deposit=True,
     )
     assert fresh(deposit).due_date == date(2026, 10, 25)
-    audit = AuditLog.objects.filter(action=start_date.CHANGED_ACTION).latest("at")
+    audit = AuditLog.objects.get(action=start_date.CHANGED_ACTION, after__new_start="2026-10-25")
     assert audit.after["deposit_moved"] is True
 
 

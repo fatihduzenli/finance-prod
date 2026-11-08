@@ -226,7 +226,7 @@ def _new_amount(lease: Lease, month: date, new_start: date) -> Decimal | None:
         if len(rows) == 1:
             rent: Decimal | None = Decimal(rows[0].amount)
         else:
-            found = rent_run.rent_on(lease, rent_run.debit_date(lease, month, days[0]))
+            found = leases.rent_on(lease, rent_run.debit_date(lease, month, days[0]))
             rent = Decimal(found.amount) if found is not None else None
         if rent is None:
             return None

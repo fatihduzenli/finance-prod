@@ -33,6 +33,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -330,16 +331,17 @@ def after_void(
                 after={"status": locked.status, "note": note, **context},
             )
     lease: Lease | None = None
-    for charge in rents:
-        lease = charge.lease
-        start = lease.started_on.replace(day=1) if lease.started_on is not None else None
-        words = {"invoice_number": invoice.invoice_number}
-        if rent == RENT_FOLLOW_START and start is not None and charge.period_month >= start:
+    for rent_charge in rents:
+        lease = rent_charge.lease
+        started = lease.started_on
+        start = started.replace(day=1) if started is not None else None
+        words: dict[str, Any] = {"invoice_number": invoice.invoice_number}
+        if rent == RENT_FOLLOW_START and start is not None and rent_charge.period_month >= start:
             # The new start month re-priced; a month after it (the old start month of a
             # start moved earlier) becomes a full month.
-            rent_run.reamount_start_month(charge, actor, words)
+            rent_run.reamount_start_month(rent_charge, actor, words)
         else:
-            rent_run.void_charge(charge, actor, words)
+            rent_run.void_charge(rent_charge, actor, words)
     if lease is None:
         draft = InvoiceDraft.objects.filter(sent_invoice=invoice).select_related("lease").first()
         lease = draft.lease if draft is not None else None

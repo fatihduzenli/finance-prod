@@ -242,9 +242,12 @@ def test_the_portal_offers_a_dated_deposit_as_an_open_charge(admin: Client, toda
     lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
     assert lease is not None
     deposit = the_deposit(lease)
+    operator_id = lease.operator_id
 
     class User:
-        operator_id = lease.operator_id
+        pass
+
+    User.operator_id = operator_id  # type: ignore[attr-defined]
 
     rows = portal_services._open_rows(User(), today)  # type: ignore[arg-type]
     assert [row.balance for row in rows if row.charge_id == deposit.pk] == [D("3000.00")]
