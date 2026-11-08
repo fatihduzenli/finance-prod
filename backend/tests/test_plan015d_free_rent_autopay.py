@@ -1,0 +1,144 @@
+"""PLAN-015d, Fable's finding 2: free rent and autopay. A rent schedule debits a fixed amount
+every month, so it never debits a month the free period touches: a new schedule starts on the
+first debit day of the month after the free period's last month; a partly free month is
+collected at its net by the invoice and reminder path (rule B, as without autopay) and the
+LEASE card says so; a change of the free period on Edit lease flags the live schedules."""
+
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+from typing import Any
+
+import pytest
+
+from accounts.roles import Role
+from ledger.models import FreeRentFrom, MessageRule, RentChargeStatus
+from ledger.services import free_rent, receivables, reminders, rent_run
+from ledger.services import leases as service
+from payments.fake import FakeProvider
+from tests.test_lease_services import (
+    CUSTOMER,
+    RENT,
+    creates,
+    edit,
+    enable,
+    fake,
+    make_lease,
+    method,
+)
+from tests.test_operator_views import client_for
+
+pytestmark = pytest.mark.django_db
+
+__all__ = ["fake"]  # the fixture, used by name
+D = Decimal
+OCTOBER_1 = date(2026, 10, 1)
+
+
+def a_lease_on_autopay(fake: FakeProvider, days: int) -> Any:
+    """A lease started 1 Oct 2026 (rent $1,500.00, debit day 15) with ``days`` of free rent
+    from the move-in date, autopay enabled on 1 Oct 2026 at 15:00 UTC."""
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(
+        started_on=OCTOBER_1, free_rent_days=days, free_rent_from=FreeRentFrom.MOVE_IN
+    )
+    assert enable(lease).action is service.AutopayAction.ENABLED
+    return lease
+
+
+def test_a_free_first_month_starts_autopay_on_the_second_months_debit_day(
+    fake: FakeProvider,
+) -> None:
+    lease = a_lease_on_autopay(fake, 31)  # 1–31 Oct free in full
+    assert free_rent.autopay_from(lease) == date(2026, 11, 1)
+    [schedule] = creates(fake)
+    # Without free rent the first debit is 15 Oct (test_lease_services); now 15 Nov.
+    assert schedule.rule == "DTSTART=20261115T120000Z;FREQ=MONTHLY"
+    assert schedule.amounts.total == RENT
+
+
+def test_without_free_rent_autopay_starts_on_the_next_debit_day(fake: FakeProvider) -> None:
+    lease = a_lease_on_autopay(fake, 0)
+    assert free_rent.autopay_from(lease) is None
+    assert [row.rule for row in creates(fake)] == ["DTSTART=20261015T120000Z;FREQ=MONTHLY"]
+
+
+def test_a_partly_free_month_gets_no_schedule_debit_and_a_rule_b_reminder_of_the_net(
+    fake: FakeProvider,
+) -> None:
+    lease = a_lease_on_autopay(fake, 45)  # 1 Oct – 14 Nov: November partly free
+    [schedule] = creates(fake)
+    # Neither October (free) nor November (partly free) is debited: December is the first.
+    assert schedule.rule == "DTSTART=20261215T120000Z;FREQ=MONTHLY"
+    assert not free_rent.debited_by_autopay(lease, date(2026, 11, 1))
+    assert free_rent.debited_by_autopay(lease, date(2026, 12, 1))
+    # Three days before 15 Nov: B with the net (14 of 30 days free: $700.00 off $1,500.00).
+    found = {
+        month.lease.pk: (rule.code, month.amount)
+        for month, rule in reminders.rent_months_due(date(2026, 11, 12))
+    }
+    assert found[lease.pk] == (MessageRule.B, D("800.00"))
+    # The month's charge is made with its concession and is not counted as on autopay: it
+    # takes C, D and E as any charge not debited.
+    charge, _made = rent_run.create_month(lease, date(2026, 11, 1), None)
+    assert (charge.amount_due, charge.concession, charge.status) == (
+        D("1500.00"),
+        D("700.00"),
+        RentChargeStatus.DUE,
+    )
+    late = charge.due_on.toordinal() + reminders.DAY_C
+    rows = [row for row in receivables.open_balances(date.fromordinal(late))]
+    row = next(row for row in rows if row.charge_id == charge.pk)
+    assert reminders.on_autopay([row]) == set()
+    rule = reminders.rule_for(row, date.fromordinal(late))
+    assert rule is not None and rule.code == MessageRule.C
+
+
+def test_a_free_month_gets_no_reminder_and_a_debited_month_gets_a(fake: FakeProvider) -> None:
+    lease = a_lease_on_autopay(fake, 45)
+    october = {month.lease.pk for month, _rule in reminders.rent_months_due(date(2026, 10, 12))}
+    assert lease.pk not in october  # free in full: nothing owed, nothing debited
+    december = {
+        month.lease.pk: (rule.code, month.amount)
+        for month, rule in reminders.rent_months_due(date(2026, 12, 12))
+    }
+    assert december[lease.pk] == (MessageRule.A, RENT)
+
+
+def test_the_lease_card_says_a_partly_free_month_is_invoiced(
+    fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lease = a_lease_on_autopay(fake, 45)
+    assert free_rent.card_note(lease, date(2026, 11, 5), autopay=True) == (
+        free_rent.NO_AUTOPAY_DEBIT
+    )
+    assert free_rent.card_note(lease, date(2026, 11, 5), autopay=False) == ""
+    assert free_rent.card_note(lease, date(2026, 10, 5), autopay=True) == ""  # free in full
+    assert free_rent.card_note(lease, date(2026, 12, 5), autopay=True) == ""  # debited
+    monkeypatch.setattr(
+        "django.utils.timezone.localdate", lambda *args, **kwargs: date(2026, 11, 5)
+    )
+    page = client_for(Role.ADMIN, "admin-free-autopay")[0].get(f"/stores/{lease.store_id}/")
+    text = page.content.decode()
+    assert 'id="header-free-rent-note"' in text
+    assert "Free rent: no autopay debit this month; the net is invoiced" in text
+
+
+def test_changing_the_free_period_flags_the_live_schedule(fake: FakeProvider) -> None:
+    lease = a_lease_on_autopay(fake, 0)
+    [row] = service.live_schedules(lease)
+    assert not row.needs_review
+    edit(lease, RENT, free_rent_days=30, free_rent_from=FreeRentFrom.NEXT_MONTH)
+    [row] = service.live_schedules(lease)
+    assert (row.needs_review, row.amount) == (True, RENT)
+    assert service.schedule_review_message(lease, row, date(2026, 10, 2)) == (
+        service.SCHEDULE_DIFFERS
+    )
+
+
+def test_an_unchanged_free_period_does_not_flag_the_schedule(fake: FakeProvider) -> None:
+    lease = a_lease_on_autopay(fake, 31)
+    edit(lease, RENT, free_rent_days=31, free_rent_from=FreeRentFrom.MOVE_IN)
+    [row] = service.live_schedules(lease)
+    assert not row.needs_review

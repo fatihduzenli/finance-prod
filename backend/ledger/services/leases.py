@@ -399,7 +399,24 @@ def debit_instant(day: date) -> datetime:
 
 def schedule_rule(day: int, now: datetime) -> str:
     """``DTSTART=YYYYMMDDTHHMMSSZ;FREQ=MONTHLY`` (spec: DTSTART in the future, that format)."""
-    return f"DTSTART={next_debit_at(day, now):%Y%m%dT%H%M%SZ};FREQ=MONTHLY"
+    return schedule_rule_at(next_debit_at(day, now))
+
+
+def schedule_rule_at(starts: datetime) -> str:
+    """:func:`schedule_rule` for a known first debit."""
+    return f"DTSTART={starts:%Y%m%dT%H%M%SZ};FREQ=MONTHLY"
+
+
+def first_debit_floor(lease: Lease, now: datetime) -> datetime:
+    """The moment a rent schedule's first debit must come after: ``now``, or the start of the
+    first month the lease's free period leaves for autopay when that is later
+    (:func:`ledger.services.free_rent.autopay_from`; Fable's finding 2 on PLAN-015d)."""
+    from ledger.services import free_rent  # free_rent reads this module's rent rows
+
+    first = free_rent.autopay_from(lease)
+    if first is None:
+        return now
+    return max(now, datetime(first.year, first.month, 1, tzinfo=UTC))
 
 
 def is_large_debit(amount: Decimal) -> bool:
@@ -524,12 +541,15 @@ def debit_plan(lease: Lease, now: datetime) -> list[PlannedDebit]:
     ``DTSTART``, with the date of any later rent change (QA owner's decision).
 
     A debit with no rent in effect on its first date is left out; :func:`enable_autopay`
-    refuses the lease in that case.
+    refuses the lease in that case. A free period moves the first debit to the first month
+    it leaves whole (:func:`first_debit_floor`): a month free in full is never debited, a
+    month partly free is invoiced at its net.
     """
     days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
     plan: list[PlannedDebit] = []
+    floor = first_debit_floor(lease, now)
     for seq, day in enumerate(days, start=1):
-        starts = next_debit_at(day, now)
+        starts = next_debit_at(day, floor)
         row = rent_on(lease, starts.date())
         if row is None:
             continue
@@ -1499,6 +1519,9 @@ def update_lease(
         lease = Lease.objects.select_for_update().get(pk=lease_id)
         before = _snapshot(lease)
         free_before = _free_rent_terms(lease)
+        from ledger.services import free_rent  # free_rent reads the rent run's amounts
+
+        period_before = free_rent.period(lease)
         old_operator_id = lease.operator_id
         for name, value in _editable(fields).items():
             setattr(lease, name, value)
@@ -1518,13 +1541,16 @@ def update_lease(
             LeaseRentHistory.objects.create(
                 lease=lease, amount=rent, effective_from=starts, source=RentSource.STAFF
             )
-        _flag_stale_schedules(lease, rent, operator_changed=lease.operator_id != old_operator_id)
+        _flag_stale_schedules(
+            lease,
+            rent,
+            operator_changed=lease.operator_id != old_operator_id,
+            free_rent_changed=free_rent.period(lease) != period_before,
+        )
         after = _snapshot(lease)
         if after != before:
             _audit(actor, "lease.updated", lease, before, after)
         if _free_rent_terms(lease) != free_before or after["started_on"] != before["started_on"]:
-            from ledger.services import free_rent  # free_rent reads the rent run's amounts
-
             if _free_rent_terms(lease) != free_before:
                 _audit(actor, FREE_RENT_SET_ACTION, lease, free_before, _free_rent_terms(lease))
             # The concession of every month not billed yet follows the new period (§3 (2)).
@@ -2261,12 +2287,18 @@ def move_autopay(
                     "plan": str(plan_id),
                     "seq": number,
                     "skipped": skipped.isoformat() if number == seq else None,
-                    "starts": next_debit_at(debit.debit_day, start_from[number]).isoformat(),
+                    "starts": (
+                        debit.starts or next_debit_at(debit.debit_day, start_from[number])
+                    ).isoformat(),
                     "row": str(created.pk),
                     "schedule": mask_identifier(schedule_ref(created)),
                 },
             )
-    resumes = next_debit_at(planned[seq].debit_day, start_from[seq]) if seq in planned else None
+    resumes = (
+        planned[seq].starts or next_debit_at(planned[seq].debit_day, start_from[seq])
+        if seq in planned
+        else None
+    )
     when = day_text(resumes.date()) if resumes is not None else "-"
     return AutopayOutcome(AutopayAction.MOVED, AUTOPAY_MOVED.format(date=when))
 
@@ -2343,7 +2375,11 @@ def _create_one(
                 _schedule_snapshot(row, adopted[0].external_id),
             )
             return None
-    rule = schedule_rule(debit.debit_day, now)
+    rule = (
+        schedule_rule_at(debit.starts)
+        if debit.starts is not None
+        else schedule_rule(debit.debit_day, now)
+    )
     line = LineItem(f"Rent, store {lease.store.external_label}", Decimal(1), debit.amount)
     schedule = ScheduleInput(
         customer_external_id=customer,
@@ -2420,8 +2456,12 @@ def _method_refusal(method: PaymentMethodRecord | None) -> str:
     return ""
 
 
-def _flag_stale_schedules(lease: Lease, rent: Decimal, *, operator_changed: bool) -> None:
-    """D5: flag every linked schedule whose day or amount no longer matches the lease."""
+def _flag_stale_schedules(
+    lease: Lease, rent: Decimal, *, operator_changed: bool, free_rent_changed: bool = False
+) -> None:
+    """D5: flag every linked schedule whose day or amount no longer matches the lease; a
+    change of the free period flags them all (PLAN-015d: the months a schedule may debit
+    moved, :func:`ledger.services.free_rent.autopay_from`)."""
     planned = {debit.seq: debit for debit in planned_debits(lease, rent)}
     for row in live_schedules(lease):
         if row.needs_review or not schedule_ref(row):
@@ -2429,6 +2469,7 @@ def _flag_stale_schedules(lease: Lease, rent: Decimal, *, operator_changed: bool
         debit = planned.get(row.seq)
         if (
             operator_changed
+            or free_rent_changed
             or debit is None
             or debit.debit_day != row.debit_day
             or debit.amount != row.amount

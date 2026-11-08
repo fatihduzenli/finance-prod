@@ -21,6 +21,14 @@ The text, on the charge and the invoice's discount line: "Free rent per lease ag
 charge not billed yet (due, nothing paid or pending, no invoice, no installment plan) is
 recomputed; a billed charge keeps its own and is named in the result (the page shows the
 warning). Local data only, never a provider call.
+
+**Autopay** (Fable's finding 2 on PLAN-015d). A provider schedule debits a fixed amount every
+month, so it never debits a month the free period touches: a month free in full has nothing
+to debit, and a month partly free is collected at its net by the invoice and reminder path
+(rule B, as for a lease not on autopay). :func:`autopay_from` is the first month a schedule
+may debit — the month after the last month of the free period — and
+:func:`ledger.services.leases.debit_plan` starts a new schedule (its ``DTSTART``) on that
+month's debit day at the earliest; :func:`debited_by_autopay` is what the reminders read.
 """
 
 from __future__ import annotations
@@ -50,6 +58,8 @@ CARD_TEXT = "{days} days, {start} – {end}"
 CARD_TEXT_ONE = "1 day, {start}"
 RECOMPUTED_ACTION = "rent_charge.concession_recomputed"
 SET_ACTION = "lease.free_rent_set"
+#: The LEASE card's words while a partly free month is current on a lease on autopay.
+NO_AUTOPAY_DEBIT = "Free rent: no autopay debit this month; the net is invoiced"
 #: The Edit lease warning: billed months keep the concession they were billed with.
 BILLED_KEPT = "{months} already billed: {it} keeps the free rent it was billed with."
 
@@ -88,6 +98,33 @@ def card_text(lease: Lease) -> str:
         start=day_short_text(span[0]),
         end=day_short_text(span[1]),
     )
+
+
+def autopay_from(lease: Lease) -> date | None:
+    """The first month (its 1st) a rent schedule may debit: the month after the last month
+    the free period touches; ``None`` without free days (any month)."""
+    span = period(lease)
+    if span is None:
+        return None
+    return _next_month(span[1].replace(day=1))
+
+
+def debited_by_autopay(lease: Lease, month: date) -> bool:
+    """Whether ``month``'s rent may be debited by a rent schedule (see the module docstring):
+    not while the free period touches the month."""
+    first = autopay_from(lease)
+    return first is None or month >= first
+
+
+def card_note(lease: Lease, today: date, *, autopay: bool) -> str:
+    """:data:`NO_AUTOPAY_DEBIT` while ``today``'s month is partly free on a lease on autopay
+    (its net is invoiced, not debited), else ``""``."""
+    span = period(lease)
+    month = today.replace(day=1)
+    if not autopay or span is None or debited_by_autopay(lease, month):
+        return ""
+    free, billed = _free_days(lease, month, span)
+    return NO_AUTOPAY_DEBIT if 0 < free < billed else ""
 
 
 def first_month_concession(
