@@ -367,9 +367,9 @@ def test_the_preview_writes_nothing_and_rolls_back_a_helper_that_writes(
     assert written() == before
     original = reminders.plan
 
-    def writing_plan(today: date) -> list[reminders.Planned]:
+    def writing_plan(today: date, **kwargs: Any) -> list[reminders.Planned]:
         AuditLog.objects.create(action="test.write", entity_type="test", entity_id="x")
-        return original(today)
+        return original(today, **kwargs)
 
     monkeypatch.setattr(reminders, "plan", writing_plan)
     found = outbox_preview.preview(TODAY)
@@ -385,7 +385,7 @@ def test_an_item_the_planner_finds_on_two_days_is_listed_once(
     clock(at(TODAY))
     first_day = [item for item in reminders.plan(TODAY) if item.queues]
     assert first_day
-    monkeypatch.setattr(reminders, "plan", lambda today: first_day)
+    monkeypatch.setattr(reminders, "plan", lambda today, **kwargs: first_day)
     rows = outbox_preview.preview(TODAY).rows
     assert len(rows) == len(first_day)
 
@@ -489,6 +489,29 @@ def test_the_pages_queries_do_not_grow_with_its_rows(clock: Any) -> None:
     # The budget: the planner's own reads for each of the 30 days (fewer on a day with no
     # rule) and the page's; nothing per row. 174 on sqlite on 2026-11-01.
     assert len(one) <= 180
+
+
+def test_previewing_28_days_reads_the_dated_deposits_once(
+    clock: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fable's review of PLAN-015d: the dated deposits do not depend on the day, so the
+    preview reads them once for its window; the daily job's plan reads them once too."""
+    from ledger.services import receivables, reminders
+
+    world()
+    clock(at(TODAY))
+    reads: list[object] = []
+    original = receivables.dated_deposits
+
+    def counted(*args: Any, **kwargs: Any) -> Any:
+        reads.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(receivables, "dated_deposits", counted)
+    outbox_preview.preview(TODAY, days=28)
+    assert len(reads) == 1
+    reminders.plan(TODAY)
+    assert len(reads) == 2
 
 
 def test_the_command_prints_the_same_rows_as_tab_separated_text_without_addresses(

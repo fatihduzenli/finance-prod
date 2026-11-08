@@ -518,12 +518,18 @@ def _billing_emails(items: list[Planned]) -> dict[uuid.UUID, str]:
     return dict(LeaseBilling.objects.filter(lease_id__in=ids).values_list("lease_id", "email"))
 
 
-def plan(today: date) -> list[Planned]:
+def plan(
+    today: date, *, deposits: Sequence[receivables.OpenBalance] | None = None
+) -> list[Planned]:
     """What the rules due ``today`` would queue (the module docstring), writing nothing: the
     lease months first (:func:`rent_months_due`), then the open charges, each with its
-    outcome. :func:`queue_due` queues exactly the items that :attr:`Planned.queues`."""
+    outcome. :func:`queue_due` queues exactly the items that :attr:`Planned.queues`.
+    ``deposits`` are the dated deposits (:func:`ledger.services.receivables.dated_deposits`,
+    which do not depend on the day), read here when not given: the Outbox preview reads them
+    once for all its days."""
     months = rent_months_due(today)
-    rows = receivables.open_balances(today) + receivables.dated_deposits()
+    dated = list(deposits) if deposits is not None else receivables.dated_deposits()
+    rows = receivables.open_balances(today) + dated
     autopay = on_autopay(rows)
     due = [
         (row, rule)
