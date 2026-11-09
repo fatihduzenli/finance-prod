@@ -404,9 +404,10 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .contact-text { white-space: pre-wrap; }
 .contact-meta { color: var(--muted); font-size: var(--fs-sm); }
 .contact-correction, .contact-deleted-note, .contact-closes { margin-top: var(--space-1); }
-/* PLAN-015f §3.1: at most two row menus (.menu-sm: "Outcome ▾" and "⋯"), on one line,
-   their lists opening under them aligned to the right edge. */
-.contact-actions { display: flex; flex: 0 0 auto; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; }
+.contact-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 50%; }
+/* PLAN-015f §3.1: a contact entry's at most two row menus (.menu-sm: "Outcome ▾" and "⋯")
+   stay on one line, their lists opening under them aligned to the right edge. */
+.contact-menus { flex-wrap: nowrap; max-width: none; }
 .menu-sm ul { left: auto; right: 0; }
 .contact-actions form { margin: 0; }
 .contact-deleted .contact-body { color: var(--muted); }
@@ -1804,7 +1805,7 @@ p.detail-more-notes { padding-left: 0; }
   .menu ul { position: static; margin-top: var(--space-1); box-shadow: none; }
   /* A row menu (.menu-sm) keeps its list over the row, at the right edge: in the flow it
      would squeeze the entry's text (PLAN-015f §3.1). */
-  .contact-actions .menu-sm ul { position: absolute; }
+  .contact-menus .menu-sm ul { position: absolute; }
   /* A list's card gives way to its rows' cards. */
   .table-card { padding: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
   .table-card > p, .table-card > .card-header, .table-card > h2 { padding: 0 0 var(--space-3); }

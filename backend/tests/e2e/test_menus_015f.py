@@ -139,6 +139,9 @@ def test_the_entry_menus_stay_on_one_line_on_the_phone(
     assert outcome["y"] == pytest.approx(more["y"], abs=1)
     assert outcome["x"] + outcome["width"] <= more["x"]
     assert more["x"] + more["width"] <= PHONE["width"]
+    # The entry's text keeps a readable column beside the menus (about a note's, 100 px+).
+    text = page.locator(f"#contact-{promise.pk} .contact-body").bounding_box()
+    assert text is not None and text["width"] >= 100
     page.locator(f"#outcome-{promise.pk} summary").click()
     listed = page.locator(f"#outcome-{promise.pk} ul").bounding_box()
     assert listed is not None

@@ -345,7 +345,8 @@ def test_the_contact_tabs_show_each_entry_with_its_avatar() -> None:
         promise_entry = section(log, f'id="contact-{pledged.pk}"', "</li>")
         assert '<span class="avatar avatar-pending" aria-hidden="true">P</span>' in promise_entry
         assert '<strong class="contact-kind">Promise to pay</strong>' in promise_entry
-        assert '<div class="contact-actions">' in promise_entry  # Kept, Reschedule, Broken
+        # Outcome ▾ and ⋯ (PLAN-015f §3.1)
+        assert '<div class="contact-actions contact-menus">' in promise_entry
         call_entry = section(log, f'id="contact-{called.pk}"', "</li>")
         assert called.kind == ContactKind.CALL
         assert '<span class="avatar avatar-neutral" aria-hidden="true">C</span>' in call_entry
