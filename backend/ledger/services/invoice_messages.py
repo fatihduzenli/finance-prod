@@ -20,11 +20,10 @@ goes.
 
 **The values.** An invoice's: the operator, the store, the number, the balance due, the due
 date, ``{pay_link}`` (the portal's Pay page of the store, else a signed statement link, as
-every message's), ``{provider_pay_link}`` (the processor's hosted page of the invoice,
-:func:`payments.hosted_invoice_url`; every line of the template naming it is left out when the
-invoice has none), the support e-mail and the company's name. A receipt's: the operator, the
-store, the entry's amount, the day it was paid and what it paid (``{applied_to}``: the invoices'
-numbers, else the charges' words).
+every message's), the support e-mail and the company's name. The processor's hosted invoice
+page is not linked: it offered card payment (PLAN-015g §3B, docs/CLAUDE.md Rule 1). A receipt's:
+the operator, the store, the entry's amount, the day it was paid and what it paid
+(``{applied_to}``: the invoices' numbers, else the charges' words).
 
 **Receipts.** One receipt per payment entry (``ledger.services.pdf.receipt.entry_of``): the
 message is about the entry's first row, so any row of it finds the one message and queues
@@ -87,18 +86,11 @@ RECEIPT_METHODS: frozenset[str] = frozenset(
 INVOICE_VOID = "InvoiceVoid"
 NO_RECEIPT = "NoReceipt"
 NO_LEASE = "An invoice or receipt e-mail needs the lease it bills."
-PROVIDER_PAY_LINK = "provider_pay_link"
 
 
 def company_sends() -> bool:
     """Whether the company, not the processor, e-mails the invoices (ADR-0020)."""
     return bool(CompanySettings.read().invoice_sender == InvoiceSender.COMPANY)
-
-
-def without_lines_naming(text: str, name: str) -> str:
-    """``text`` without each line that names the placeholder ``name``."""
-    gap = messaging.gap(name)
-    return "\n".join(line for line in text.split("\n") if gap not in line)
 
 
 def billing_lease_of_invoice(invoice: Invoice) -> Lease | None:
@@ -107,14 +99,6 @@ def billing_lease_of_invoice(invoice: Invoice) -> Lease | None:
     from ledger.services.invoice_builder import billing_account
 
     return billing_account(invoice.operator, invoice_pdf.lease_of(invoice))
-
-
-def provider_pay_link(invoice: Invoice) -> str:
-    """The processor's hosted page of the invoice, or ``""`` (see the module docstring)."""
-    import payments
-    from payments.webhooks.handlers.common import ENTITY_INVOICE, KIND_INVOICE, current_ref
-
-    return payments.hosted_invoice_url(current_ref(ENTITY_INVOICE, invoice.pk, KIND_INVOICE))
 
 
 def invoice_context(invoice: Invoice, lease: Lease, company: CompanySettings) -> dict[str, str]:
@@ -129,7 +113,6 @@ def invoice_context(invoice: Invoice, lease: Lease, company: CompanySettings) ->
         "amount": format_amount(found.balance),
         "due_date": day_text(invoice.due_date),
         "pay_link": messaging.pay_link(invoice.operator, store.pk),
-        PROVIDER_PAY_LINK: provider_pay_link(invoice),
         "support_email": str(company.support_email or ""),
         "company_name": str(company.name),
     }
@@ -174,13 +157,9 @@ def _queue(
     operator = lease.operator
     if operator is None:
         raise ValueError(NO_LEASE)
-    subject_text, body_text = template.subject, template.body
-    if PROVIDER_PAY_LINK in values and not values[PROVIDER_PAY_LINK]:
-        subject_text = without_lines_naming(subject_text, PROVIDER_PAY_LINK)
-        body_text = without_lines_naming(body_text, PROVIDER_PAY_LINK)
     shown = messaging.with_gaps(values)
-    subject = messaging.one_line(merge.render(subject_text, shown))[:SUBJECT_MAX_LENGTH]
-    body = merge.render(body_text, shown)
+    subject = messaging.one_line(merge.render(template.subject, shown))[:SUBJECT_MAX_LENGTH]
+    body = merge.render(template.body, shown)
     message = OutboundMessage(
         operator=operator,
         lease=lease,

@@ -194,7 +194,21 @@ class CompanySettingsAdmin(AuditedAdmin):
     """The one row: changed, never added or deleted (PLAN-012c D2)."""
 
     list_display = ("name", "short_name", "processor_name", "time_zone", "updated_at")
-    fields = ("name", "short_name", "support_email", "time_zone", "logo", "processor_name")
+    #: PLAN-015g §3C: the company's address after the support e-mail (the sender choice stays on
+    #: Admin › Settings).
+    fields = (
+        "name",
+        "short_name",
+        "support_email",
+        "address_line1",
+        "address_line2",
+        "city",
+        "state",
+        "postal_code",
+        "time_zone",
+        "logo",
+        "processor_name",
+    )
     audited_fields = fields
     entity_type = "company_settings"
 

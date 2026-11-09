@@ -47,22 +47,6 @@ def pay_invoice_enabled() -> bool:
     return bool(settings.STAX_PAY_INVOICE_ENABLED)
 
 
-def hosted_invoice_url(external_id: str) -> str:
-    """The processor's hosted page of an invoice (PLAN-015c, ``{provider_pay_link}``): the
-    payment page URL the adapter creates every invoice with, joined with the invoice's id, as
-    https://docs.staxpayments.com/reference/create-an-invoice.md says ("Hosted Invoice Pages":
-    combine the ``url`` and the ``id`` of the response, ``https://app.staxpayments.com/#/bill/
-    {id}``; read 2026-11-07). ``""`` without an id (the page alone shows no invoice) and with
-    the in-memory provider (no page exists)."""
-    from django.conf import settings
-
-    if not external_id or settings.STAX_PROVIDER == FAKE:
-        return ""
-    from payments.stax.adapter import DEFAULT_PAYMENT_PAGE_URL
-
-    return f"{DEFAULT_PAYMENT_PAGE_URL}{external_id}"
-
-
 def return_reason_words(code: str | None) -> str:
     """An ACH return code in plain words, for the operator (PLAN-014 F1); a code the
     processor's table does not list, or none, reads a general sentence."""

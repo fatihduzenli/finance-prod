@@ -1,9 +1,11 @@
 """PLAN-015d task 2: free rent by days (ledger.services.free_rent), the concession on the charges
-the rent run makes, the discount line of the invoice builder and the provider body's per-line
-discount rate (docs/qa/15/PLAN-015d §3 (2), §9.2)."""
+the rent run makes, the discount line of the invoice builder and, since PLAN-015g §3A, the Rent
+line sent to the processor at its net with the concession named in its details (docs/qa/15/PLAN-015d
+§3 (2))."""
 
 from __future__ import annotations
 
+import json
 import random
 import uuid
 from datetime import date, timedelta
@@ -25,10 +27,14 @@ from ledger.models import (
 )
 from ledger.services import free_rent, invoice_builder, leases, proration, rent_run
 from ledger.services.pdf import invoice as invoice_pdf
+from payments import one_off_invoices
 from payments.fake import FakeProvider
+from payments.provider import InvoiceInput, InvoiceUpdate
 from payments.stax import mapping, validation
+from payments.stax.adapter import StaxProvider
 from tests import test_invoice_builder as builder_tests
 from tests.job_helpers import run_queued_jobs
+from tests.stax_helpers import always, make_rig
 from tests.test_invoice_builder import (
     NOVEMBER,
     TODAY,
@@ -36,6 +42,7 @@ from tests.test_invoice_builder import (
     a_rent_lease,
     created_invoices,
     fresh,
+    line,
     rent_line,
     sent,
     user,
@@ -296,18 +303,18 @@ def test_a_rent_line_with_free_rent_shows_a_discount_line_and_bills_the_net(
     run_queued_jobs()
     [request] = created_invoices(fake)
     validation.amounts(request.amounts)
+    # PLAN-015g §3A: to the processor the line goes at its net, the concession in its details.
     [item] = request.amounts.line_items
-    assert (item.unit_price, item.discount, item.total) == (D("1000"), D("400.00"), D("600.00"))
+    assert (item.quantity, item.unit_price, item.total) == (D(1), D("600.00"), D("600.00"))
+    assert item.details == f"Rent $1,000.00 less $400.00: {words}"
     assert request.amounts.total == D("600.00")
     body = mapping.invoice_body(request, "https://example.com/pay")
     assert body["total"] == D("600.00")
     assert body["meta"]["subtotal"] == "600.00"
     [line] = body["meta"]["lineItems"]
-    assert (line["price"], line["total"], line["discountRate"]) == (
-        D("1000"),
-        D("600.00"),
-        D("0.4000"),
-    )
+    assert (line["quantity"], line["price"], line["total"]) == (D(1), D("600.00"), D("600.00"))
+    assert line["details"] == item.details
+    assert "discountRate" not in json.dumps(body, default=str)
 
 
 def test_the_invoice_pdf_shows_the_discount_negative_and_the_net_balance(
@@ -337,16 +344,6 @@ def test_a_fully_free_rent_alone_invoice_is_refused_with_nothing_sent(fake: Fake
     assert not fake.calls
 
 
-def test_a_line_discount_cannot_exceed_its_amount_or_be_negative() -> None:
-    from payments.errors import ValidationFailed
-    from payments.provider import LineItem
-
-    for bad in (D("100.01"), D("-0.01")):
-        with pytest.raises(ValidationFailed):
-            LineItem("Rent", D(1), D("100.00"), discount=bad)
-    assert LineItem("Rent", D(1), D("100.00"), discount=D("100.00")).total == D("0.00")
-
-
 def test_a_line_without_a_discount_sends_no_discount_rate() -> None:
     from payments.provider import Amounts, InvoiceInput, LineItem
 
@@ -359,9 +356,227 @@ def test_a_line_without_a_discount_sends_no_discount_rate() -> None:
     assert "discountRate" not in line
 
 
-def test_discount_rate_is_a_fraction_to_four_decimals() -> None:
-    from payments.provider import LineItem
+# --- PLAN-015g §3A: the Rent line goes to the processor at its net -------------------------------
 
-    assert mapping.discount_rate(LineItem("Rent", D(1), D("3000.00"), discount=D("1000.00"))) == (
-        D("0.3333")
+
+def a_stored_line(
+    amount: str,
+    concession: str,
+    text: str = "Free rent per lease agreement (Dec 10 – Jan 8)",
+    *,
+    quantity: str = "1",
+    unit: str | None = None,
+    details: str = "",
+) -> InvoiceLineItem:
+    """An unsaved Rent line item of ``amount`` whose charge carries ``concession``."""
+    rent = RentCharge(amount_due=D(amount), concession=D(concession), concession_text=text)
+    return InvoiceLineItem(
+        description="Rent December 2026, store Store 0101",
+        quantity=D(quantity),
+        unit_price=D(unit if unit is not None else amount),
+        line_total=D(amount),
+        details=details,
+        rent_charge=rent,
     )
+
+
+def test_the_concession_sentence_names_the_amount_the_concession_and_its_text() -> None:
+    item = one_off_invoices._provider_line(a_stored_line("2000.00", "666.67"))
+    assert (item.description, item.quantity, item.unit_price, item.total) == (
+        "Rent December 2026, store Store 0101",
+        D(1),
+        D("1333.33"),
+        D("1333.33"),
+    )
+    assert item.details == (
+        "Rent $2,000.00 less $666.67: Free rent per lease agreement (Dec 10 – Jan 8)"
+    )
+
+
+def test_an_empty_concession_text_ends_the_sentence_at_the_amount() -> None:
+    item = one_off_invoices._provider_line(a_stored_line("2000.00", "666.67", ""))
+    assert item.details == "Rent $2,000.00 less $666.67"
+
+
+def test_the_lines_own_details_come_first_then_the_concession() -> None:
+    item = one_off_invoices._provider_line(
+        a_stored_line("580.65", "161.29", details="14–31 Oct, 18 of 31 days of $1,000.00 = $580.65")
+    )
+    assert item.details == (
+        "14–31 Oct, 18 of 31 days of $1,000.00 = $580.65; Rent $580.65 less $161.29: "
+        "Free rent per lease agreement (Dec 10 – Jan 8)"
+    )
+    assert item.unit_price == D("419.36")
+
+
+def test_a_line_whose_quantity_is_not_one_goes_as_one_at_its_net() -> None:
+    # A builder Rent line is quantity 1; a stored line of half a unit is sent as one, net.
+    item = one_off_invoices._provider_line(
+        a_stored_line("1000.00", "250.00", quantity="0.5", unit="2000.00")
+    )
+    assert (item.quantity, item.unit_price, item.total) == (D(1), D("750.00"), D("750.00"))
+    assert item.details.startswith("Rent $1,000.00 less $250.00: ")
+
+
+def test_a_concession_of_one_cent_and_of_the_amount_less_one_cent() -> None:
+    small = one_off_invoices._provider_line(a_stored_line("1000.00", "0.01"))
+    large = one_off_invoices._provider_line(a_stored_line("1000.00", "999.99"))
+    assert (small.unit_price, large.unit_price) == (D("999.99"), D("0.01"))
+    amounts = one_off_invoices._line_amounts([a_stored_line("1000.00", "999.99")])
+    assert validation.amounts(amounts).total == D("0.01")
+
+
+def test_a_long_unicode_concession_text_is_carried_whole() -> None:
+    # No length rule applies to a line's details at the provider boundary; the text is kept.
+    text = ("Loyer gratuit — été ☀ " * 10)[:200]
+    item = one_off_invoices._provider_line(a_stored_line("1000.00", "100.00", text))
+    assert item.details == f"Rent $1,000.00 less $100.00: {text}"
+    assert len(text) == 200
+
+
+def test_a_line_without_a_concession_is_built_as_before() -> None:
+    item = one_off_invoices._provider_line(a_stored_line("1000.00", "0.00", "", details="x"))
+    assert (item.quantity, item.unit_price, item.details) == (D("1"), D("1000.00"), "x")
+
+
+def a_sign_line() -> InvoiceLineItem:
+    return InvoiceLineItem(
+        description="Sign", quantity=D(1), unit_price=D("100.00"), line_total=D("100.00")
+    )
+
+
+def sent_body(request: Any) -> dict[str, Any]:
+    body = json.loads(request.content, parse_float=D)
+    assert isinstance(body, dict)
+    return body
+
+
+def test_a_rent_line_free_in_full_beside_a_billed_line_is_left_out_of_what_is_sent(
+    worker: None,
+) -> None:
+    # A Rent line free in full beside a billed line (the builder lets the invoice through: its
+    # net is positive) is not sent: the processor refuses a line at price zero. The one-off
+    # line goes as it is and the body still sums to our total.
+    amounts = one_off_invoices._line_amounts([a_sign_line(), a_stored_line("2000.00", "2000.00")])
+    assert [item.description for item in amounts.line_items] == ["Sign"]
+    assert (amounts.total, amounts.subtotal) == (D("100.00"), D("100.00"))
+    rig = make_rig(always(200, {"id": "inv-1", "status": "DRAFT"}))
+    StaxProvider(rig.transport).create_invoice(InvoiceInput("cus-1", amounts, due_on=TODAY))
+    [request] = rig.recorder.requests
+    body = sent_body(request)
+    [line] = body["meta"]["lineItems"]
+    assert (line["item"], line["quantity"], line["price"], line["total"]) == (
+        "Sign",
+        D(1),
+        D("100.00"),
+        D("100.00"),
+    )
+    assert body["total"] == D("100.00") and body["meta"]["subtotal"] == "100.00"
+
+
+def test_a_mixed_invoice_with_its_rent_free_in_full_sends_only_the_one_off_line(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator = an_operator(fake)
+    lease = with_free_rent(a_rent_lease(operator), 18)  # Oct 14 – Oct 31: October free
+    draft = a_draft(operator, lease, [line("Sign", "100.00"), rent_line(lease)])
+    invoice = sent(draft).invoice
+    assert invoice is not None
+    assert fresh(invoice).total == D("100.00")
+    # Our own rows keep the Rent line and its discount line.
+    rows = list(InvoiceLineItem.objects.filter(invoice=invoice).order_by("position"))
+    assert [(row.kind, row.line_total, row.rent_charge_id is not None) for row in rows] == [
+        (InvoiceLineKind.CHARGE, D("100.00"), False),
+        (InvoiceLineKind.CHARGE, D("580.65"), True),
+        (InvoiceLineKind.DISCOUNT, D("580.65"), False),
+    ]
+    run_queued_jobs()
+    [request] = created_invoices(fake)
+    assert [item.description for item in request.amounts.line_items] == ["Sign"]
+    # The real adapter accepts it and sends one request of the one-off line alone.
+    rig = make_rig(always(200, {"id": "inv-1", "status": "DRAFT"}))
+    StaxProvider(rig.transport).create_invoice(request)
+    [sent_request] = rig.recorder.requests
+    body = sent_body(sent_request)
+    assert [item["item"] for item in body["meta"]["lineItems"]] == ["Sign"]
+    assert body["total"] == D("100.00") and body["meta"]["subtotal"] == "100.00"
+
+
+def test_of_two_rent_lines_only_the_partly_free_one_is_sent_at_its_net(worker: None) -> None:
+    amounts = one_off_invoices._line_amounts(
+        [a_stored_line("1000.00", "1000.00"), a_stored_line("2000.00", "666.67")]
+    )
+    rig = make_rig(always(200, {"id": "inv-1", "status": "DRAFT"}))
+    StaxProvider(rig.transport).create_invoice(InvoiceInput("cus-1", amounts, due_on=TODAY))
+    [request] = rig.recorder.requests
+    body = sent_body(request)
+    [line] = body["meta"]["lineItems"]
+    assert (line["quantity"], line["price"], line["total"]) == (D(1), D("1333.33"), D("1333.33"))
+    assert line["details"].startswith("Rent $2,000.00 less $666.67: ")
+    assert body["total"] == D("1333.33") and body["meta"]["subtotal"] == "1333.33"
+
+
+def test_the_update_body_leaves_a_rent_line_free_in_full_out_too(worker: None) -> None:
+    amounts = one_off_invoices._line_amounts([a_sign_line(), a_stored_line("2000.00", "2000.00")])
+    rig = make_rig(always(200, {"id": "inv-1", "status": "DRAFT"}))
+    StaxProvider(rig.transport).update_invoice("inv-1", InvoiceUpdate(amounts=amounts))
+    [request] = rig.recorder.requests
+    assert request.method == "PUT"
+    body = sent_body(request)
+    assert [item["item"] for item in body["meta"]["lineItems"]] == ["Sign"]
+    assert body["total"] == D("100.00") and body["meta"]["subtotal"] == "100.00"
+
+
+def test_a_mixed_invoice_keeps_the_one_off_line_and_sums_to_the_net(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator = an_operator(fake)
+    lease = with_free_rent(a_rent_lease(operator), 5)  # Oct 14 – Oct 18
+    draft = a_draft(operator, lease, [line("Sign", "100.00", description="Own"), rent_line(lease)])
+    invoice = sent(draft).invoice
+    assert invoice is not None
+    run_queued_jobs()
+    [request] = created_invoices(fake)
+    sign, rent = request.amounts.line_items
+    assert (sign.description, sign.quantity, sign.unit_price, sign.details) == (
+        "Sign",
+        D("1"),
+        D("100.00"),
+        "Own",
+    )
+    assert (rent.quantity, rent.unit_price) == (D(1), D("419.36"))
+    assert rent.details == (
+        "14–31 Oct, 18 of 31 days of $1,000.00 = $580.65; Rent $580.65 less $161.29: "
+        "Free rent per lease agreement (Oct 14 – Oct 18)"
+    )
+    validation.amounts(request.amounts)
+    assert request.amounts.total == request.amounts.subtotal == fresh(invoice).total == D("519.36")
+    body = mapping.invoice_body(request, "https://example.com/pay")
+    assert body["total"] == D("519.36") and body["meta"]["subtotal"] == "519.36"
+    assert [line["total"] for line in body["meta"]["lineItems"]] == [D("100.00"), D("419.36")]
+    assert "discountRate" not in json.dumps(body, default=str)
+
+
+def test_the_update_body_sends_the_same_net_line() -> None:
+    amounts = one_off_invoices._line_amounts([a_stored_line("2000.00", "666.67")])
+    body = mapping.invoice_update_body(InvoiceUpdate(amounts=amounts))
+    assert body["total"] == D("1333.33")
+    [line] = body["meta"]["lineItems"]
+    assert (line["quantity"], line["price"], line["total"]) == (D(1), D("1333.33"), D("1333.33"))
+    assert line["details"].startswith("Rent $2,000.00 less $666.67: ")
+    assert "discountRate" not in json.dumps(body, default=str)
+
+
+def test_nothing_in_the_app_sends_or_reads_a_discount_rate() -> None:
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    hits = [
+        str(path.relative_to(backend))
+        for path in backend.rglob("*.py")
+        if "tests" not in path.parts
+        and (
+            "discountRate" in (text := path.read_text(encoding="utf-8")) or "discount_rate" in text
+        )
+    ]
+    assert hits == []

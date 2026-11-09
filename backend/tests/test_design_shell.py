@@ -540,6 +540,12 @@ def _admin_form(**overrides: str) -> dict[str, str]:
         "name": "Monvera Holdings",
         "short_name": "Monvera",
         "support_email": "help@example.com",
+        # PLAN-015g §3C: the address is on the form; an omitted key would blank it.
+        "address_line1": "",
+        "address_line2": "",
+        "city": "",
+        "state": "",
+        "postal_code": "",
         "time_zone": "America/Chicago",
         "logo": "",
         "processor_name": "Stax",

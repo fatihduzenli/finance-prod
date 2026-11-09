@@ -18,7 +18,7 @@ import json
 import re
 from collections.abc import Iterator, Mapping
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from payments.errors import ProviderUnavailable
@@ -38,7 +38,6 @@ from payments.provider import (
     InvoiceQuery,
     InvoiceRecord,
     InvoiceUpdate,
-    LineItem,
     OfflinePayment,
     PaymentMethodRecord,
     PayWithStoredMethod,
@@ -188,41 +187,21 @@ def customer_params(query: CustomerQuery) -> Params:
 # --- Requests: invoices ----------------------------------------------------------------
 
 
-#: A line's discount rate is written to four decimals (PLAN-015d §9.2).
-_RATE = Decimal("0.0001")
-
-
-def discount_rate(item: LineItem) -> Decimal:
-    """``lineItems[].discountRate`` of a discounted line: its discount over its amount before
-    the discount, as a fraction to four decimals (PLAN-015d §9.2, page create-an-invoice, read
-    2026-11-08: "Discount applied to this specific line item", a number).
-
-    TODO-VERIFY-075: the page does not say whether the rate is a fraction (0.3333) or a
-    percentage (33.33), nor whether the line's ``total`` is before or after it; the line's
-    ``total`` and the invoice's ``total`` are sent net, and the sandbox must show that the
-    processor keeps them (else the fallback of §9.2: the line sent at its net amount)."""
-    return (item.discount / item.gross).quantize(_RATE, rounding=ROUND_HALF_UP)
-
-
-def _line_item(item: LineItem) -> Body:
-    line: Body = {
-        "item": item.description,
-        "details": item.details,
-        "quantity": item.quantity,
-        "price": item.unit_price,
-        "total": item.total.quantize(_CENT),
-    }
-    if item.discount > 0:
-        line["discountRate"] = discount_rate(item)
-    return line
-
-
 def _invoice_meta(amounts: Amounts) -> Body:
     """``meta`` of create-an-invoice: subtotal and tax are strings, line items numbers."""
     return {
         "subtotal": money_string(amounts.subtotal),
         "tax": money_string(amounts.tax),
-        "lineItems": [_line_item(item) for item in amounts.line_items],
+        "lineItems": [
+            {
+                "item": item.description,
+                "details": item.details,
+                "quantity": item.quantity,
+                "price": item.unit_price,
+                "total": item.total.quantize(_CENT),
+            }
+            for item in amounts.line_items
+        ],
     }
 
 

@@ -120,7 +120,7 @@ from ledger.models import (
     format_quantity,
 )
 from ledger.services import installments, leases, numbering, one_off_charges, rent_run
-from ledger.wording import provider_sentence
+from ledger.wording import format_amount, provider_sentence
 from payments import invoice_sync, lease_sync
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef, JobEntity, WebhookOutcome
@@ -414,10 +414,27 @@ def _rent_lines(invoice: Invoice) -> list[InvoiceLineItem]:
 
 
 def _line_amounts(items: list[InvoiceLineItem]) -> Amounts:
-    """One provider line per line item, no tax; the total is their sum."""
-    provider_lines = tuple(_provider_line(item) for item in items)
+    """One provider line per line item, no tax; the total is their sum. A Rent line free
+    in full (its concession equals its amount, so its net is zero) is left out: the
+    processor refuses a line at price zero, and leaving it out changes no sum (PLAN-015g
+    §3A). Our own rows, page and PDF keep it and its discount line. This is the one place
+    the rule lives; the builder lines (:func:`charge_amounts`) and the lines of an invoice
+    of rent alone (:func:`create_rent_invoice`) both come through here, for the create and
+    the update body alike. A rent-alone invoice free in full never gets here: the invoice
+    builder refuses it (``NOTHING_TO_BILL``)."""
+    provider_lines = tuple(_provider_line(item) for item in items if not _free_in_full(item))
     amount = sum((line.total for line in provider_lines), ZERO)
     return Amounts(amount, amount, ZERO, provider_lines)
+
+
+def _free_in_full(item: InvoiceLineItem) -> bool:
+    """A Rent line whose free-rent concession equals its amount: nothing to bill on it."""
+    rent = item.rent_charge
+    return (
+        rent is not None
+        and rent.concession > 0
+        and Decimal(item.line_total) == Decimal(rent.concession)
+    )
 
 
 def _provider_line(item: InvoiceLineItem) -> LineItem:
@@ -425,27 +442,39 @@ def _provider_line(item: InvoiceLineItem) -> LineItem:
     and unit price when they multiply to its total exactly, else quantity 1 at its total
     with the charge's description (which names the quantity), so that the lines always
     sum to the invoice's total; its detail as the line's ``details`` either way. A Rent line
-    whose charge carries a free-rent concession carries it as the line's discount (PLAN-015d
-    §9.2), so the line's total is the charge's net."""
+    whose charge carries a free-rent concession goes at its net, quantity 1, with the
+    concession named in its details (PLAN-015g §3A); one free in full is not sent at all
+    (:func:`_line_amounts`)."""
     quantity = Decimal(item.quantity)
     rent = item.rent_charge
-    discount = Decimal(rent.concession) if rent is not None else ZERO
+    text = item.one_off_charge.description if item.one_off_charge is not None else ""
+    if rent is not None and rent.concession > 0:
+        return LineItem(
+            text or item.description,
+            Decimal(1),
+            Decimal(item.line_total) - Decimal(rent.concession),
+            details="; ".join(
+                part for part in (item.details, _concession_details(item, rent)) if part
+            ),
+        )
     if quantity * Decimal(item.unit_price) == Decimal(item.line_total):
         return LineItem(
             item.description,
             Decimal(format_quantity(quantity)),
             Decimal(item.unit_price),
             details=item.details,
-            discount=discount,
         )
-    text = item.one_off_charge.description if item.one_off_charge is not None else ""
     return LineItem(
-        text or item.description,
-        Decimal(1),
-        Decimal(item.line_total),
-        details=item.details,
-        discount=discount,
+        text or item.description, Decimal(1), Decimal(item.line_total), details=item.details
     )
+
+
+def _concession_details(item: InvoiceLineItem, rent: RentCharge) -> str:
+    """The concession sentence of a Rent line sent at its net (PLAN-015g §3A):
+    "Rent $2,000.00 less $666.67: Free rent per lease agreement (Dec 10 – Jan 8)", ending at
+    the amount when the charge has no concession text."""
+    sentence = f"Rent {format_amount(item.line_total)} less {format_amount(rent.concession)}"
+    return f"{sentence}: {rent.concession_text}" if rent.concession_text else sentence
 
 
 def charge_amounts(charge: OneOffCharge, total: Decimal | None = None) -> Amounts:
@@ -454,7 +483,8 @@ def charge_amounts(charge: OneOffCharge, total: Decimal | None = None) -> Amount
     (PLAN-011b D5): one line for the re-debit and one per billed companion, and the
     total is their sum; and for the first line of an invoice builder invoice (PLAN-012
     D6): one line per line of the invoice whose charge is neither waived nor voided,
-    and the total is their sum."""
+    a Rent line free in full left out (:func:`_line_amounts`), and the total is their
+    sum."""
     builder = _builder_lines(charge)
     if builder:
         return _line_amounts(builder)

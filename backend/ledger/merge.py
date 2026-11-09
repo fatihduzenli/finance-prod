@@ -84,9 +84,9 @@ PORTAL_RESET_FIELDS: tuple[str, ...] = (
 PORTAL_CODES: frozenset[str] = frozenset({PORTAL_INVITE_CODE, PORTAL_RESET_CODE})
 #: PLAN-015c (ADR-0020): the invoice e-mailed by the company (``invoice_sent``) and the
 #: receipt of a payment recorded outside the processor (``receipt``), each with its PDF.
-#: ``{provider_pay_link}`` is the processor's hosted invoice page; a line naming it is left
-#: out when the invoice has none. ``{applied_to}`` is the invoice number the payment paid, or
-#: the charge's words ("Rent — November 2026") when it paid no invoice.
+#: The invoice e-mail links the portal only (PLAN-015g §3B). ``{applied_to}`` is the invoice
+#: number the payment paid, or the charge's words ("Rent — November 2026") when it paid no
+#: invoice.
 INVOICE_CODE = "invoice_sent"
 RECEIPT_CODE = "receipt"
 INVOICE_FIELDS: tuple[str, ...] = (
@@ -97,7 +97,6 @@ INVOICE_FIELDS: tuple[str, ...] = (
     "amount",
     "due_date",
     "pay_link",
-    "provider_pay_link",
     "support_email",
     "company_name",
 )
