@@ -383,10 +383,14 @@ Document every new one in `.env.example` with an empty value (root `CLAUDE.md` �
 live) and reaches the app through the container apps' managed identity at runtime
 (ADR-0002). Models never read vault values (root `CLAUDE.md` §5.1). Sandbox and live
 keys are separate secrets with the environment in the name (Rule 6). **The key stored
-on 2026-09-16 is the LIVE key** (owner, 2026-09-27); it is to be named
-`stax-api-key-live` and must not be readable by any development identity. **No
-sandbox key exists yet.** Until `stax-api-key-sandbox` exists, no session may make
-any Stax call, and no code may be tested against Stax.
+on 2026-09-16 is the SANDBOX (test) account's key** (owner's correction, 2026-11-08; confirmed
+read-only the same day: Stax's `GET /self` reports the merchant "Global Retail Group" with
+`is_sandbox: true` and the brand `fattmerchant-sandbox`). **No live Stax key exists in our
+systems.** A live key will be added separately before go-live, under its own name
+(`stax-api-key-live`), unreadable by any development identity, and **no session may use it
+without the owner's explicit approval given for that use**. Sandbox calls from staging's own
+process (the documented `provider_ping` and the TODO-VERIFY checks) are allowed; no session
+resolves the key value itself (root `CLAUDE.md` §5.1).
 
 | Name | Purpose |
 |---|---|
