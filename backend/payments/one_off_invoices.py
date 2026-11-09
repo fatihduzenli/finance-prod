@@ -414,10 +414,27 @@ def _rent_lines(invoice: Invoice) -> list[InvoiceLineItem]:
 
 
 def _line_amounts(items: list[InvoiceLineItem]) -> Amounts:
-    """One provider line per line item, no tax; the total is their sum."""
-    provider_lines = tuple(_provider_line(item) for item in items)
+    """One provider line per line item, no tax; the total is their sum. A Rent line free
+    in full (its concession equals its amount, so its net is zero) is left out: the
+    processor refuses a line at price zero, and leaving it out changes no sum (PLAN-015g
+    §3A). Our own rows, page and PDF keep it and its discount line. This is the one place
+    the rule lives; the builder lines (:func:`charge_amounts`) and the lines of an invoice
+    of rent alone (:func:`create_rent_invoice`) both come through here, for the create and
+    the update body alike. A rent-alone invoice free in full never gets here: the invoice
+    builder refuses it (``NOTHING_TO_BILL``)."""
+    provider_lines = tuple(_provider_line(item) for item in items if not _free_in_full(item))
     amount = sum((line.total for line in provider_lines), ZERO)
     return Amounts(amount, amount, ZERO, provider_lines)
+
+
+def _free_in_full(item: InvoiceLineItem) -> bool:
+    """A Rent line whose free-rent concession equals its amount: nothing to bill on it."""
+    rent = item.rent_charge
+    return (
+        rent is not None
+        and rent.concession > 0
+        and Decimal(item.line_total) == Decimal(rent.concession)
+    )
 
 
 def _provider_line(item: InvoiceLineItem) -> LineItem:
@@ -426,7 +443,8 @@ def _provider_line(item: InvoiceLineItem) -> LineItem:
     with the charge's description (which names the quantity), so that the lines always
     sum to the invoice's total; its detail as the line's ``details`` either way. A Rent line
     whose charge carries a free-rent concession goes at its net, quantity 1, with the
-    concession named in its details (PLAN-015g §3A)."""
+    concession named in its details (PLAN-015g §3A); one free in full is not sent at all
+    (:func:`_line_amounts`)."""
     quantity = Decimal(item.quantity)
     rent = item.rent_charge
     text = item.one_off_charge.description if item.one_off_charge is not None else ""
@@ -465,7 +483,8 @@ def charge_amounts(charge: OneOffCharge, total: Decimal | None = None) -> Amount
     (PLAN-011b D5): one line for the re-debit and one per billed companion, and the
     total is their sum; and for the first line of an invoice builder invoice (PLAN-012
     D6): one line per line of the invoice whose charge is neither waived nor voided,
-    and the total is their sum."""
+    a Rent line free in full left out (:func:`_line_amounts`), and the total is their
+    sum."""
     builder = _builder_lines(charge)
     if builder:
         return _line_amounts(builder)

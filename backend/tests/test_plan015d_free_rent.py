@@ -28,7 +28,6 @@ from ledger.models import (
 from ledger.services import free_rent, invoice_builder, leases, proration, rent_run
 from ledger.services.pdf import invoice as invoice_pdf
 from payments import one_off_invoices
-from payments.errors import ValidationFailed
 from payments.fake import FakeProvider
 from payments.provider import InvoiceInput, InvoiceUpdate
 from payments.stax import mapping, validation
@@ -440,19 +439,92 @@ def test_a_line_without_a_concession_is_built_as_before() -> None:
     assert (item.quantity, item.unit_price, item.details) == (D("1"), D("1000.00"), "x")
 
 
-def test_a_net_zero_rent_line_is_refused_before_anything_is_sent() -> None:
-    # A Rent line free in full beside a billed line (the builder lets the invoice through: its
-    # net is positive) is refused by the provider-side validation; nothing is sent.
-    sign = InvoiceLineItem(
+def a_sign_line() -> InvoiceLineItem:
+    return InvoiceLineItem(
         description="Sign", quantity=D(1), unit_price=D("100.00"), line_total=D("100.00")
     )
-    amounts = one_off_invoices._line_amounts([sign, a_stored_line("580.65", "580.65")])
-    assert (amounts.total, amounts.line_items[1].unit_price) == (D("100.00"), D("0.00"))
+
+
+def sent_body(request: Any) -> dict[str, Any]:
+    body = json.loads(request.content, parse_float=D)
+    assert isinstance(body, dict)
+    return body
+
+
+def test_a_rent_line_free_in_full_beside_a_billed_line_is_left_out_of_what_is_sent(
+    worker: None,
+) -> None:
+    # A Rent line free in full beside a billed line (the builder lets the invoice through: its
+    # net is positive) is not sent: the processor refuses a line at price zero. The one-off
+    # line goes as it is and the body still sums to our total.
+    amounts = one_off_invoices._line_amounts([a_sign_line(), a_stored_line("2000.00", "2000.00")])
+    assert [item.description for item in amounts.line_items] == ["Sign"]
+    assert (amounts.total, amounts.subtotal) == (D("100.00"), D("100.00"))
     rig = make_rig(always(200, {"id": "inv-1", "status": "DRAFT"}))
-    request = InvoiceInput("cus-1", amounts, due_on=TODAY)
-    with pytest.raises(ValidationFailed, match="unit_price must be greater than zero"):
-        StaxProvider(rig.transport).create_invoice(request)
-    assert rig.recorder.requests == []
+    StaxProvider(rig.transport).create_invoice(InvoiceInput("cus-1", amounts, due_on=TODAY))
+    [request] = rig.recorder.requests
+    body = sent_body(request)
+    [line] = body["meta"]["lineItems"]
+    assert (line["item"], line["quantity"], line["price"], line["total"]) == (
+        "Sign",
+        D(1),
+        D("100.00"),
+        D("100.00"),
+    )
+    assert body["total"] == D("100.00") and body["meta"]["subtotal"] == "100.00"
+
+
+def test_a_mixed_invoice_with_its_rent_free_in_full_sends_only_the_one_off_line(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator = an_operator(fake)
+    lease = with_free_rent(a_rent_lease(operator), 18)  # Oct 14 – Oct 31: October free
+    draft = a_draft(operator, lease, [line("Sign", "100.00"), rent_line(lease)])
+    invoice = sent(draft).invoice
+    assert invoice is not None
+    assert fresh(invoice).total == D("100.00")
+    # Our own rows keep the Rent line and its discount line.
+    rows = list(InvoiceLineItem.objects.filter(invoice=invoice).order_by("position"))
+    assert [(row.kind, row.line_total, row.rent_charge_id is not None) for row in rows] == [
+        (InvoiceLineKind.CHARGE, D("100.00"), False),
+        (InvoiceLineKind.CHARGE, D("580.65"), True),
+        (InvoiceLineKind.DISCOUNT, D("580.65"), False),
+    ]
+    run_queued_jobs()
+    [request] = created_invoices(fake)
+    assert [item.description for item in request.amounts.line_items] == ["Sign"]
+    # The real adapter accepts it and sends one request of the one-off line alone.
+    rig = make_rig(always(200, {"id": "inv-1", "status": "DRAFT"}))
+    StaxProvider(rig.transport).create_invoice(request)
+    [sent_request] = rig.recorder.requests
+    body = sent_body(sent_request)
+    assert [item["item"] for item in body["meta"]["lineItems"]] == ["Sign"]
+    assert body["total"] == D("100.00") and body["meta"]["subtotal"] == "100.00"
+
+
+def test_of_two_rent_lines_only_the_partly_free_one_is_sent_at_its_net(worker: None) -> None:
+    amounts = one_off_invoices._line_amounts(
+        [a_stored_line("1000.00", "1000.00"), a_stored_line("2000.00", "666.67")]
+    )
+    rig = make_rig(always(200, {"id": "inv-1", "status": "DRAFT"}))
+    StaxProvider(rig.transport).create_invoice(InvoiceInput("cus-1", amounts, due_on=TODAY))
+    [request] = rig.recorder.requests
+    body = sent_body(request)
+    [line] = body["meta"]["lineItems"]
+    assert (line["quantity"], line["price"], line["total"]) == (D(1), D("1333.33"), D("1333.33"))
+    assert line["details"].startswith("Rent $2,000.00 less $666.67: ")
+    assert body["total"] == D("1333.33") and body["meta"]["subtotal"] == "1333.33"
+
+
+def test_the_update_body_leaves_a_rent_line_free_in_full_out_too(worker: None) -> None:
+    amounts = one_off_invoices._line_amounts([a_sign_line(), a_stored_line("2000.00", "2000.00")])
+    rig = make_rig(always(200, {"id": "inv-1", "status": "DRAFT"}))
+    StaxProvider(rig.transport).update_invoice("inv-1", InvoiceUpdate(amounts=amounts))
+    [request] = rig.recorder.requests
+    assert request.method == "PUT"
+    body = sent_body(request)
+    assert [item["item"] for item in body["meta"]["lineItems"]] == ["Sign"]
+    assert body["total"] == D("100.00") and body["meta"]["subtotal"] == "100.00"
 
 
 def test_a_mixed_invoice_keeps_the_one_off_line_and_sums_to_the_net(
