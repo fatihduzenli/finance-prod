@@ -136,6 +136,7 @@ import mail
 from finance.dates import NEW_YORK, day_text, month_long_text
 from ledger import merge
 from ledger.models import (
+    CREDIT_RETURNED_RULES,
     RETIRED_RULES,
     AuditLog,
     ChargeEntityType,
@@ -146,6 +147,7 @@ from ledger.models import (
     HeldReason,
     InsuranceCharge,
     Lease,
+    LeaseCredit,
     LeaseEnd,
     MessageChannel,
     MessageKind,
@@ -493,7 +495,12 @@ class RentMonth:
 Subject = Charge | RentMonth
 
 
-def charge_type_of(charge: Subject | LeaseEnd) -> str:
+#: What a message may be about: a rule's charge or lease month, a lease end (the final
+#: statement), or a lease credit reversed by a returned bank debit (PLAN-015e).
+About = Subject | LeaseEnd | LeaseCredit
+
+
+def charge_type_of(charge: About) -> str:
     if isinstance(charge, RentMonth):
         return ChargeEntityType.LEASE_MONTH
     if isinstance(charge, RentCharge):
@@ -504,7 +511,9 @@ def charge_type_of(charge: Subject | LeaseEnd) -> str:
         return ChargeEntityType.INSURANCE_CHARGE
     if isinstance(charge, LeaseEnd):
         return ChargeEntityType.LEASE_END
-    raise TypeError("A message is about a charge or a lease end.")
+    if isinstance(charge, LeaseCredit):
+        return ChargeEntityType.LEASE_CREDIT
+    raise TypeError("A message is about a charge, a lease end or a lease credit.")
 
 
 def policy_label(year: int) -> str:
@@ -545,7 +554,7 @@ def balance_of(charge: Subject) -> Decimal:
     return Decimal(str(charge.balance))
 
 
-def operator_of(lease: Lease | None, charge: Subject | LeaseEnd) -> Operator | None:
+def operator_of(lease: Lease | None, charge: About) -> Operator | None:
     """The operator a message about ``charge`` goes to (or is about)."""
     if isinstance(charge, OneOffCharge) and charge.operator is not None:
         return charge.operator
@@ -568,6 +577,14 @@ def store_link(lease: Lease) -> str:
     """The absolute URL of the staff page of the lease's store."""
     path = reverse("ledger:stores:detail", kwargs={"pk": lease.store_id})
     return f"{str(settings.APP_BASE_URL).rstrip('/')}{path}"
+
+
+def lease_words(lease: Lease) -> str:
+    """ "lease from Nov 1, 2026" (``{lease}`` of a reversed credit's managers' e-mail,
+    PLAN-015e); "lease without a start date" without one."""
+    if lease.started_on is None:
+        return "lease without a start date"
+    return f"lease from {day_text(lease.started_on)}"
 
 
 def lease_ended(lease: Lease, today: date) -> bool:
@@ -759,7 +776,7 @@ def refuse_retired(rule: str, template: MessageTemplate) -> None:
 def queue(
     rule: str,
     lease: Lease | None,
-    charge: Subject | LeaseEnd,
+    charge: About,
     template: MessageTemplate,
     context: Mapping[str, str],
     *,
@@ -777,7 +794,9 @@ def queue(
     stored as ``failed`` (``PaymentDataRefused``) without its text, and gets no job.
     ``ValueError`` and nothing written when ``lease`` is ``None``, the rule is retired or the
     template inactive (:func:`refuse_retired`). A :class:`RentMonth` is stored by its lease
-    and month (``lease_month``, ``period_month``; E4). A message that may not go yet
+    and month (``lease_month``, ``period_month``; E4); a message of a reversed credit's two
+    rules (PLAN-015e) is about the :class:`~ledger.models.LeaseCredit`, of kind
+    ``credit_returned``. A message that may not go yet
     (:func:`hold_reason`: a required company setting blank, a placeholder without a value) is
     stored ``held``, without its job. ``job=False`` stores the row without its job and
     without that check: the daily job's :func:`combine` or :func:`wait_for_fold` decides what
@@ -794,6 +813,12 @@ def queue(
     subject = one_line(merge.render(template.subject, values))[:SUBJECT_MAX_LENGTH]
     body = merge.render(template.body, values)
     final = rule == MessageRule.FINAL_STATEMENT
+    if final:
+        kind = MessageKind.FINAL_STATEMENT
+    elif rule in CREDIT_RETURNED_RULES:
+        kind = MessageKind.CREDIT_RETURNED
+    else:
+        kind = MessageKind.LADDER
     address = ""
     if template.internal:
         managers = manager_addresses()
@@ -804,7 +829,7 @@ def queue(
         operator=operator,
         lease=lease,
         template=template,
-        kind=MessageKind.FINAL_STATEMENT if final else MessageKind.LADDER,
+        kind=kind,
         channel=template.channel,
         rule=rule,
         occurrence=occurrence,
@@ -1393,11 +1418,18 @@ def send(message_id: uuid.UUID, now: datetime | None = None) -> Outcome:
 
 def manual_templates() -> list[MessageTemplate]:
     """What "Send a message now" offers: the active e-mail templates for operators (not the
-    final statement, the portal's two, or PLAN-015c's invoice and receipt, each about
-    something a charge is not)."""
+    final statement, the portal's two, PLAN-015c's invoice and receipt, or PLAN-015e's
+    reversed credit, each about something a charge is not)."""
     return list(
         MessageTemplate.objects.filter(active=True, internal=False, channel=MessageChannel.EMAIL)
-        .exclude(code__in=(merge.FINAL_STATEMENT_CODE, *merge.PORTAL_CODES, *merge.PDF_CODES))
+        .exclude(
+            code__in=(
+                merge.FINAL_STATEMENT_CODE,
+                *merge.PORTAL_CODES,
+                *merge.PDF_CODES,
+                *merge.CREDIT_RETURNED_CODES,
+            )
+        )
         .order_by("name", "code")
     )
 

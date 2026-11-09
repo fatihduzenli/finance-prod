@@ -33,7 +33,8 @@ BANNER = "SANDBOX — test system, no real money"
 
 #: Every stored choice value of ledger.models before Batch D (2026-10-17). Labels may change;
 #: values never. Values are only ever added (PLAN-014 C2: ReviewReason own_customer; PLAN-014
-#: F2: ReviewReason returned_debit and redebit_limit, and the new RetryState).
+#: F2: ReviewReason returned_debit and redebit_limit, and the new RetryState; PLAN-015e:
+#: ReviewReason credit_returned, the reversed credit's message kind, rules and entity type).
 FROZEN_CHOICES: dict[str, list[str]] = {
     "AdjustmentReason": ["carry_forward", "credit", "cross_store_balance", "discount"],
     # PLAN-012f-a Batch E (ADR-0014): the repeating debit plan's three stored choices.
@@ -47,6 +48,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
         "insurance_charge",
         # PLAN-015c: an invoice and a payment, what the invoice and receipt e-mails are about.
         "invoice",
+        # PLAN-015e (ledger 0077): a reversed lease credit, what its two e-mails are about.
+        "lease_credit",
         "lease_end",
         "lease_month",
         "one_off_charge",
@@ -111,7 +114,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "LegacyStatus": ["paid", "unpaid"],
     # PLAN-014 H2: the portal's invitation and reset ("portal").
     # "invoice" and "receipt" added by ledger 0071 (PLAN-015c).
-    "MessageKind": ["final_statement", "invoice", "ladder", "portal", "receipt"],
+    # "credit_returned" added by ledger 0077 (PLAN-015e).
+    "MessageKind": ["credit_returned", "final_statement", "invoice", "ladder", "portal", "receipt"],
     # PLAN-014 D2: held in the Outbox; D3: the message's channel, rule and held reason.
     # "combined" and "waiting" added for one e-mail per lease and day (owner, 2026-11-02).
     "MessageStatus": [
@@ -132,6 +136,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
         "D",
         "E",
         "F",
+        # PLAN-015e (ledger 0077): the reversed credit's two e-mails.
+        "credit_returned",
+        "credit_returned_operator",
         "final_statement",
         # PLAN-015c (ledger 0071): the invoice and receipt e-mails.
         "invoice",
@@ -188,6 +195,7 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "RetryState": ["auto_pending", "done", "scheduled", "stopped"],
     "ReviewReason": [
         "closed",
+        "credit_returned",  # PLAN-015e (ledger 0077)
         "dormant",
         "own_customer",
         "redebit_limit",

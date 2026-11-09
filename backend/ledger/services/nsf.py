@@ -29,7 +29,12 @@ transaction, once per returned ACH debit; a refund's return does nothing):
   the debit's date and the returned amount; without a retry, its no-retry variant
   ``returned_debit_no_retry``;
 - a returned automatic re-debit is ``done`` and its own returned payment resolved (the new
-  return carries on); one row ``payment.return_processed`` audits what was done.
+  return carries on); one row ``payment.return_processed`` audits what was done;
+- a debit that staff kept as a credit, whole or in part (PLAN-015e: its credit is reversed by
+  the webhook, :func:`ledger.services.credits.reverse_from_return`): the fee is made on the
+  credit's lease (or the charge's, for the part still on it), there is **no automatic
+  re-debit** and **no template F**; :func:`on_credit_return` then flags the lease Needs review
+  (``credit_returned``) and queues the managers' e-mail and the operator's.
 
 **The retry's schedule** (:func:`create_due_redebits`, the daily tick): every ``auto_pending``
 re-debit due today or on the next business day gets its processor schedule, through the
@@ -110,6 +115,7 @@ from ledger.models import (
     AuditLog,
     CollectionMethod,
     CollectionStatus,
+    CompanySettings,
     ContactEntry,
     ContactKind,
     FeeType,
@@ -132,8 +138,17 @@ from ledger.models import (
     RetryState,
     ReviewReason,
 )
-from ledger.services import business_days, leases, messaging, numbering, one_off_charges, returns
-from ledger.services.payments_ledger import charge_lease
+from ledger.services import (
+    business_days,
+    credits,
+    leases,
+    messaging,
+    numbering,
+    one_off_charges,
+    receivables,
+    returns,
+)
+from ledger.services.payments_ledger import payment_lease
 from ledger.validators import validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_sentence
 from payments import jobs
@@ -211,6 +226,8 @@ def source_description(payment: Payment) -> str:
         return payment.one_off_charge.label or "a one-off charge"
     if payment.charge_adjustment_id is not None:
         return "an adjustment"
+    if payment.credit_id is not None:
+        return "a payment kept as a credit"
     return "a payment"
 
 
@@ -287,8 +304,9 @@ def reschedule(
         if operator.archived_at is not None:
             return Outcome(False, OPERATOR_ARCHIVED)
         # PLAN-014 C5: the re-debit bills through the account of the returned charge's
-        # lease (else the operator's first active lease's).
-        lease = charge_lease(payment)
+        # lease (a payment held as a credit: the credit's, PLAN-015e), else the operator's
+        # first active lease's.
+        lease = payment_lease(payment)
         account = lease if lease is not None else leases.first_active_lease(operator)
         if account is None:
             return Outcome(False, leases.NO_LEASE_BILLING)
@@ -516,6 +534,9 @@ RETRY_AUTO = "auto"
 NO_RETRY_CODE = "code"
 NO_RETRY_LIMIT = "limit"
 NO_RETRY_ACCOUNT = "account"
+#: PLAN-015e: the debit (or part of it) was kept as a credit, now reversed: no automatic
+#: re-debit; the charges owed again follow the normal collection path.
+NO_RETRY_CREDIT = "credit"
 
 REVIEW_RETURNED = "Returned debit ({code}): new payment method needed"
 REVIEW_LIMIT = "Re-debit limit reached (Nacha)"
@@ -544,6 +565,7 @@ STATE_DONE = "Re-debited"
 STATE_NO_RETRY = "No retry: {code}"
 STATE_LIMIT = "No retry: re-debit limit reached"
 STATE_ACCOUNT = "No retry: no bank account to debit"
+STATE_CREDIT = "No retry: the credit it funded is reversed"
 
 
 def shown(code: str) -> str:
@@ -798,11 +820,38 @@ def _queue_message(
         return None
 
 
+def held_credits(payment: Payment) -> list[uuid.UUID]:
+    """The credits the returned debit's money was held as (PLAN-015e): the payment's own
+    (a payment held whole) and those of the rows split off it."""
+    found = [payment.credit_id] if payment.credit_id is not None else []
+    found += [
+        credit
+        for credit in Payment.objects.filter(split_from=payment, credit__isnull=False)
+        .order_by("created_at", "id")
+        .values_list("credit", flat=True)
+        if credit is not None
+    ]
+    return found
+
+
+def transaction_total(payment: Payment) -> Decimal:
+    """What the bank debit behind ``payment`` was for: the payment and the rows split off it
+    (PLAN-015e; a payment split by "Keep as credit" keeps only the rest)."""
+    split = Payment.objects.filter(split_from=payment).values_list("amount", flat=True)
+    return Decimal(payment.amount) + sum((Decimal(amount) for amount in split), ZERO)
+
+
 def on_return(payment: Payment, today: date, now: datetime | None = None) -> ReturnOutcome | None:
     """The fee, the automatic re-debit or the Needs review flag, and template F, for one
     returned ACH debit (see the module docstring); ``None`` and nothing written for a
     refund, a payment not returned, one processed already, or one without an operator.
-    Runs in the caller's transaction, which holds the payment's row lock."""
+    Runs in the caller's transaction, which holds the payment's row lock.
+
+    A debit kept as a credit, whole or in part (PLAN-015e; :func:`held_credits`): the lease
+    is the payment's charge's, else the credit's (never a guess); the fee attaches to it; no
+    automatic re-debit (``retry`` ``credit``: the charges owed again follow the normal
+    collection path) and no template F (the credit's own messages, :func:`on_credit_return`,
+    tell the operator); the audit row names the credits and the transaction's total."""
     if (
         payment.is_refund
         or payment.method != PaymentMethod.ACH
@@ -818,15 +867,19 @@ def on_return(payment: Payment, today: date, now: datetime | None = None) -> Ret
         logger.warning("Returned payment %s has no operator: nothing made", payment.pk)
         return None
     moment = now or timezone.now()
+    kept = held_credits(payment)
     with transaction.atomic():
         operator = Operator.objects.select_for_update(of=("self",)).get(pk=billed.pk)
-        lease = charge_lease(payment)
-        account = lease if lease is not None else leases.first_active_lease(operator)
+        lease = payment_lease(payment)
+        if kept:
+            account = lease
+        else:
+            account = lease if lease is not None else leases.first_active_lease(operator)
         code = (payment.return_code or "").strip().upper()
         shown_code = shown(code)
         words = payments.return_reason_words(code)
         what = source_description(payment)
-        amount = Decimal(payment.amount)
+        amount = transaction_total(payment) if kept else Decimal(payment.amount)
         # A returned automatic re-debit is done; its own return carries on below.
         _finish_retry(payment, RESOLVED_RETURNED, moment, shown_code)
         fee: OneOffCharge | None = None
@@ -866,7 +919,9 @@ def on_return(payment: Payment, today: date, now: datetime | None = None) -> Ret
             )
         else:
             logger.warning("NSF fee type inactive or without a price: no fee for %s", payment.pk)
-        if not payments.retryable_return(code):
+        if kept:
+            retry = NO_RETRY_CREDIT
+        elif not payments.retryable_return(code):
             retry = NO_RETRY_CODE
         elif limit_reached(payment, today):
             retry = NO_RETRY_LIMIT
@@ -909,14 +964,14 @@ def on_return(payment: Payment, today: date, now: datetime | None = None) -> Ret
             )
         elif retry == NO_RETRY_LIMIT:
             _flag_lease(account, ReviewReason.REDEBIT_LIMIT, REVIEW_LIMIT, payment)
-        else:
+        elif retry != NO_RETRY_CREDIT:
             _flag_lease(
                 account,
                 ReviewReason.RETURNED_DEBIT,
                 REVIEW_RETURNED.format(code=shown_code),
                 payment,
             )
-        message = _queue_message(payment, account, code, words, retry_date, today)
+        message = None if kept else _queue_message(payment, account, code, words, retry_date, today)
         AuditLog.objects.create(
             actor=None,
             action=RETURN_ACTION,
@@ -932,9 +987,125 @@ def on_return(payment: Payment, today: date, now: datetime | None = None) -> Ret
                 "redebit_charge": str(redebit.pk) if redebit is not None else None,
                 "message": str(message.pk) if message is not None else None,
                 "lease": str(account.pk) if account is not None else None,
+                "credit_reversed": [str(pk) for pk in kept],
+                "transaction_total": str(amount),
             },
         )
     return ReturnOutcome(fee=fee, redebit=redebit, retry=retry, message=message)
+
+
+# --- A debit kept as a credit (PLAN-015e) ----------------------------------------------------
+
+REVIEW_CREDIT = "Returned debit ({code}): credit of {amount} reversed"
+#: ``{charges_owed}`` when the credit had paid nothing, or had been refunded at the lease end.
+NO_CHARGES_OWED = "none"
+REFUNDED_CHARGES_OWED = "none (the credit had been refunded at the lease end; staff decide)"
+CHARGE_OWED = "{name} {amount}"
+CREDIT_MESSAGES: tuple[tuple[str, str], ...] = (
+    (MessageRule.CREDIT_RETURNED, merge.CREDIT_RETURNED_CODE),
+    (MessageRule.CREDIT_RETURNED_OPERATOR, merge.CREDIT_RETURNED_OPERATOR_CODE),
+)
+
+
+def charges_owed_text(reversal: credits.CreditReversal) -> str:
+    """ "Rent November 2026 $900.00; Rent December 2026 $600.00": the charges the reversed
+    credit had paid, owed again (``{charges_owed}``)."""
+    if reversal.refunded:
+        return REFUNDED_CHARGES_OWED
+    parts = []
+    for application in reversal.applications:
+        charge: messaging.Charge | None = (
+            application.rent_charge or application.insurance_charge or application.one_off_charge
+        )
+        name = messaging.charge_name(charge) if charge is not None else "a charge"
+        parts.append(CHARGE_OWED.format(name=name, amount=format_amount(application.amount)))
+    return "; ".join(parts) or NO_CHARGES_OWED
+
+
+def store_balance(lease: Lease, today: date) -> Decimal:
+    """What the operator owes on the lease's store today (the store header's open balance
+    of that operator): ``{balance}`` of the operator's e-mail."""
+    rows = receivables.open_balances(today, operator=lease.operator_id)
+    return receivables.total(row for row in rows if row.store_id == lease.store_id)
+
+
+def _credit_context(
+    rule: str,
+    payment: Payment,
+    reversal: credits.CreditReversal,
+    lease: Lease,
+    today: date,
+    company: CompanySettings,
+) -> dict[str, str]:
+    store = lease.store
+    operator = lease.operator
+    code = (payment.return_code or "").strip().upper()
+    values = {
+        "operator_name": str(operator.display_name) if operator is not None else "",
+        "store_number": str(store.store_number) if store.store_number is not None else "",
+        "store_name": str(store.external_label),
+        "debit_date": day_text(payment.initiated_on) if payment.initiated_on else "",
+        "return_reason": payments.return_reason_words(code),
+    }
+    if rule == MessageRule.CREDIT_RETURNED:
+        return {
+            **values,
+            "lease": messaging.lease_words(lease),
+            "amount": format_amount(Decimal(reversal.credit.amount)),
+            "charges_owed": charges_owed_text(reversal),
+            "store_link": messaging.store_link(lease),
+        }
+    return {
+        **values,
+        "amount": format_amount(transaction_total(payment)),
+        "balance": format_amount(store_balance(lease, today)),
+        "support_email": str(company.support_email or ""),
+        "company_name": str(company.name),
+    }
+
+
+def on_credit_return(
+    payment: Payment, reversals: Iterable[credits.CreditReversal], today: date
+) -> list[OutboundMessage]:
+    """Tell staff and the operator of each credit the returned ``payment`` reversed
+    (PLAN-015e), in the caller's transaction: the credit's lease is flagged Needs review
+    (``credit_returned``, a reason already set kept; audited ``lease.flagged_for_review``),
+    and two messages about the credit are queued through :func:`ledger.services.messaging.queue`
+    (the send window, the holds and the Outbox apply): the managers' (``credit_returned``,
+    internal, to the company settings' managers) and the operator's
+    (``credit_returned_operator``, to the lease's billing e-mail, the owner's wording). Neither
+    names an account number. A replayed event reverses nothing, so queues nothing; a message
+    already queued for the credit is not queued again. The messages queued."""
+    queued: list[OutboundMessage] = []
+    company = CompanySettings.read()
+    for reversal in reversals:
+        lease = Lease.objects.select_related("store", "operator").get(pk=reversal.credit.lease_id)
+        code = shown((payment.return_code or "").strip().upper())
+        amount = format_amount(Decimal(reversal.credit.amount))
+        _flag_lease(
+            lease,
+            ReviewReason.CREDIT_RETURNED,
+            REVIEW_CREDIT.format(code=code, amount=amount),
+            payment,
+        )
+        for rule, template_code in CREDIT_MESSAGES:
+            template = MessageTemplate.objects.filter(code=template_code, active=True).first()
+            if template is None:
+                logger.warning("Template %s inactive: no message for %s", template_code, payment.pk)
+                continue
+            context = _credit_context(rule, payment, reversal, lease, today, company)
+            try:
+                message = messaging.queue(rule, lease, reversal.credit, template, context)
+            except (messaging.ChannelUnavailable, merge.TemplateRefused, ValueError) as error:
+                logger.warning(
+                    "Reversed-credit message not queued for payment %s: %s",
+                    payment.pk,
+                    type(error).__name__,
+                )
+                continue
+            if message is not None:
+                queued.append(message)
+    return queued
 
 
 def on_settled(payment: Payment, now: datetime | None = None) -> None:
@@ -1196,6 +1367,8 @@ def queue_states(found: Iterable[Payment]) -> dict[uuid.UUID, QueueState]:
             texts[key] = STATE_LIMIT
         elif retry == NO_RETRY_ACCOUNT:
             texts[key] = STATE_ACCOUNT
+        elif retry == NO_RETRY_CREDIT:
+            texts[key] = STATE_CREDIT
     for pk, source, state, retry_date, status in (
         OneOffCharge.objects.filter(source_payment__in=ids, category=OneOffCategory.REDEBIT)
         .exclude(retry_state="")

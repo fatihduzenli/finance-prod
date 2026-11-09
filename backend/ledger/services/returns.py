@@ -34,7 +34,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services import one_off_charges
-from ledger.services.payments_ledger import charge_lease
+from ledger.services.payments_ledger import payment_lease
 from ledger.validators import visible_text
 
 ENTITY_PAYMENT = "payment"
@@ -79,14 +79,17 @@ def open_returns() -> QuerySet[Payment]:
             "one_off_charge__lease__store",
             "one_off_charge__lease__operator",
             "one_off_charge__operator",
+            "credit__lease__store",
+            "credit__lease__operator",
         )
         .order_by("returned_at", "created_at", "id")
     )
 
 
 def row(payment: Payment) -> ReturnRow:
-    """What the queue shows of one returned payment."""
-    lease = charge_lease(payment)
+    """What the queue shows of one returned payment (a payment held as a credit: its
+    credit's lease, PLAN-015e)."""
+    lease = payment_lease(payment)
     operator = payment.invoice.operator if payment.invoice is not None else None
     if operator is None and lease is not None:
         operator = lease.operator

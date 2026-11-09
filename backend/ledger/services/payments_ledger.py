@@ -592,6 +592,15 @@ def charge_lease(payment: Payment) -> Lease | None:
     return None
 
 
+def payment_lease(payment: Payment) -> Lease | None:
+    """The lease of the payment's charge (:func:`charge_lease`), else, for a payment held as a
+    credit (PLAN-015d), the credit's lease (PLAN-015e)."""
+    lease = charge_lease(payment)
+    if lease is None and payment.credit is not None:
+        return payment.credit.lease
+    return lease
+
+
 def csv_record(row: LedgerRow) -> list[object]:
     payment = row.payment
     charge = payment.rent_charge

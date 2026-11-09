@@ -6,7 +6,8 @@ visits, e-mails logged by hand and promises with their outcomes and corrections)
 messages about a lease of it (:func:`ledger.services.messaging.for_store`: sent, held,
 failed or suppressed, with their stored text) and the status changes of its leases
 (:func:`status_changes`, PLAN-015b: collection paused with its reason, resumed, the lease
-activated on its start date or by staff), newest first: by day (a note's day in New
+activated on its start date or by staff; PLAN-015e: a credit of a lease reversed by a returned
+bank debit), newest first: by day (a note's day in New
 York, an entry's ``happened_on``, a message's or a change's day in New York), then by when
 each was written. ``show`` narrows it (``?show=``, :func:`parse_show`): ``notes``,
 ``contacts`` (Calls & promises), ``emails`` (the messages) or ``status`` (Lease status);
@@ -20,14 +21,17 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, overload
 
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 
+import payments
 from finance.dates import day_text
-from ledger.models import AuditLog, ContactEntry, Note, OutboundMessage, Store
-from ledger.services import contacts, leases, messaging, notes
+from ledger.models import AuditLog, ContactEntry, LeaseCredit, Note, OutboundMessage, Store
+from ledger.services import contacts, credits, leases, messaging, notes
+from ledger.wording import format_amount
 
 NOTE = "note"
 CONTACT = "contact"
@@ -63,6 +67,13 @@ ACTIVATED_TEXT = {
 }
 #: PLAN-015d: "Start date changed Nov 15, 2026 → Nov 20, 2026 — <reason>".
 START_CHANGED_TEXT = "Start date changed {old} → {new} — {reason}"
+#: PLAN-015e: "Credit of $1,500.00 reversed — the bank debit of Oct 15, 2026 was returned
+#: (Insufficient funds); 2 charges owed again".
+CREDIT_REVERSED_TEXT = (
+    "Credit of {amount} reversed — the bank debit of {date} was returned ({reason}); "
+    "{count} charge{plural} owed again"
+)
+CREDIT_REVERSED_BY = "The bank's return"
 EMPTY_EMAILS = "No e-mails yet."
 EMPTY_NOTES = "No notes yet."
 EMPTY_STATUS = "No status changes yet."
@@ -106,12 +117,25 @@ def _status(row: AuditLog) -> TimelineEntry:
 def status_changes(store: Store) -> QuerySet[AuditLog]:
     """The status changes of the store's leases (their ``lease.collection_paused``,
     ``lease.collection_resumed``, ``lease.activated`` and, PLAN-015d,
-    ``lease.start_date_changed`` audit rows), newest first, with
-    their staff member."""
+    ``lease.start_date_changed`` audit rows; PLAN-015e, the ``lease_credit.reversed`` rows of
+    their credits), newest first, with their staff member."""
     ids = [str(pk) for pk in store.leases.values_list("pk", flat=True)]
+    credit_ids = [
+        str(pk)
+        for pk in LeaseCredit.objects.filter(lease__store=store).values_list("pk", flat=True)
+    ]
     return (
         AuditLog.objects.filter(
-            entity_type=leases.ENTITY_LEASE, entity_id__in=ids, action__in=leases.STATUS_ACTIONS
+            Q(
+                entity_type=leases.ENTITY_LEASE,
+                entity_id__in=ids,
+                action__in=leases.STATUS_ACTIONS,
+            )
+            | Q(
+                entity_type=credits.ENTITY,
+                entity_id__in=credit_ids,
+                action=credits.REVERSED_ACTION,
+            )
         )
         .select_related("actor")
         .order_by("-at", "-id")
@@ -126,6 +150,8 @@ class StatusWords:
     text: str
     label: str
     tone: str
+    #: Who made the change when no staff member did.
+    by: str = "The daily job"
 
 
 def status_words(row: AuditLog) -> StatusWords:
@@ -133,6 +159,17 @@ def status_words(row: AuditLog) -> StatusWords:
     (Paused), "Collection resumed" (Active), "Lease activated (start date)" or "(by staff)"
     (Active)."""
     after = row.after or {}
+    if row.action == credits.REVERSED_ACTION:
+        count = len(after.get("applications") or [])
+        code = str(after.get("return_code") or "").strip().upper()
+        text = CREDIT_REVERSED_TEXT.format(
+            amount=format_amount(Decimal(str(after.get("amount") or "0"))),
+            date=_day_words(after.get("debit_date")),
+            reason=payments.return_reason_words(code),
+            count=count,
+            plural="" if count == 1 else "s",
+        )
+        return StatusWords(text, "Needs review", "returned", CREDIT_REVERSED_BY)
     if row.action == leases.COLLECTION_PAUSED_ACTION:
         return StatusWords(PAUSED_TEXT.format(reason=after.get("reason", "")), "Paused", "pending")
     if row.action == leases.COLLECTION_RESUMED_ACTION:

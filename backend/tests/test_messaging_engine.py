@@ -421,6 +421,8 @@ def test_the_templates_list_order_does_not_follow_the_database_collation() -> No
         "reminder_due",
         "overdue_day5",
         "overdue_day10",
+        # PLAN-015e (ledger 0077): "F — Credit reversed (returned debit)".
+        "credit_returned_operator",
         "returned_debit",
         "returned_debit_no_retry",
         "final_statement",
@@ -432,6 +434,8 @@ def test_the_templates_list_order_does_not_follow_the_database_collation() -> No
         "invoice_sent",
         "receipt",
         "internal_day30",
+        # PLAN-015e (ledger 0077): "F — Credit reversed (internal)".
+        "credit_returned",
     ]
     inactive = [t for t in message_templates.rows() if not t.active]
     assert inactive and [t.code for t in message_templates.rows()][len(active) :] == [

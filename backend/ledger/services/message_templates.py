@@ -207,6 +207,8 @@ def sample_context(template: MessageTemplate, lease: Lease, today: date) -> dict
     due = today + timedelta(days=3)
     if template.code in merge.PDF_CODES:
         return _pdf_sample(template.code, lease, company, today, due)
+    if template.code in merge.CREDIT_RETURNED_CODES:
+        return _credit_sample(template.code, lease, company, today)
     values = {
         "operator_name": str(operator.display_name) if operator is not None else "",
         "store_number": str(store.store_number) if store.store_number is not None else "",
@@ -259,6 +261,42 @@ def _pdf_sample(
         "due_date": day_text(due),
         "pay_link": messaging.pay_link(operator, store.pk),
         "provider_pay_link": SAMPLE_PROVIDER_PAY_LINK,
+    }
+
+
+#: PLAN-015e: the sample charges owed again of the reversed credit's managers' e-mail.
+SAMPLE_CHARGES_OWED = "Rent {month} {amount}"
+
+
+def _credit_sample(
+    code: str, lease: Lease, company: CompanySettings, today: date
+) -> dict[str, str]:
+    """The preview's values of a reversed credit's e-mails (PLAN-015e): the lease's real
+    names and link, a sample amount, debit date, reason, charges and balance."""
+    store = lease.store
+    operator = lease.operator
+    values = {
+        "operator_name": str(operator.display_name) if operator is not None else "",
+        "store_number": str(store.store_number) if store.store_number is not None else "",
+        "store_name": str(store.external_label),
+        "amount": SAMPLE_AMOUNT,
+        "debit_date": day_text(today - timedelta(days=5)),
+        "return_reason": SAMPLE_RETURN_REASON,
+    }
+    if code == merge.CREDIT_RETURNED_CODE:
+        return {
+            **values,
+            "lease": messaging.lease_words(lease),
+            "charges_owed": SAMPLE_CHARGES_OWED.format(
+                month=month_long_text(today), amount=SAMPLE_AMOUNT
+            ),
+            "store_link": messaging.store_link(lease),
+        }
+    return {
+        **values,
+        "balance": SAMPLE_AMOUNT,
+        "support_email": str(company.support_email or ""),
+        "company_name": str(company.name),
     }
 
 
