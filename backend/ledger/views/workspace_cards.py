@@ -70,8 +70,6 @@ def side_cards(request: HttpRequest, store: Store, today: date) -> dict[str, Any
         "can_set_cost": meets(role_of(request.user), Role.BILLING),
         # PLAN-014 B3: the LEASE card's "Bill now" (the invoice builder is billing's).
         "can_bill": meets(role_of(request.user), Role.BILLING),
-        # PLAN-015b §9.3: the LEASE card's Pause and Resume collection are admin's.
-        "can_pause_collection": meets(role_of(request.user), Role.ADMIN),
         # PLAN-014 C4: the LEASE card's "Add a bank account" / "Replace" (no query).
         "bank_entry_available": get_hosted_fields().available(),
         # PLAN-014b item 3: the NOTES card (two queries), "All notes (n) ›" to the Notes &

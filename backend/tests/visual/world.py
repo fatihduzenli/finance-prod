@@ -204,8 +204,14 @@ def _build() -> World:
 
     store = a_store("0101 MAPLE AVENUE", 101, "GA")
     # PLAN-012e-2 D7 and D8: the address line and the Store cost block have something to show.
+    # PLAN-015f §3.5: an open date, so the LEASE card shows "Insurance 2026–27 · not billed ·
+    # Bill now" and the yellow "Insurance 2025–26 never billed" (the lease started 2025-01-01).
     Store.objects.filter(pk=store.pk).update(
-        address_line1="101 Maple Avenue", city="Savannah", postal_code="31401"
+        address_line1="101 Maple Avenue",
+        city="Savannah",
+        postal_code="31401",
+        open_date=date(2024, 6, 15),
+        needs_open_date=False,
     )
     store.refresh_from_db()
     cost = store_costs.set_cost(

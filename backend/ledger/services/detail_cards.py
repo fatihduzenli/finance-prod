@@ -342,8 +342,8 @@ class LeaseCollections:
     policy year (``insurance_label`` "" when the store has no open date) and the note about
     the previous year ("" when it was collected, or the lease did not hold the store then);
     ``insurance_billable`` (PLAN-014 I-b): the insurance row offers "Bill now", only while the
-    year is not billed and the lease owes it (:func:`ledger.services.insurance.bill_now`'s
-    rule, from what was read already)."""
+    year is not billed and :func:`ledger.services.insurance.can_bill_now` holds (PLAN-015f
+    §3.3, :func:`ledger.services.insurance.bill_now`'s rule, from what was read already)."""
 
     sign_fee: CollectionState
     sign_fee_bill_url: str
@@ -399,7 +399,7 @@ def lease_collections(lease: Lease, today: date) -> LeaseCollections:
         found,
         insurance_label=policy_label(year),
         insurance=collection_state(current, balance=owed.get(current.pk) if current else None),
-        insurance_billable=current is None and insurance.owes(lease, year, today),
+        insurance_billable=current is None and insurance.can_bill_now(lease, year),
         insurance_note=(
             _previous_year_note(
                 lease, year - 1, previous, owed.get(previous.pk) if previous else None, today
@@ -450,10 +450,13 @@ class LeaseAccount:
     @property
     def switchable(self) -> bool:
         """Whether the LEASE card offers "Switch to own account" (PLAN-014 C9): the lease
-        shares another lease's account and holds a customer of its own (one query, only
-        for a sharer and only when read)."""
-        return self.shares is not None and bool(
-            lease_sync.current_refs(self.lease).get(lease_sync.KIND_CUSTOMER)
+        shares the account of a lease of another store (PLAN-015f §3.4: a renewal sharing a
+        lease of its own store keeps it) and holds a customer of its own (one query, only
+        for such a sharer and only when read)."""
+        return (
+            self.shares is not None
+            and self.shares.store_id != self.lease.store_id
+            and bool(lease_sync.current_refs(self.lease).get(lease_sync.KIND_CUSTOMER))
         )
 
 

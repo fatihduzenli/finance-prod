@@ -1,24 +1,55 @@
 {% comment %}
 Closes an open bar menu (details.menu, docs/qa/PLAN-012e2-fewer-actions.md D5) on a click
-outside it and on Escape. A convenience only: without it the menu opens and closes with its
-summary.
+outside it and on Escape (focus back on its summary). In an open menu ArrowDown and ArrowUp
+move between its items (links and buttons alike), Home and End go to the first and the last;
+Tab leaves the menu as usual (PLAN-015f §3.1). A menu written without the menu roles gets
+them here (aria-haspopup on the summary, menu on the list, menuitem on each item), since the
+arrow keys exist only with this script. A convenience only: without it the menu opens and
+closes with its summary.
 {% endcomment %}
 <script>
   (function () {
     var menus = Array.prototype.slice.call(document.querySelectorAll("details.menu"));
     if (!menus.length) { return; }
+    function items(menu) {
+      return Array.prototype.slice.call(menu.querySelectorAll("ul a, ul button"));
+    }
+    menus.forEach(function (menu) {
+      var summary = menu.querySelector("summary");
+      var list = menu.querySelector("ul");
+      if (summary && !summary.hasAttribute("aria-haspopup")) { summary.setAttribute("aria-haspopup", "menu"); }
+      if (!list || list.hasAttribute("role")) { return; }
+      list.setAttribute("role", "menu");
+      Array.prototype.forEach.call(list.children, function (li) { li.setAttribute("role", "none"); });
+      items(menu).forEach(function (item) { item.setAttribute("role", "menuitem"); });
+    });
     document.addEventListener("click", function (event) {
       menus.forEach(function (menu) {
         if (menu.open && !menu.contains(event.target)) { menu.open = false; }
       });
     });
     document.addEventListener("keydown", function (event) {
-      if (event.key !== "Escape") { return; }
-      menus.forEach(function (menu) {
-        if (!menu.open) { return; }
-        menu.open = false;
-        menu.querySelector("summary").focus();
-      });
+      if (event.key === "Escape") {
+        menus.forEach(function (menu) {
+          if (!menu.open) { return; }
+          menu.open = false;
+          menu.querySelector("summary").focus();
+        });
+        return;
+      }
+      if (["ArrowDown", "ArrowUp", "Home", "End"].indexOf(event.key) === -1) { return; }
+      var menu = event.target.closest ? event.target.closest("details.menu") : null;
+      if (!menu || !menu.open) { return; }
+      var found = items(menu);
+      if (!found.length) { return; }
+      var at = found.indexOf(event.target);
+      var next;
+      if (event.key === "Home") { next = 0; }
+      else if (event.key === "End") { next = found.length - 1; }
+      else if (event.key === "ArrowDown") { next = at < 0 ? 0 : (at + 1) % found.length; }
+      else { next = at < 0 ? found.length - 1 : (at - 1 + found.length) % found.length; }
+      event.preventDefault();
+      found[next].focus();
     });
   })();
 </script>

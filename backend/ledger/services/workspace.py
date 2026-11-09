@@ -584,78 +584,133 @@ def _with(url: str, **params: str) -> str:
 
 def _actions(store: Store, header: Header, role: Role | None) -> list[Action]:
     """The bar's actions ``role`` may take (PLAN-012e-2 D5), in bar order: Create invoice
-    (primary; the operator not archived), Add payment and, for an admin, the Lease menu
-    (Edit lease, Transfer to another operator, End lease); a store without a current
-    lease offers New lease to an admin; a viewer gets none. Upload, Add entry and Create
-    missing charges are on their tabs."""
+    (primary; the operator not archived), Add payment and the Lease menu
+    (:func:`_lease_items`); a store without a current lease offers New lease to an admin, and
+    the Lease menu for its upcoming prospective lease; a viewer gets none. Upload, Add entry
+    and Create missing charges are on their tabs."""
     billing = meets(role, Role.BILLING)
-    admin = meets(role, Role.ADMIN)
     if not billing:
         return []
     lease = header.lease
-    if lease is None:
-        if not admin:
-            return []
-        return [
-            Action(
-                "new_lease",
-                "New lease",
-                _with(reverse("ledger:leases:create"), store=str(store.pk)),
-                element_id="new-lease",
-            )
-        ]
-    known = {"store": str(store.pk), "lease": str(lease.pk)}
     found: list[Action] = []
-    operator = header.operator
-    if operator is not None and operator.archived_at is None:
+    if lease is None:
+        if meets(role, Role.ADMIN):
+            found.append(
+                Action(
+                    "new_lease",
+                    "New lease",
+                    _with(reverse("ledger:leases:create"), store=str(store.pk)),
+                    element_id="new-lease",
+                )
+            )
+    else:
+        known = {"store": str(store.pk), "lease": str(lease.pk)}
+        operator = header.operator
+        if operator is not None and operator.archived_at is None:
+            found.append(
+                Action(
+                    "create_invoice",
+                    "Create invoice",
+                    _with(reverse("ledger:invoices:new_store", kwargs={"pk": store.pk}), **known),
+                    primary=True,
+                    element_id="create-invoice",
+                )
+            )
         found.append(
             Action(
-                "create_invoice",
-                "Create invoice",
-                _with(reverse("ledger:invoices:new_store", kwargs={"pk": store.pk}), **known),
-                primary=True,
-                element_id="create-invoice",
+                "record_payment",
+                "Add payment",
+                reverse("ledger:stores:record_payment", kwargs={"pk": store.pk}),
+                element_id="record-payment",
             )
         )
-    found.append(
-        Action(
-            "record_payment",
-            "Add payment",
-            reverse("ledger:stores:record_payment", kwargs={"pk": store.pk}),
-            element_id="record-payment",
-        )
-    )
-    if admin:
-        found.append(
-            Action(
-                "lease",
-                "Lease",
-                "",
-                items=(
-                    Action(
-                        "edit_lease",
-                        "Edit lease",
-                        _with(reverse("ledger:leases:edit", kwargs={"pk": lease.pk}), **known),
-                        element_id="bar-edit-lease",
-                    ),
-                    Action(
-                        "transfer",
-                        "Transfer to another operator",
-                        reverse("ledger:stores:transfer", kwargs={"pk": store.pk}),
-                        element_id="store-transfer",
-                    ),
-                    Action(
-                        "end_lease",
-                        "End lease",
-                        reverse("ledger:stores:end_lease", kwargs={"pk": store.pk}),
-                        danger=True,
-                        element_id="store-end-lease",
-                    ),
-                ),
-                element_id="lease-menu",
-            )
-        )
+    items = _lease_items(store, header, role)
+    if items:
+        found.append(Action("lease", "Lease", "", items=items, element_id="lease-menu"))
     return found
+
+
+def _lease_items(store: Store, header: Header, role: Role | None) -> tuple[Action, ...]:
+    """The Lease menu (PLAN-015f §3.2), in this order, each item only when it applies to
+    ``role``: Edit lease (admin, a current lease); Change start date (the Status row's lease
+    while :func:`changeable_start`: billing on a prospective lease, admin on an active one);
+    Activate now (billing, prospective); Pause collection (admin, active) or Resume collection
+    (admin, paused); Transfer to another operator and End lease (admin, a current lease). The
+    controls the LEASE card's Status and Lease rows carried before (PLAN-015b, PLAN-015d), with
+    their element ids."""
+    admin = meets(role, Role.ADMIN)
+    billing = meets(role, Role.BILLING)
+    lease, shown = header.lease, header.status_lease
+    status = shown.collection_status if shown is not None else ""
+    found: list[Action] = []
+    if admin and lease is not None:
+        known = {"store": str(store.pk), "lease": str(lease.pk)}
+        found.append(
+            Action(
+                "edit_lease",
+                "Edit lease",
+                _with(reverse("ledger:leases:edit", kwargs={"pk": lease.pk}), **known),
+                element_id="bar-edit-lease",
+            )
+        )
+    if shown is not None:
+        prospective = status == CollectionStatus.PROSPECTIVE
+        active = status == CollectionStatus.ACTIVE
+        if header.start_changeable and (prospective and billing or active and admin):
+            found.append(
+                Action(
+                    "change_start",
+                    "Change start date",
+                    reverse("ledger:leases:change_start", kwargs={"pk": shown.pk}),
+                    element_id="change-start",
+                )
+            )
+        if prospective and billing:
+            found.append(
+                Action(
+                    "activate",
+                    "Activate now",
+                    reverse("ledger:leases:activate", kwargs={"pk": shown.pk}),
+                    element_id="activate-lease",
+                )
+            )
+        if active and admin:
+            found.append(
+                Action(
+                    "pause_collection",
+                    "Pause collection",
+                    reverse("ledger:leases:pause_collection", kwargs={"pk": shown.pk}),
+                    element_id="pause-collection",
+                )
+            )
+        if status == CollectionStatus.PAUSED and admin:
+            found.append(
+                Action(
+                    "resume_collection",
+                    "Resume collection",
+                    reverse("ledger:leases:resume_collection", kwargs={"pk": shown.pk}),
+                    element_id="resume-collection",
+                )
+            )
+    if admin and lease is not None:
+        found.append(
+            Action(
+                "transfer",
+                "Transfer to another operator",
+                reverse("ledger:stores:transfer", kwargs={"pk": store.pk}),
+                element_id="store-transfer",
+            )
+        )
+        found.append(
+            Action(
+                "end_lease",
+                "End lease",
+                reverse("ledger:stores:end_lease", kwargs={"pk": store.pk}),
+                danger=True,
+                element_id="store-end-lease",
+            )
+        )
+    return tuple(found)
 
 
 def _create_charges_url(store: Store, header: Header, role: Role | None) -> str:
