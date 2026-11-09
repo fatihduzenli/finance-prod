@@ -17,7 +17,7 @@ Four changes. (A) A rent line with a free-rent concession goes to the processor 
 - `payments/one_off_invoices._provider_line(item)`: for a line whose `rent_charge.concession > 0` the `LineItem` is quantity 1 at unit price `line_total − concession` (the net), with `details` = the line's own details (when any) followed by the concession sentence, joined with `"; "`:
   `"Rent $2,000.00 less $666.67: Free rent per lease agreement (Dec 10 – Jan 8)"` — built by one small function next to `_provider_line` from `item.line_total`, `rent.concession` and `rent.concession_text` with the money formatter the module already uses; when `concession_text` is empty the sentence ends at the amount (`"Rent $2,000.00 less $666.67"`). The line's `item` text is what the existing not-exact branch already builds for a quantity-1 line (`text or item.description`). A line without a concession is built exactly as today.
 - `payments/provider.LineItem` loses `discount` and `gross`; `total` is `quantity × unit_price` again; the discount bounds check goes. `payments/stax/mapping`: `discount_rate`, `_RATE` and the `discountRate` key go (no dead code; the TODO-VERIFY-075 comment goes with them). `_line_amounts` is unchanged in meaning: the sum of the lines' totals is the net, equal to the invoice's `total` and `subtotal`.
-- A rent line whose concession equals its amount (net 0) is refused as today with nothing sent (the existing "fully free rent alone" refusal; the validation's positive-price rule may now be what refuses it — the staff sentence must stay the one the test pins).
+- A rent-alone invoice that is free in full is refused as today with nothing sent (`NOTHING_TO_BILL`). **Revised after review (Fable, 2026-11-09):** a Rent line free in full beside a billed line is left out of the lines sent to the processor, on create and update alike (the processor refuses a line at price zero, and the first build let the whole invoice fail); the other lines still sum to our invoice total, and our rows, page and PDF keep the rent line and its concession line.
 - The update path (`invoice_update_body`) uses the same line builder and so sends the same net line.
 - Nothing changes in `invoice_builder.py`, in the DISCOUNT rows, in `invoices/_invoice.html`, `draft.html` or `pdf/invoice.py`.
 
@@ -88,4 +88,5 @@ Happy paths as in §4. Boundaries: concession of one cent; concession = amount �
 ## 8. Assumptions (the work proceeds under them)
 
 - The details sentence wording of §3A. Say if another wording is wanted on the processor's invoice.
+- A Rent line free in full is left out of the processor's invoice beside billed lines (told to the owner 2026-11-09). Say if such an invoice should be refused at the builder instead.
 - `invoice_sender` is not added to the Django admin form.
