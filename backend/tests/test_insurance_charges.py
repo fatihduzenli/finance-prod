@@ -254,7 +254,9 @@ def test_bill_now_without_a_premium_creates_a_charge_that_waits_for_it() -> None
         ("started after the anniversary", "BILL_NOT_OWED"),
         ("ended before the anniversary", "BILL_NOT_OWED"),
         ("store closed before the anniversary", "BILL_NOT_OWED"),
-        ("prospective", "BILL_NOT_OWED"),
+        # PLAN-015f §3.3: a prospective lease holding the store on the anniversary is billed
+        # (test_plan015f_bill_now.py); one starting after it is still refused.
+        ("prospective, started after the anniversary", "BILL_NOT_OWED"),
     ],
 )
 def test_bill_now_refuses_with_one_sentence_and_writes_nothing(case: str, message: str) -> None:
@@ -277,6 +279,7 @@ def test_bill_now_refuses_with_one_sentence_and_writes_nothing(case: str, messag
         lease = lease_on(
             store(date(2025, 3, 10)),
             operator=operator,
+            started_on=date(2026, 4, 1),
             collection_status=CollectionStatus.PROSPECTIVE,
         )
     outcome = insurance.bill_now(lease, TODAY, actor=None)

@@ -1223,6 +1223,8 @@ def queue_own_customers(*, dry_run: bool, limit: int | None = None) -> OwnCustom
 
 #: Refusal reasons of :func:`switch_to_own_account` (stored in its audit row; never shown).
 SWITCH_NOT_SHARING = "NotSharing"
+#: PLAN-015f §3.4: the shared account is a lease's of the same store (a renewal keeps it).
+SWITCH_SAME_STORE = "SameStore"
 SWITCH_NO_CUSTOMER = "NoOwnCustomer"
 SWITCH_ARCHIVED = "Archived"
 SWITCH_PAUSED = "AutopayPaused"
@@ -1234,6 +1236,9 @@ SWITCH_NOT_MOVED = "AutopayNotMoved"
 #: The sentence of each refusal; a provider failure has its own (:data:`SWITCH_FAILED`).
 SWITCH_MESSAGES: dict[str, str] = {
     SWITCH_NOT_SHARING: "This lease already uses its own account. Nothing was changed.",
+    SWITCH_SAME_STORE: (
+        "This lease shares the account of another lease of the same store. Nothing was changed."
+    ),
     SWITCH_NO_CUSTOMER: provider_sentence(
         "This lease has no {provider} customer of its own yet. Nothing was changed."
     ),
@@ -1286,11 +1291,14 @@ class _NotMoved(Exception):  # noqa: N818 (an outcome carried out of the savepoi
 def switch_refusal(lease: Lease) -> str:
     """Why the lease cannot switch to its own account now, or ``""`` (local data only;
     the view's up-front check and the job's first one): it does not share another lease's
-    account, its operator is archived, it holds no customer of its own, or a rent or
-    insurance schedule of it is paused at the provider (resuming it later would debit the
-    shared account's method)."""
-    if lease_sync.billing_of(lease).shares_account_of_id is None:
+    account, the account is a lease's of the same store (PLAN-015f §3.4), its operator is
+    archived, it holds no customer of its own, or a rent or insurance schedule of it is
+    paused at the provider (resuming it later would debit the shared account's method)."""
+    shares = lease_sync.billing_of(lease).shares_account_of
+    if shares is None:
         return SWITCH_NOT_SHARING
+    if shares.store_id == lease.store_id:
+        return SWITCH_SAME_STORE
     if lease.operator is not None and lease.operator.archived_at is not None:
         return SWITCH_ARCHIVED
     if not lease_sync.current_refs(lease).get(lease_sync.KIND_CUSTOMER):

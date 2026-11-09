@@ -458,12 +458,17 @@ def test_no_bill_now_for_a_lease_that_owes_no_insurance_this_year() -> None:
     card = lease_card(store)
     assert "not billed" in section(card, "header-insurance-state", "</dd>")
     assert 'id="insurance-bill"' not in card
-    # A prospective lease owes nothing yet (it is not the store page's lease: read directly).
+    # PLAN-015f §3.3: a prospective lease that holds the store on the anniversary may be
+    # billed now (it is not the store page's lease: read directly); one starting after the
+    # anniversary may not.
     lease.started_on, lease.collection_status = date(2025, 6, 1), "prospective"
     lease.save()
     rows = detail_cards.lease_collections(lease, TODAY)
     assert rows.insurance is not None and rows.insurance.code == "unbilled"
-    assert rows.insurance_billable is False
+    assert rows.insurance_billable is True
+    lease.started_on = date(2026, 8, 1)
+    lease.save()
+    assert detail_cards.lease_collections(lease, TODAY).insurance_billable is False
 
 
 def test_bill_now_on_the_card_bills_the_year_and_the_row_turns_red() -> None:

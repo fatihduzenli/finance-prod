@@ -16,8 +16,10 @@ Generation is idempotent on ``(lease, policy_year)`` (a unique constraint plus
 ``get_or_create``). :func:`insurance_due_soon` only reads: it lists the anniversaries
 of the coming days for the run screen, with the charge when one exists. Insurance
 autopay schedules are a later plan (7c). :func:`bill_now` (PLAN-014 I-b, the LEASE card's
-"Bill now") creates one lease's charge of the current policy year by the same rule, audited
-with the staff member who pressed it.
+"Bill now") creates one lease's charge of the current policy year, audited with the staff
+member who pressed it, by :func:`can_bill_now` (PLAN-015f §3.3): the lease holds the store on
+the anniversary by its dates, prospective or not, the anniversary passed or not; the charge is
+due on the anniversary, never earlier. The daily generator keeps :func:`owes`.
 
 **Manual payments** (:func:`record_manual_payment`, PLAN-012d D6a): the rent rules
 (method, amount, date, note and the form's creation key;
@@ -139,6 +141,21 @@ def owes(lease: Lease, year: int, today: date) -> bool:
     )
 
 
+def can_bill_now(lease: Lease, year: int) -> bool:
+    """Whether staff may bill ``year`` of ``lease`` now (PLAN-015f §3.3; no query: the
+    lease's store is read with it): the store has an open date, has not closed on or before
+    the year's anniversary, and the lease holds the store on that anniversary by its dates
+    (:func:`holds_on`), whether or not the anniversary has passed and whether or not the
+    lease is prospective. :func:`generate_insurance_charges` keeps :func:`owes`."""
+    store = lease.store
+    if store.open_date is None:
+        return False
+    due = anniversary(store.open_date, year)
+    if store.closed_at is not None and due >= store.closed_at:
+        return False
+    return holds_on(lease, due)
+
+
 def _leases() -> list[Lease]:
     return list(
         Lease.objects.select_related("store")
@@ -219,18 +236,19 @@ class Outcome:
 
 def bill_now(lease: Lease, today: date, *, actor: User | None) -> Outcome:
     """The LEASE card's "Bill now" on the insurance row (PLAN-014 I-b): the charge of the
-    current policy year of ``lease``, by the rule of :func:`generate_insurance_charges` (the
-    store's open date, the lease not prospective and holding the store on the anniversary,
-    before the store closed; the year's premium, or none and ``needs_premium``), audited
-    with ``actor``. Refused with one sentence, writing nothing, when the store has no open
-    date, the lease does not owe this year or the year is already billed (a second press)."""
+    current policy year of ``lease`` by :func:`can_bill_now` (PLAN-015f §3.3: the lease holds
+    the store on the anniversary, before the store closed; prospective or not), due on the
+    anniversary, with the year's premium (or none and ``needs_premium``), audited with
+    ``actor``. Refused with one sentence, writing nothing, when the store has no open date,
+    the lease does not hold the store on the anniversary or the store closed by then
+    (:data:`BILL_NOT_OWED`), or the year is already billed (a second press)."""
     store = lease.store
     if store.needs_open_date or store.open_date is None:
         return Outcome(False, BILL_NO_OPEN_DATE)
     year = policy_year(store.open_date, today)
-    due = in_scope(lease, year, today)
-    if due is None or not owes(lease, year, today):
+    if not can_bill_now(lease, year):
         return Outcome(False, BILL_NOT_OWED)
+    due = anniversary(store.open_date, year)
     premium = InsurancePremium.objects.filter(policy_year=year).values_list("amount", flat=True)
     charge, made = _create(lease, year, due, premium.first(), actor=actor)
     if not made:
