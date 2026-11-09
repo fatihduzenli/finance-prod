@@ -711,7 +711,9 @@ def test_the_page_renders_within_a_fixed_number_of_queries(selected: bool) -> No
     # one, the theme row: 54 and 65.
     assert large == small, (small, large)
     # PLAN-014 B3: +2 with a store selected (the sign fee, the insurance charges and their
-    # balances for the LEASE card): 67.
+    # balances for the LEASE card): 67. PLAN-015e adds none: Needs review's reversed credits
+    # come in the void audit read above, and the LEASE card's Credit row (the credit held and a
+    # reversed credit's line) is the one credit read it was.
     assert small <= (67 if selected else 54), small
 
 

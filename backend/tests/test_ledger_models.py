@@ -2284,6 +2284,33 @@ LEDGER_CASES: list[ConstraintCase] = [
             one_off_charge=saved(new_one_off_charge()),
         ),
     ),
+    # PLAN-015e: a reversed credit holds nothing; only a held row is split off a payment.
+    ConstraintCase(
+        "lease_credits_reversed_holds_nothing",
+        lambda: new_lease_credit(
+            remaining=D("0.00"),
+            reversed_at=datetime(2026, 11, 6, 15, tzinfo=UTC),
+            reversed_reason="R01: Insufficient Funds",
+        ),
+        lambda: new_lease_credit(
+            remaining=D("0.01"),
+            reversed_at=datetime(2026, 11, 6, 15, tzinfo=UTC),
+            reversed_reason="R01: Insufficient Funds",
+        ),
+    ),
+    ConstraintCase(
+        "payments_split_from_held_row",
+        lambda: new_payment(
+            amount=D("300.00"),
+            credit=saved(new_lease_credit()),
+            split_from=saved(new_payment(rent_charge=saved(new_rent_charge()))),
+        ),
+        # The same row naming no credit: a payment split off another that is not held.
+        lambda: new_payment(
+            amount=D("300.00"),
+            split_from=saved(new_payment(rent_charge=saved(new_rent_charge()))),
+        ),
+    ),
     ConstraintCase(
         "payments_credit_refund_shape",
         lambda: new_payment(

@@ -449,8 +449,10 @@ def _hold(
     stays received (the processor knows nothing different). A rent payment wholly taken is
     re-pointed from the charge to the credit; otherwise ``part`` is split off into a payment
     of its own naming the credit (same method, dates, reference, invoice and allocation
-    group), the payment keeping the rest on its charge. Audited (``lease_credit.created``
-    with ``from_rent_charge``; :data:`HELD_ACTION`). The held payment."""
+    group) and the payment it came from (``split_from``, PLAN-015e: a return of the
+    payment's transaction reaches it), the payment keeping the rest on its charge. Audited
+    (``lease_credit.created`` with ``from_rent_charge``; :data:`HELD_ACTION`). The held
+    payment."""
     credit = credits.create(
         lease,
         part,
@@ -492,6 +494,7 @@ def _hold(
             recorded_by=payment.recorded_by,
             allocation_group=payment.allocation_group,
             credit=credit,
+            split_from=payment,
         )
     AuditLog.objects.create(
         actor=actor,

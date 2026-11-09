@@ -27,6 +27,7 @@ from ledger.models import (
     InstallmentPlan,
     InsurancePremium,
     Lease,
+    LeaseCredit,
     LeaseEnd,
     OneOffCharge,
     Operator,
@@ -43,7 +44,7 @@ from ledger.models import (
     StoreCostSource,
     StoreStatus,
 )
-from ledger.services import attention, contacts
+from ledger.services import attention, contacts, credits
 from payments.models import (
     MismatchKind,
     ReconciliationMismatch,
@@ -513,6 +514,37 @@ def paused_plan(lease: Lease) -> InstallmentPlan:
     return plan
 
 
+def reversed_credit(lease: Lease, amount: str = "200.00") -> LeaseCredit:
+    """PLAN-015e: a credit of ``lease`` reversed by a returned bank debit (as
+    :func:`ledger.services.credits.reverse_from_return` leaves it, one application), the
+    lease flagged Needs review."""
+    credit = LeaseCredit.objects.create(
+        lease=lease,
+        amount=D(amount),
+        remaining=D("0.00"),
+        method="other",
+        received_on=date(2026, 10, 1),
+        note="Kept as a credit.",
+        allocation_group=uuid.uuid4(),
+        reversed_at=NOW,
+        reversed_reason="R01: Insufficient Funds",
+    )
+    Lease.objects.filter(pk=lease.pk).update(needs_review=True, review_reason="credit_returned")
+    AuditLog.objects.create(
+        action=credits.REVERSED_ACTION,
+        entity_type=credits.ENTITY,
+        entity_id=str(credit.pk),
+        before=None,
+        after={
+            "amount": amount,
+            "applications": [{"payment": str(uuid.uuid4()), "amount": amount}],
+            "debit_date": "2026-10-01",
+            "return_code": "R01",
+        },
+    )
+    return credit
+
+
 def build(n: int) -> None:
     """``n`` of every kind of item."""
     InsurancePremium.objects.get_or_create(policy_year=2026, defaults={"amount": D("600.00")})
@@ -531,6 +563,8 @@ def build(n: int) -> None:
         paused_plan(lease)
         # PLAN-012f-c D3: a manual payment voided while its invoice reads paid.
         marked_paid_void(lease, 9000 + n * 10 + i)
+        # PLAN-015e: a credit a returned bank debit reversed (credit_returned).
+        reversed_credit(lease)
         LeaseEnd.objects.create(
             lease=lease,
             ended_on=TODAY - timedelta(days=1),

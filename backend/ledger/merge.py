@@ -6,8 +6,10 @@ A template's subject and body may name exactly the placeholders of its code's li
 :data:`FINAL_STATEMENT_FIELDS` for the template ``final_statement``, and for the two portal
 messages of PLAN-014 H2 :data:`PORTAL_INVITE_FIELDS` (``portal_invite``, whose own placeholder
 ``{set_password_link}`` no other template may use), :data:`PORTAL_RESET_FIELDS`
-(``portal_reset``, with ``{reset_link}``) and, for the two messages of PLAN-015c that carry a
-PDF, :data:`INVOICE_FIELDS` (``invoice_sent``) and :data:`RECEIPT_FIELDS` (``receipt``)
+(``portal_reset``, with ``{reset_link}``), for the two messages of PLAN-015c that carry a
+PDF, :data:`INVOICE_FIELDS` (``invoice_sent``) and :data:`RECEIPT_FIELDS` (``receipt``), and for
+the two of PLAN-015e about a reversed credit :data:`CREDIT_RETURNED_FIELDS` (``credit_returned``)
+and :data:`CREDIT_RETURNED_OPERATOR_FIELDS` (``credit_returned_operator``)
 (:func:`fields_for`); :data:`MERGE_FIELDS` is every
 placeholder of any list. ``{{`` and ``}}`` write a literal
 brace. Nothing else is accepted: no attribute or index access (``{operator_name.__dict__}``,
@@ -110,12 +112,47 @@ RECEIPT_FIELDS: tuple[str, ...] = (
     "company_name",
 )
 PDF_CODES: frozenset[str] = frozenset({INVOICE_CODE, RECEIPT_CODE})
+#: PLAN-015e: a bank debit kept as a credit was returned and the credit reversed. The
+#: managers' e-mail (``credit_returned``, internal) names the lease (``{lease}``: "Lease from
+#: Nov 1, 2026") and the charges the credit had paid, owed again (``{charges_owed}``: each
+#: charge and amount, or "none"); the operator's (``credit_returned_operator``) names the
+#: store's open balance after the reversal (``{balance}``). ``{amount}`` is the credit's
+#: amount in the first and the returned debit's in the second; no account number in either.
+CREDIT_RETURNED_CODE = "credit_returned"
+CREDIT_RETURNED_OPERATOR_CODE = "credit_returned_operator"
+CREDIT_RETURNED_FIELDS: tuple[str, ...] = (
+    "operator_name",
+    "store_number",
+    "store_name",
+    "lease",
+    "amount",
+    "debit_date",
+    "return_reason",
+    "charges_owed",
+    "store_link",
+)
+CREDIT_RETURNED_OPERATOR_FIELDS: tuple[str, ...] = (
+    "operator_name",
+    "store_number",
+    "store_name",
+    "amount",
+    "debit_date",
+    "return_reason",
+    "balance",
+    "support_email",
+    "company_name",
+)
+CREDIT_RETURNED_CODES: frozenset[str] = frozenset(
+    {CREDIT_RETURNED_CODE, CREDIT_RETURNED_OPERATOR_CODE}
+)
 _CODE_FIELDS: dict[str, tuple[str, ...]] = {
     FINAL_STATEMENT_CODE: FINAL_STATEMENT_FIELDS,
     PORTAL_INVITE_CODE: PORTAL_INVITE_FIELDS,
     PORTAL_RESET_CODE: PORTAL_RESET_FIELDS,
     INVOICE_CODE: INVOICE_FIELDS,
     RECEIPT_CODE: RECEIPT_FIELDS,
+    CREDIT_RETURNED_CODE: CREDIT_RETURNED_FIELDS,
+    CREDIT_RETURNED_OPERATOR_CODE: CREDIT_RETURNED_OPERATOR_FIELDS,
 }
 MERGE_FIELDS: tuple[str, ...] = tuple(
     dict.fromkeys(
@@ -126,6 +163,8 @@ MERGE_FIELDS: tuple[str, ...] = tuple(
             *PORTAL_RESET_FIELDS,
             *INVOICE_FIELDS,
             *RECEIPT_FIELDS,
+            *CREDIT_RETURNED_FIELDS,
+            *CREDIT_RETURNED_OPERATOR_FIELDS,
         )
     )
 )
@@ -138,6 +177,8 @@ _VALUE_SETS = (
     frozenset(PORTAL_RESET_FIELDS),
     frozenset(INVOICE_FIELDS),
     frozenset(RECEIPT_FIELDS),
+    frozenset(CREDIT_RETURNED_FIELDS),
+    frozenset(CREDIT_RETURNED_OPERATOR_FIELDS),
     _ALLOWED,
 )
 UNREADABLE = "Braces must pair: write {{ and }} for a literal brace."
