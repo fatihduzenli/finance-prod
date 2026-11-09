@@ -1764,6 +1764,11 @@ p.detail-more-notes { padding-left: 0; }
   .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=datetime-local], input[type=month], input[type=file] { min-height: var(--tap); }
   input[type=checkbox], input[type=radio] { min-width: 24px; min-height: 24px; }
   td a, li a, .pagination a, .pager a, .segmented a, .tab { display: inline-flex; align-items: center; min-height: var(--tap); }
+  /* PLAN-015g §3D: a contact entry's store link in its meta line stays at text height, so a
+     wrapped line keeps its line height; a transparent box centred on the link (its first line
+     box when the label wraps) keeps the 44 px tap area. */
+  .contact-meta a { display: inline; min-height: 0; position: relative; }
+  .contact-meta a::after { content: ""; position: absolute; left: 0; right: 0; top: calc(50% - var(--tap) / 2); height: var(--tap); background: transparent; }
   /* A grid cell's block keeps its amount over its status line. */
   table.grid td a.cell-block { min-height: var(--tap); display: flex; flex-direction: column; align-items: flex-end; justify-content: center; }
 }

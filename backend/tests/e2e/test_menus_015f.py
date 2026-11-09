@@ -2,7 +2,8 @@
 Notes & follow-ups tab; the arrow keys move between a menu's items (Home and End to the ends),
 Escape closes it and gives the focus back to its summary, Tab leaves it; on a phone the two
 summaries share one line under the entry's meta line, the text keeps the full width, and an
-open list stays on the screen. PLAN-015f §3.2: the Lease ▾
+open list stays on the screen; a wrapped meta line keeps its line height and the store link a
+44 px tap box (PLAN-015g §3D). PLAN-015f §3.2: the Lease ▾
 menu reaches Pause collection from the keyboard; a menu of buttons (the operator's More ▾)
 gets the menu roles and the arrow keys from the shared script."""
 
@@ -150,6 +151,47 @@ def test_the_entry_menus_stay_on_one_line_on_the_phone(
     listed = page.locator(f"#outcome-{promise.pk} ul").bounding_box()
     assert listed is not None
     assert listed["x"] >= 0 and listed["x"] + listed["width"] <= PHONE["width"]
+    width = page.evaluate("document.documentElement.scrollWidth")
+    assert width <= PHONE["width"]
+
+
+def test_a_wrapped_meta_line_keeps_its_line_height_and_the_store_link_a_44px_tap_box(
+    live_server: LiveServer, phone: BrowserContext
+) -> None:
+    # PLAN-015g §3D: a long store label wraps the meta line onto a second line; the link no
+    # longer stretches the line to 44 px, and its transparent ::after box keeps the tap area.
+    store, promise = a_world()
+    Store.objects.filter(pk=store.pk).update(
+        external_label="1515 Peachtree Corners Town Center Outparcel North"
+    )
+    page = signed_in(phone, live_server, "e2e-menus-meta")
+    page.goto(f"{live_server.url}/stores/{store.pk}/?tab=contacts")
+    meta = page.locator(f"#contact-{promise.pk} .contact-meta")
+    found = meta.evaluate(
+        """(p) => {
+            const style = getComputedStyle(p);
+            const link = p.querySelector("a");
+            const after = getComputedStyle(link, "::after");
+            const line = style.lineHeight === "normal"
+                ? parseFloat(style.fontSize) * 1.2 : parseFloat(style.lineHeight);
+            return {
+                height: p.getBoundingClientRect().height,
+                line: line,
+                afterHeight: after.height,
+                afterPosition: after.position,
+                linkDisplay: getComputedStyle(link).display,
+            };
+        }"""
+    )
+    assert found["height"] > 1.5 * found["line"], found  # the line really wraps
+    assert found["height"] <= 2 * found["line"] + 2, found
+    assert (found["afterHeight"], found["afterPosition"]) == ("44px", "absolute"), found
+    assert found["linkDisplay"] == "inline", found
+    # The menus still take their own line under the meta line.
+    box = meta.bounding_box()
+    outcome = page.locator(f"#outcome-{promise.pk} summary").bounding_box()
+    assert box is not None and outcome is not None
+    assert outcome["y"] >= box["y"] + box["height"]
     width = page.evaluate("document.documentElement.scrollWidth")
     assert width <= PHONE["width"]
 
