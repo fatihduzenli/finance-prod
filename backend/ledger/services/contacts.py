@@ -278,7 +278,7 @@ def note_text(entry: ContactEntry) -> str:
         and entry.body.strip() == promise_sentence(entry.promised_amount, entry.promised_date)
     ):
         return ""
-    return entry.body
+    return str(entry.body)
 
 
 def outcome_text(entry: ContactEntry) -> str:
@@ -289,6 +289,7 @@ def outcome_text(entry: ContactEntry) -> str:
     Reads the joins of :func:`entries` and :func:`store_entries` only."""
     if entry.kind != ContactKind.PROMISE or entry.status == ContactStatus.OPEN:
         return ""
+    status = str(entry.get_status_display())
     day: date | None = None
     if entry.status == ContactStatus.KEPT:
         payment = entry.kept_by_payment
@@ -296,13 +297,13 @@ def outcome_text(entry: ContactEntry) -> str:
             day = payment.settled_on
         elif entry.closed_by is not None:
             day = entry.closed_by.happened_on
-        return f"Kept on {day_short_text(day)}" if day is not None else entry.get_status_display()
+        return f"Kept on {day_short_text(day)}" if day is not None else status
     if entry.status == ContactStatus.RESCHEDULED:
         closer = entry.closed_by
         day = closer.promised_date if closer is not None else None
         if day is not None:
             return f"Rescheduled to {day_short_text(day)}"
-    return entry.get_status_display()
+    return status
 
 
 def with_status(rows: QuerySet[ContactEntry], status: str) -> QuerySet[ContactEntry]:

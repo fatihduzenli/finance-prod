@@ -56,7 +56,9 @@ def items(menu_html: str) -> list[str]:
 
 
 def badge(html: str) -> str:
-    return re.findall(r'<span class="badge promise-status promise-\w+">([^<]*)</span>', html)[0]
+    return str(
+        re.findall(r'<span class="badge promise-status promise-\w+">([^<]*)</span>', html)[0]
+    )
 
 
 def a_world() -> tuple[ContactEntry, object]:
