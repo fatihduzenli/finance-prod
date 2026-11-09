@@ -36,10 +36,13 @@ On the store page (`ledger:stores:detail`), each Notes & follow-ups entry gets a
   6. "End lease" — admin, danger (as today).
 - The menu renders for any role that has at least one item (billing sees it on a prospective lease; a viewer never sees it). No current lease: "New lease" (admin) as today.
 
-### 3.3 Insurance Bill now (`detail_cards.py`, `insurance.py::bill_now`)
+### 3.3 Insurance Bill now (`detail_cards.py`, `insurance.py::bill_now`) — revised after review (Fable, 2026-11-08 22:00)
 
-- `insurance_billable` becomes: current year's charge is `None`, the store has an open date, and `insurance.can_bill_now(lease, year, today)` (new, pure): the store is not closed on or before the anniversary and the lease holds the store on the anniversary by its dates (`holds_on`), whether or not the anniversary has passed and whether or not the lease is prospective. The button's form, URL, view and audit are unchanged.
-- `bill_now` uses the same `can_bill_now` rule in place of `in_scope`+`owes`, so a press before the anniversary creates the year's charge with `due_on` = the anniversary (never earlier) and the audited `insurance_charge.created`. The refusal messages stay; `BILL_NOT_OWED` is kept for "does not hold the store on the anniversary / store closed". The daily generator (`generate_insurance_charges`) keeps `owes` — no change to automatic billing.
+The first wording ("holds the store on the anniversary, passed or not") changed nothing reachable: `bill_now` bills `policy_year(open_date, today)`, whose anniversary is always on or before today, and a prospective lease with a future start never holds the store on a past anniversary. The owner's case is a lease that began after this year's anniversary (the previous tenant owed the year under ADR-0005): its row reads "not billed" with no button. The rule the owner asked for is the Sign fee's: staff may bill whenever it is not billed.
+
+- `insurance_billable` becomes: the current policy year has no charge for this lease, the store has an open date and `insurance.can_bill_now(lease, year)` holds, where `can_bill_now` is pure: the store is not closed on or before the year's anniversary and the lease has not ended before that anniversary (`ended_on` is None or ≥ the anniversary). No start-date condition, prospective or not.
+- `bill_now` uses the same rule. `due_on` is the anniversary, or the lease's `started_on` when that is later (a lease is never billed for a day before it began); the audit row records the due date. `BILL_NOT_OWED` keeps its text for the refusals (store closed by the anniversary, lease ended before it). The daily generator (`generate_insurance_charges`) keeps `owes`: automatic billing is unchanged; only staff's press is wider.
+- ADR-0005 is not amended: the holder on the anniversary still owes by default; this is staff's explicit, audited override.
 
 ### 3.4 Switch to own account (`detail_cards.py::LeaseAccount.switchable`)
 
@@ -84,7 +87,7 @@ Happy: open promise → Outcome ▾ with three items + ⋯ with Add correction (
 
 - Q1. The "Paused since … — reason" line stays under the badge (information, not a control). Say if the badge alone is wanted with the reason as its hover title instead.
 - Q2. "Edit (until HH:MM)" within the 15-minute window stays, inside the ⋯ menu. Say if it should go.
-- Q3. Insurance Bill now before the anniversary bills the year early with the normal due date (the anniversary). Say if early billing should instead be refused with a message.
+- Q3 (revised). Insurance "Bill now" shows for billing on every "not billed" row of a lease that has not ended before the anniversary of a store open then and not closed by it — including a lease that began after this year's anniversary, which ADR-0005 does not make owe the year. The charge is due on the anniversary, or on the lease's start date when later. Say if a lease that began after the anniversary should instead keep "not billed" without a button.
 - Q4. The Contacts tab's note entries (Pin / Edit / Delete) are left as they are; only contact entries (calls, e-mails, visits, promises) get the menus. Say if notes should get a ⋯ too.
 
 ## 9. Size and gate class
