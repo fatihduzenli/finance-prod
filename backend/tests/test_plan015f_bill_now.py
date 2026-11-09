@@ -1,8 +1,9 @@
 """PLAN-015f §3.3 and §3.4: the insurance row's "Bill now" by
-:func:`ledger.services.insurance.can_bill_now` (the lease holds the store on the anniversary,
-prospective or not, the anniversary passed or not; due on the anniversary; the daily generator
-unchanged), and "Switch to own account" only for a lease sharing another store's lease's
-account (the card and the POST alike)."""
+:func:`ledger.services.insurance.can_bill_now` (revised: the store open and not closed by the
+anniversary and the lease not ended before it, whatever its start date, prospective or not; due
+on the anniversary or the lease's start when later; the daily generator unchanged), and
+"Switch to own account" only for a lease sharing another store's lease's account (the card and
+the POST alike)."""
 
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ pytestmark = pytest.mark.django_db
 # --- can_bill_now: the pure rule ---------------------------------------------------------------
 
 
-def test_a_lease_holding_the_store_on_the_anniversary_may_be_billed_passed_or_not() -> None:
+def test_a_lease_may_be_billed_whether_the_anniversary_passed_or_not() -> None:
     lease = lease_on(store(date(2025, 3, 10)), started_on=date(2025, 1, 1))
     assert insurance.can_bill_now(lease, 2026)  # Mar 10, 2026: passed on TODAY (Oct 1)
     assert insurance.can_bill_now(lease, 2027)  # Mar 10, 2027: not reached yet
@@ -56,7 +57,11 @@ def test_a_lease_holding_the_store_on_the_anniversary_may_be_billed_passed_or_no
         ({"collection_status": CollectionStatus.PROSPECTIVE, "started_on": date(2026, 3, 1)}, True),
         ({"collection_status": CollectionStatus.PROSPECTIVE, "started_on": None}, True),
         ({"started_on": date(2026, 3, 10)}, True),  # starts on the anniversary itself
-        ({"started_on": date(2026, 3, 11)}, False),  # the day after
+        ({"started_on": date(2026, 3, 11)}, True),  # the day after: no start-date condition
+        (
+            {"collection_status": CollectionStatus.PROSPECTIVE, "started_on": date(2026, 12, 1)},
+            True,  # a future start
+        ),
         (
             {
                 "started_on": date(2025, 1, 1),
@@ -90,15 +95,16 @@ def test_can_bill_now_refuses_a_store_without_an_open_date_or_closed_by_the_anni
 
 def test_a_29_february_open_date_falls_on_28_february_in_a_common_year() -> None:
     shop = store(date(2024, 2, 29))
-    assert insurance.can_bill_now(lease_on(shop, started_on=date(2026, 2, 28)), 2026)
-    assert not insurance.can_bill_now(lease_on(shop, started_on=date(2026, 3, 1)), 2026)
-    assert insurance.can_bill_now(lease_on(shop, started_on=date(2028, 2, 29)), 2028)
+    assert insurance.can_bill_now(lease_on(shop, ended_on=date(2026, 2, 28)), 2026)
+    assert not insurance.can_bill_now(lease_on(shop, ended_on=date(2026, 2, 27)), 2026)
+    assert not insurance.can_bill_now(lease_on(shop, ended_on=date(2028, 2, 28)), 2028)
+    assert insurance.can_bill_now(lease_on(shop, ended_on=date(2028, 2, 29)), 2028)
 
 
 # --- bill_now ----------------------------------------------------------------------------------
 
 
-def test_a_prospective_lease_holding_the_store_is_billed_due_on_the_anniversary() -> None:
+def test_a_prospective_lease_started_before_the_anniversary_is_billed_due_on_it() -> None:
     lease = lease_on(
         store(date(2025, 3, 10)),
         started_on=date(2026, 2, 1),
@@ -118,6 +124,30 @@ def test_a_prospective_lease_holding_the_store_is_billed_due_on_the_anniversary(
     again = insurance.bill_now(lease, TODAY, actor=user)
     assert (again.ok, again.message) == (False, insurance.BILL_ALREADY)
     assert InsuranceCharge.objects.count() == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "started_on"),
+    [
+        (CollectionStatus.PAUSED, date(2026, 5, 1)),  # the owner's case: began after Mar 10
+        (CollectionStatus.PROSPECTIVE, date(2026, 12, 1)),  # a future start
+    ],
+)
+def test_a_lease_that_began_after_the_anniversary_is_billed_due_on_its_start(
+    status: str, started_on: date
+) -> None:
+    lease = lease_on(store(date(2025, 3, 10)), started_on=started_on, collection_status=status)
+    assert detail_cards.lease_collections(lease, TODAY).insurance_billable is True
+    # The daily generator, by ADR-0005, still creates nothing for it.
+    assert insurance.generate_insurance_charges(TODAY).created == 0
+    assert not InsuranceCharge.objects.exists()
+    _, user = client_for(Role.BILLING)
+    outcome = insurance.bill_now(lease, TODAY, actor=user)
+    assert (outcome.ok, outcome.message) == (True, insurance.BILL_CREATED)
+    charge = InsuranceCharge.objects.get()
+    assert (charge.policy_year, charge.due_on) == (2026, started_on)
+    [audit] = AuditLog.objects.filter(action=insurance.CREATED_ACTION)
+    assert audit.actor_id == user.pk and audit.after["due_on"] == started_on.isoformat()
 
 
 def test_bill_now_never_dates_the_charge_before_the_anniversary() -> None:
@@ -142,6 +172,9 @@ def test_a_lease_ending_before_the_anniversary_is_not_billable_and_the_post_is_r
     response = billing.post(f"/leases/{lease.pk}/insurance/bill/", follow=True)
     assert html.escape(insurance.BILL_NOT_OWED) in response.content.decode()
     assert not InsuranceCharge.objects.exists()
+    # The daily generator bills the year it held the store (2025), not 2026.
+    insurance.generate_insurance_charges(TODAY)
+    assert list(InsuranceCharge.objects.values_list("policy_year", flat=True)) == [2025]
 
 
 def test_the_daily_generator_still_skips_a_prospective_lease() -> None:
