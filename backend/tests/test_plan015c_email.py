@@ -2,8 +2,8 @@
 (ADR-0020). With ``company`` the worker's send asks the provider for no e-mail and the app's
 invoice message is delivered through the memory mail with its PDF; with ``processor`` (the
 default) nothing changes: the provider's call, no app message. A Zelle payment queues a
-receipt, an ACH payment none; held while mail is off; the provider's hosted link line left out
-when there is none; the links point at APP_BASE_URL; the Outbox lists both kinds; a voided
+receipt, an ACH payment none; held while mail is off; no hosted pay link (PLAN-015g); the links
+point at APP_BASE_URL; the Outbox lists both kinds; a voided
 invoice's message is suppressed."""
 
 from __future__ import annotations
@@ -93,16 +93,23 @@ def sender(choice: str) -> None:
 
 
 def seeded(code: str) -> MessageTemplate:
-    """The template of 0071 (written again from the migration when a test flushed it)."""
+    """The template of 0071 as 0078 leaves it (written again from the migrations when a test
+    flushed it)."""
     import importlib
 
     found = MessageTemplate.objects.filter(code=code).first()
     if found is not None:
         return found
     migration = importlib.import_module("ledger.migrations.0071_invoice_pdfs")
+    portal_only = importlib.import_module("ledger.migrations.0078_invoice_email_portal_link_only")
     for seeded_code, name, subject, body in migration.TEMPLATES:
         if seeded_code == code:
-            return MessageTemplate.objects.create(code=code, name=name, subject=subject, body=body)
+            return MessageTemplate.objects.create(
+                code=code,
+                name=name,
+                subject=subject,
+                body=portal_only.without_provider_pay_line(body),
+            )
     raise AssertionError(code)
 
 
@@ -128,10 +135,9 @@ def send_draft(fake: FakeProvider) -> Invoice:
 
 
 def test_with_the_company_sending_no_provider_email_and_the_app_delivers_the_pdf(
-    fake: FakeProvider, worker: None, memory: MemoryMailSender, settings: Any
+    fake: FakeProvider, worker: None, memory: MemoryMailSender
 ) -> None:
     sender(InvoiceSender.COMPANY)
-    settings.STAX_PROVIDER = "fake"  # the in-memory provider: no hosted page
     invoice = send_draft(fake)
     assert not calls(fake, "send_invoice_email")
     assert invoice.internal_status == InvoiceStatus.SENT
@@ -153,7 +159,7 @@ def test_with_the_company_sending_no_provider_email_and_the_app_delivers_the_pdf
     )
     assert attachment.data.startswith(b"%PDF")
     assert invoice.invoice_number in pdf_text(attachment.data)
-    # No hosted page: its line is left out, nothing shows a gap.
+    # PLAN-015g: no hosted pay link line, nothing shows a gap.
     assert "{provider_pay_link}" not in delivered.text
     assert "Or pay on our payment page" not in delivered.text
     entry = AuditLog.objects.get(action="invoice.sent", entity_id=str(invoice.pk))
@@ -179,18 +185,22 @@ def test_the_invoice_email_is_held_while_mail_is_off(fake: FakeProvider, worker:
     assert message.status == MessageStatus.HELD
 
 
-def test_the_body_links_the_portal_and_the_hosted_page_under_app_base_url(
+def test_the_body_links_the_portal_alone_under_app_base_url(
     fake: FakeProvider, worker: None, settings: Any
 ) -> None:
+    # PLAN-015g §3B: the processor's hosted page offered card payment; the e-mail links the
+    # portal only, whichever provider is configured.
+    from payments.stax.adapter import DEFAULT_PAYMENT_PAGE_URL
+
     sender(InvoiceSender.COMPANY)
-    settings.STAX_PROVIDER = "stax"  # the hosted page exists (no provider is built here)
+    settings.STAX_PROVIDER = "stax"
     invoice = send_draft(fake)
     [message] = OutboundMessage.objects.filter(kind=MessageKind.INVOICE)
-    ref = invoice_messages.provider_pay_link(invoice)
     external = ExternalRef.objects.get(entity_type="invoice", entity_id=invoice.pk).external_id
-    assert ref.startswith("https://") and ref.endswith(f"/{external}")
     body = message.rendered_body
-    assert f"Or pay on our payment page: {ref}" in body
+    assert "Or pay on our payment page" not in body
+    assert DEFAULT_PAYMENT_PAGE_URL not in body and "#/bill/" not in body
+    assert external not in body
     pay = body.split("Pay by bank debit (ACH) here: ", 1)[1].split("\n", 1)[0]
     assert pay.startswith(f"{settings.APP_BASE_URL.rstrip('/')}/")
     assert "Questions? Write to help@example.com." in body

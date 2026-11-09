@@ -232,16 +232,15 @@ def sample_context(template: MessageTemplate, lease: Lease, today: date) -> dict
     return values
 
 
-#: PLAN-015c: the sample invoice number and hosted page of the invoice e-mail's preview.
+#: PLAN-015c: the sample invoice number of the invoice e-mail's preview.
 SAMPLE_INVOICE_NUMBER = "INV-{year}-0001"
-SAMPLE_PROVIDER_PAY_LINK = "https://pay.example.com/invoice"
 
 
 def _pdf_sample(
     code: str, lease: Lease, company: CompanySettings, today: date, due: date
 ) -> dict[str, str]:
     """The preview's values of the invoice e-mail or the receipt (PLAN-015c): the lease's
-    real names and pay link, a sample number, amount, dates and hosted page."""
+    real names and pay link, a sample number, amount and dates."""
     store = lease.store
     operator = lease.operator
     number = SAMPLE_INVOICE_NUMBER.format(year=today.year)
@@ -260,7 +259,6 @@ def _pdf_sample(
         "invoice_number": number,
         "due_date": day_text(due),
         "pay_link": messaging.pay_link(operator, store.pk),
-        "provider_pay_link": SAMPLE_PROVIDER_PAY_LINK,
     }
 
 
