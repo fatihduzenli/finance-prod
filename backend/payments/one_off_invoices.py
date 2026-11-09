@@ -120,7 +120,7 @@ from ledger.models import (
     format_quantity,
 )
 from ledger.services import installments, leases, numbering, one_off_charges, rent_run
-from ledger.wording import provider_sentence
+from ledger.wording import format_amount, provider_sentence
 from payments import invoice_sync, lease_sync
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef, JobEntity, WebhookOutcome
@@ -425,27 +425,38 @@ def _provider_line(item: InvoiceLineItem) -> LineItem:
     and unit price when they multiply to its total exactly, else quantity 1 at its total
     with the charge's description (which names the quantity), so that the lines always
     sum to the invoice's total; its detail as the line's ``details`` either way. A Rent line
-    whose charge carries a free-rent concession carries it as the line's discount (PLAN-015d
-    §9.2), so the line's total is the charge's net."""
+    whose charge carries a free-rent concession goes at its net, quantity 1, with the
+    concession named in its details (PLAN-015g §3A)."""
     quantity = Decimal(item.quantity)
     rent = item.rent_charge
-    discount = Decimal(rent.concession) if rent is not None else ZERO
+    text = item.one_off_charge.description if item.one_off_charge is not None else ""
+    if rent is not None and rent.concession > 0:
+        return LineItem(
+            text or item.description,
+            Decimal(1),
+            Decimal(item.line_total) - Decimal(rent.concession),
+            details="; ".join(
+                part for part in (item.details, _concession_details(item, rent)) if part
+            ),
+        )
     if quantity * Decimal(item.unit_price) == Decimal(item.line_total):
         return LineItem(
             item.description,
             Decimal(format_quantity(quantity)),
             Decimal(item.unit_price),
             details=item.details,
-            discount=discount,
         )
-    text = item.one_off_charge.description if item.one_off_charge is not None else ""
     return LineItem(
-        text or item.description,
-        Decimal(1),
-        Decimal(item.line_total),
-        details=item.details,
-        discount=discount,
+        text or item.description, Decimal(1), Decimal(item.line_total), details=item.details
     )
+
+
+def _concession_details(item: InvoiceLineItem, rent: RentCharge) -> str:
+    """The concession sentence of a Rent line sent at its net (PLAN-015g §3A):
+    "Rent $2,000.00 less $666.67: Free rent per lease agreement (Dec 10 – Jan 8)", ending at
+    the amount when the charge has no concession text."""
+    sentence = f"Rent {format_amount(item.line_total)} less {format_amount(rent.concession)}"
+    return f"{sentence}: {rent.concession_text}" if rent.concession_text else sentence
 
 
 def charge_amounts(charge: OneOffCharge, total: Decimal | None = None) -> Amounts:
