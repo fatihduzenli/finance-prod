@@ -35,18 +35,21 @@ job), `.env.example`, `docs/`. New dependency, approved: `google-auth` (Apache-2
 through the already pinned `httpx`. **Out of scope:** SMS, DocuSign, installments (12b), any
 inbound mail, Google Sheet push.
 
-## 3. Facts checked on 2026-10-06 (public DNS, read-only)
+## 3. Facts checked on 2026-11-09 (public DNS, read-only)
 
-- `globalretailgroups.com` SPF: `v=spf1 include:dc-aa8e722993._spfm.globalretailgroups.com ~all`,
-  and that include resolves to `v=spf1 include:_spf.google.com ~all`. **Google's senders are
+Corrected on 2026-11-09 (owner): the company's mail domain is `globalretailgroup.com`. The lookup of
+2026-10-06 was made on a similarly named domain that is not the company's, and its facts (an SPF include under
+that name, a DMARC quarantine policy, no DKIM record) do not describe the company's domain. The
+facts below were looked up again on the right name.
+
+- `globalretailgroup.com` SPF: `v=spf1 include:_spf.google.com ~all`. **Google's senders are
   covered**: mail sent by the Gmail API as the mailbox passes SPF with alignment.
 - MX: Google (`aspmx.l.google.com` and alternates).
-- DMARC: `v=DMARC1; p=quarantine; adkim=r; aspf=r; rua=mailto:dmarc_rua@onsecureserver.net` —
-  quarantine policy, relaxed alignment; DMARC passes on aligned SPF alone.
-- **DKIM: no `google._domainkey` record exists** (no other common selector either). Google then
-  signs with its generic domain, which does not align. Nothing *must* be added for delivery to
-  pass (SPF aligns), but the Workspace DKIM key **should** be published so that mail still passes
-  DMARC when forwarded or when SPF breaks; the admin steps are in §9.
+- DMARC: **no `_dmarc.globalretailgroup.com` record is published.** Nothing fails for lack of one;
+  publishing a policy is the owner's choice and is not needed for this plan.
+- **DKIM: a `google._domainkey.globalretailgroup.com` record exists** (Google's selector). Whether
+  Workspace is signing with it is seen in the Workspace Admin (§9 step 4), not in DNS.
+- Name servers: Google's (`ns-cloud-e*.googledomains.com`); the DNS is edited there.
 
 ## 4. Decisions
 
@@ -138,10 +141,11 @@ return webhook; the two-line schedule total equals amount + fee to the cent.
    `az keyvault secret set --vault-name finance-sandbox-kv --name gmail-service-account-key --file <the JSON file>`
    then delete the local file. Never paste the content in chat or in the repo. For live later:
    the same into `finance-kv` under the same name (the app reads by name).
-4. **DKIM (recommended):** Workspace Admin → Apps → Google Workspace → Gmail → Authenticate email
-   → select the domain → Generate new record (2048-bit, selector `google`) → add the TXT record
-   `google._domainkey.globalretailgroups.com` at GoDaddy → back in Admin, **Start authentication**.
-   SPF already includes Google; DMARC stays as it is.
+4. **DKIM (check):** Workspace Admin → Apps → Google Workspace → Gmail → Authenticate email →
+   select `globalretailgroup.com`. The TXT record `google._domainkey.globalretailgroup.com` is
+   already published (§3); if the page does not say "Authenticating email", press **Start
+   authentication**. If it offers a new record instead, add that TXT record where the domain's DNS
+   is hosted, then start. SPF already includes Google.
 5. **Catch-all:** choose the staff address that receives every sandbox e-mail and give it to Fable
    for the deployment parameter.
 
