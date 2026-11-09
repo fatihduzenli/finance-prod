@@ -26,6 +26,7 @@ from tests.test_contact_log import (
 )
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture: the webhook path)
+from tests.text_helpers import assert_absent
 
 pytestmark = pytest.mark.django_db
 
@@ -115,7 +116,8 @@ def test_a_viewer_sees_no_menu_on_any_entry() -> None:
 def test_billing_has_no_delete_item_and_the_delete_page_still_refuses_billing() -> None:
     row, store_id = a_world()
     html = row_of(store_tab(store_id, Role.BILLING), row)
-    assert "contact-delete" not in html and "Delete" not in html
+    assert_absent(html, "contact-delete")
+    assert_absent(html, "Delete")
     client, _ = client_for(Role.BILLING)
     assert client.get(f"/contacts/{row.pk}/delete/").status_code == 403
     assert client.post(f"/contacts/{row.pk}/delete/", {"reason": "x"}).status_code == 403
@@ -183,7 +185,8 @@ def test_kept_by_a_call_reads_kept_on_the_calls_day() -> None:
     old, store_id = closed("kept")
     html = row_of(store_tab(store_id, Role.VIEWER), old)
     assert badge(html) == "Kept on Oct 3"
-    assert "recorded" not in html and "payment settled" not in html
+    assert_absent(html, "recorded")
+    assert_absent(html, "payment settled")
 
 
 def test_kept_by_a_payment_reads_kept_on_the_settled_day() -> None:
