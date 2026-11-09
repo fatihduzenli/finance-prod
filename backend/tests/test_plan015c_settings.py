@@ -267,6 +267,12 @@ def admin_form(**overrides: str) -> dict[str, str]:
         "name": "Monvera",
         "short_name": "Monvera",
         "support_email": "help@example.com",
+        # PLAN-015g §3C: the address is on the form; an omitted key would blank it.
+        "address_line1": "",
+        "address_line2": "",
+        "city": "",
+        "state": "",
+        "postal_code": "",
         "time_zone": "America/New_York",
         "logo": "",
         "processor_name": "Stax",
@@ -278,6 +284,67 @@ def admin_client() -> Any:
     user, device = make_user(f"logo-{uuid.uuid4().hex[:8]}", Role.ADMIN)
     assert device is not None
     return verified_client(user, device), user
+
+
+ADMIN_CHANGE = "/admin/ledger/companysettings/1/change/"
+ADDRESS = {
+    "address_line1": "100 Main Street",
+    "address_line2": "Suite 4",
+    "city": "Atlanta",
+    "state": "GA",
+    "postal_code": "30301",
+}
+
+
+def test_the_admin_form_shows_and_saves_the_address_audited() -> None:
+    client, user = admin_client()
+    page = client.get(ADMIN_CHANGE).content.decode()
+    for name in ADDRESS:
+        assert f'name="{name}"' in page, name
+    assert 'name="invoice_sender"' not in page  # the sender choice stays on Admin › Settings
+    assert client.post(ADMIN_CHANGE, admin_form(**ADDRESS)).status_code == 302
+    row = CompanySettings.objects.get()
+    assert {name: getattr(row, name) for name in ADDRESS} == ADDRESS
+    entry = AuditLog.objects.get(actor=user, action="company_settings.updated")
+    assert entry.before is not None and entry.after is not None
+    assert {name: entry.before[name] for name in ADDRESS} == dict.fromkeys(ADDRESS, "")
+    assert {name: entry.after[name] for name in ADDRESS} == ADDRESS
+
+
+@pytest.mark.parametrize(
+    ("name", "limit"),
+    [
+        ("address_line1", 200),
+        ("address_line2", 200),
+        ("city", 100),
+        ("state", 50),
+        ("postal_code", 20),
+    ],
+)
+def test_the_admin_refuses_an_address_field_over_its_length(name: str, limit: int) -> None:
+    client, _ = admin_client()
+    assert client.post(ADMIN_CHANGE, admin_form(**{name: "x" * limit})).status_code == 302
+    response = client.post(ADMIN_CHANGE, admin_form(**{name: "y" * (limit + 1)}))
+    assert response.status_code == 200  # the form again, with the error
+    assert f"at most {limit} characters" in response.content.decode()
+    assert getattr(CompanySettings.objects.get(), name) == "x" * limit
+
+
+def test_the_admin_refuses_a_card_number_in_the_address_and_saves_nothing() -> None:
+    client, _ = admin_client()
+    response = client.post(ADMIN_CHANGE, admin_form(city="4111 1111 1111 1111", state="GA"))
+    assert response.status_code == 200
+    assert "This text may not contain card or account numbers." in response.content.decode()
+    row = CompanySettings.objects.get()
+    assert (row.city, row.state) == ("", "")
+    assert not AuditLog.objects.filter(action="company_settings.updated").exists()
+
+
+@pytest.mark.parametrize("role", [Role.VIEWER, Role.BILLING])
+def test_below_admin_the_address_cannot_be_changed_in_the_admin(role: Role) -> None:
+    response = client_for(role)[0].post(ADMIN_CHANGE, admin_form(**ADDRESS))
+    assert response.status_code == 403
+    assert CompanySettings.objects.get().city == ""
 
 
 def test_saving_the_logo_in_the_admin_writes_its_png_copy_and_removing_it_clears_it(
