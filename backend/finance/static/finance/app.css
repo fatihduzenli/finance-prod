@@ -1803,8 +1803,13 @@ p.detail-more-notes { padding-left: 0; }
   form button.link-action { width: auto; }
   /* An open bar menu opens in the flow: nothing hangs past the screen's edge. */
   .menu ul { position: static; margin-top: var(--space-1); box-shadow: none; }
-  /* A row menu (.menu-sm) keeps its list over the row, at the right edge: in the flow it
-     would squeeze the entry's text (PLAN-015f §3.1). */
+  /* A contact entry's row menus (PLAN-015f §3.1) take their own line under the entry's body,
+     right-aligned, both summaries on one line: the body keeps the full width beside the
+     round letter. The open list stays over the row at the right edge (in the flow it would
+     push the summaries apart). */
+  .contact-entry-menus { flex-wrap: wrap; row-gap: var(--space-2); }
+  .contact-entry-menus > .contact-body { flex: 1 1 0; }
+  .contact-entry-menus > .contact-menus { flex: 1 0 100%; justify-content: flex-end; }
   .contact-menus .menu-sm ul { position: absolute; }
   /* A list's card gives way to its rows' cards. */
   .table-card { padding: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }

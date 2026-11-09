@@ -1,7 +1,8 @@
 """PLAN-015f §3.1 in a browser: an open promise's "Outcome ▾" and "⋯" menus on the store's
 Notes & follow-ups tab; the arrow keys move between a menu's items (Home and End to the ends),
 Escape closes it and gives the focus back to its summary, Tab leaves it; on a phone the two
-summaries stay on one line and an open list stays on the screen. PLAN-015f §3.2: the Lease ▾
+summaries share one line under the entry's meta line, the text keeps the full width, and an
+open list stays on the screen. PLAN-015f §3.2: the Lease ▾
 menu reaches Pause collection from the keyboard; a menu of buttons (the operator's More ▾)
 gets the menu roles and the arrow keys from the shared script."""
 
@@ -139,9 +140,12 @@ def test_the_entry_menus_stay_on_one_line_on_the_phone(
     assert outcome["y"] == pytest.approx(more["y"], abs=1)
     assert outcome["x"] + outcome["width"] <= more["x"]
     assert more["x"] + more["width"] <= PHONE["width"]
-    # The entry's text keeps a readable column beside the menus (about a note's, 100 px+).
+    # The menus take their own line under the meta line; the entry's text keeps the full
+    # width beside the round letter (review finding 2: not a 118 px column).
     text = page.locator(f"#contact-{promise.pk} .contact-body").bounding_box()
-    assert text is not None and text["width"] >= 100
+    assert text is not None and text["width"] >= 250
+    meta = page.locator(f"#contact-{promise.pk} .contact-meta").bounding_box()
+    assert meta is not None and outcome["y"] >= meta["y"] + meta["height"]
     page.locator(f"#outcome-{promise.pk} summary").click()
     listed = page.locator(f"#outcome-{promise.pk} ul").bounding_box()
     assert listed is not None
