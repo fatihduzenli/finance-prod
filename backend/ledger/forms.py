@@ -71,7 +71,7 @@ from ledger.services import (
     proration,
     rent_run,
 )
-from ledger.services.contacts import PROMISE_FIELDS_REQUIRED
+from ledger.services.contacts import PROMISE_FIELDS_REQUIRED, promise_sentence
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import (
     ACCOUNT_ENTER,
@@ -3510,7 +3510,7 @@ class ContactEntryForm(ContactEditForm):
         if kind == ContactKind.PROMISE:
             on, amount = cleaned.get("promised_date"), cleaned.get("promised_amount")
             if on is not None and amount is not None:
-                return f"Promised {format_amount(amount)} by {day_text(on)}."
+                return promise_sentence(amount, on)
             if cleaned.get("outcome") == "rescheduled":
                 # The service takes the old promise's date and amount; a note says the rest.
                 return ""

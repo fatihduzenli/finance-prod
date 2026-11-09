@@ -251,18 +251,16 @@ def test_bill_now_without_a_premium_creates_a_charge_that_waits_for_it() -> None
     ("case", "message"),
     [
         ("no open date", "BILL_NO_OPEN_DATE"),
-        ("started after the anniversary", "BILL_NOT_OWED"),
         ("ended before the anniversary", "BILL_NOT_OWED"),
         ("store closed before the anniversary", "BILL_NOT_OWED"),
-        ("prospective", "BILL_NOT_OWED"),
+        # PLAN-015f §3.3 (revised): a lease that started after the anniversary, prospective
+        # or not, is billed due on its start (test_bill_now_bills_a_lease_that_began_after_...).
     ],
 )
 def test_bill_now_refuses_with_one_sentence_and_writes_nothing(case: str, message: str) -> None:
     operator = an_operator("Refused Co")
     if case == "no open date":
         lease = lease_on(store(None), operator=operator)
-    elif case == "started after the anniversary":
-        lease = lease_on(store(date(2025, 3, 10)), operator=operator, started_on=date(2026, 4, 1))
     elif case == "ended before the anniversary":
         lease = lease_on(
             store(date(2025, 3, 10)),
@@ -271,18 +269,29 @@ def test_bill_now_refuses_with_one_sentence_and_writes_nothing(case: str, messag
             ended_on=date(2026, 3, 1),
             collection_status=CollectionStatus.ENDED,
         )
-    elif case == "store closed before the anniversary":
-        lease = lease_on(store(date(2025, 3, 10), closed_at=date(2026, 3, 1)), operator=operator)
     else:
-        lease = lease_on(
-            store(date(2025, 3, 10)),
-            operator=operator,
-            collection_status=CollectionStatus.PROSPECTIVE,
-        )
+        lease = lease_on(store(date(2025, 3, 10), closed_at=date(2026, 3, 1)), operator=operator)
     outcome = insurance.bill_now(lease, TODAY, actor=None)
     assert (outcome.ok, outcome.message) == (False, getattr(insurance, message))
     assert outcome.message.endswith(" Nothing was billed.")
     assert not InsuranceCharge.objects.exists() and not AuditLog.objects.exists()
+
+
+@pytest.mark.parametrize("status", [CollectionStatus.PAUSED, CollectionStatus.PROSPECTIVE])
+def test_bill_now_bills_a_lease_that_began_after_the_anniversary_due_on_its_start(
+    status: str,
+) -> None:
+    lease = lease_on(
+        store(date(2025, 3, 10)),
+        operator=an_operator("Late Start Co"),
+        started_on=date(2026, 4, 1),
+        collection_status=status,
+    )
+    outcome = insurance.bill_now(lease, TODAY, actor=None)
+    assert (outcome.ok, outcome.message) == (True, insurance.BILL_CREATED)
+    assert years(lease) == [(2026, date(2026, 4, 1), D("695.00"), False)]
+    [entry] = AuditLog.objects.filter(action="insurance_charge.created")
+    assert entry.after["due_on"] == "2026-04-01"
 
 
 def _bill_url(lease: Lease) -> str:

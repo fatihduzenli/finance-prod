@@ -341,11 +341,12 @@ def test_the_contact_tabs_show_each_entry_with_its_avatar() -> None:
     for path in (f"/stores/{lease.store_id}/?tab=contacts", f"/operators/{operator.pk}/"):
         html = page(billing, path)
         assert MARKUP not in html, path
-        log = section(html, 'id="contact-entries"', "</ul>")
+        log = section(html, 'id="contact-entries"', "\n</ul>")  # menus close theirs inside
         promise_entry = section(log, f'id="contact-{pledged.pk}"', "</li>")
         assert '<span class="avatar avatar-pending" aria-hidden="true">P</span>' in promise_entry
         assert '<strong class="contact-kind">Promise to pay</strong>' in promise_entry
-        assert '<div class="contact-actions">' in promise_entry  # Kept, Reschedule, Broken
+        # Outcome ▾ and ⋯ (PLAN-015f §3.1)
+        assert '<div class="contact-actions contact-menus">' in promise_entry
         call_entry = section(log, f'id="contact-{called.pk}"', "</li>")
         assert called.kind == ContactKind.CALL
         assert '<span class="avatar avatar-neutral" aria-hidden="true">C</span>' in call_entry
@@ -524,7 +525,10 @@ def test_the_card_buttons_and_inputs_follow_the_spec() -> None:
 def test_the_lease_menu_is_a_drop_down_button_ending_with_the_arrow() -> None:
     lease = a_lease(a_store("3310 MENU", 3310), an_operator("Menu Co"))
     html = page(client_for(Role.ADMIN)[0], f"/stores/{lease.store_id}/")
-    summary = re.search(r'id="lease-menu"><summary class="btn btn-menu">([^<]+)</summary>', html)
+    summary = re.search(
+        r'id="lease-menu"><summary class="btn btn-menu" aria-haspopup="menu">([^<]+)</summary>',
+        html,
+    )
     assert summary is not None and summary.group(1).endswith("▾")
 
 

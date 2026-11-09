@@ -247,6 +247,7 @@ def test_the_bar_by_role() -> None:
     assert menu.url == ""
     assert [(i.key, i.label, i.danger) for i in menu.items] == [
         ("edit_lease", "Edit lease", False),
+        ("pause_collection", "Pause collection", False),  # PLAN-015f §3.2
         ("transfer", "Transfer to another operator", False),
         ("end_lease", "End lease", True),
     ]
@@ -258,6 +259,7 @@ def test_the_bar_by_role() -> None:
         "record-payment",
         "lease-menu",
         "bar-edit-lease",
+        "pause-collection",
         "store-transfer",
         "store-end-lease",
     ]
@@ -265,12 +267,18 @@ def test_the_bar_by_role() -> None:
     assert f'<a class="btn btn-primary" id="create-invoice" href="{invoice}">' in bar
     assert f'<a class="btn" id="record-payment" href="/stores/{store.pk}/payments/new/">' in bar
     assert (
-        '<details class="menu" id="lease-menu"><summary class="btn btn-menu">Lease ▾</summary><ul>'
-        in bar
-    )  # PLAN-012f D6: the drop-down button
+        '<details class="menu" id="lease-menu"><summary class="btn btn-menu" aria-haspopup="menu">'
+        'Lease ▾</summary><ul role="menu">' in bar
+    )  # PLAN-012f D6: the drop-down button; PLAN-015f §3.1: the menu roles
     edit = f"/leases/{lease.pk}/edit/?store={store.pk}&amp;lease={lease.pk}"
-    assert f'<li><a id="bar-edit-lease" href="{edit}">Edit lease</a></li>' in bar
-    end = f'<a id="store-end-lease" href="/stores/{store.pk}/end-lease/" class="menu-danger">'
+    assert (
+        f'<li role="none"><a role="menuitem" id="bar-edit-lease" href="{edit}">Edit lease</a></li>'
+        in bar
+    )
+    end = (
+        f'<a role="menuitem" id="store-end-lease" href="/stores/{store.pk}/end-lease/"'
+        ' class="menu-danger">'
+    )
     assert end in bar and bar.count("menu-danger") == 1
     # The removed actions are gone from the bar (their URLs redirect, PLAN-012e-2 D4).
     for gone in (

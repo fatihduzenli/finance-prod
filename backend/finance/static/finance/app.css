@@ -405,6 +405,10 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .contact-meta { color: var(--muted); font-size: var(--fs-sm); }
 .contact-correction, .contact-deleted-note, .contact-closes { margin-top: var(--space-1); }
 .contact-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 50%; }
+/* PLAN-015f §3.1: a contact entry's at most two row menus (.menu-sm: "Outcome ▾" and "⋯")
+   stay on one line, their lists opening under them aligned to the right edge. */
+.contact-menus { flex-wrap: nowrap; max-width: none; }
+.menu-sm ul { left: auto; right: 0; }
 .contact-actions form { margin: 0; }
 .contact-deleted .contact-body { color: var(--muted); }
 /* PLAN-014 B5: a store's notes on the Notes & follow-ups tab (.note: a .contact-entry with the
@@ -1799,6 +1803,14 @@ p.detail-more-notes { padding-left: 0; }
   form button.link-action { width: auto; }
   /* An open bar menu opens in the flow: nothing hangs past the screen's edge. */
   .menu ul { position: static; margin-top: var(--space-1); box-shadow: none; }
+  /* A contact entry's row menus (PLAN-015f §3.1) take their own line under the entry's body,
+     right-aligned, both summaries on one line: the body keeps the full width beside the
+     round letter. The open list stays over the row at the right edge (in the flow it would
+     push the summaries apart). */
+  .contact-entry-menus { flex-wrap: wrap; row-gap: var(--space-2); }
+  .contact-entry-menus > .contact-body { flex: 1 1 0; }
+  .contact-entry-menus > .contact-menus { flex: 1 0 100%; justify-content: flex-end; }
+  .contact-menus .menu-sm ul { position: absolute; }
   /* A list's card gives way to its rows' cards. */
   .table-card { padding: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
   .table-card > p, .table-card > .card-header, .table-card > h2 { padding: 0 0 var(--space-3); }

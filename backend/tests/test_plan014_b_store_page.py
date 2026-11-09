@@ -31,6 +31,7 @@ from ledger.models import (
     AuditLog,
     Brand,
     FeeType,
+    InsuranceCharge,
     Note,
     OneOffCategory,
     Payment,
@@ -449,17 +450,26 @@ def test_the_insurance_row_offers_bill_now_to_billing_only_while_not_billed() ->
     assert 'id="insurance-bill"' not in lease_card(store)
 
 
-def test_no_bill_now_for_a_lease_that_owes_no_insurance_this_year() -> None:
-    # Review of I-b: a "not billed" row of a lease bill_now would refuse offers no button.
+def test_bill_now_for_a_lease_that_began_after_the_anniversary_and_none_once_ended_before() -> None:
+    # PLAN-015f §3.3 (revised): the Sign fee's rule. A lease that began after this year's
+    # anniversary (ADR-0005 makes the previous tenant owe it) still offers "Bill now"; the
+    # charge is due on its start date. One that ended before the anniversary offers none.
     store = a_store(f"16{uuid.uuid4().hex[:2]}")
     store.open_date = date(2025, 7, 1)
     store.save()
     lease = a_lease(store, an_operator("Later Co"), started=date(2026, 8, 1))
-    card = lease_card(store)
-    assert "not billed" in section(card, "header-insurance-state", "</dd>")
-    assert 'id="insurance-bill"' not in card
-    # A prospective lease owes nothing yet (it is not the store page's lease: read directly).
-    lease.started_on, lease.collection_status = date(2025, 6, 1), "prospective"
+    row = section(lease_card(store), "header-insurance-state", "</dd>")
+    assert "not billed" in row and 'id="insurance-bill"' in row
+    client, _ = a_user(Role.BILLING)
+    assert client.post(f"/leases/{lease.pk}/insurance/bill/").status_code == 302
+    charge = InsuranceCharge.objects.get(lease=lease)
+    assert (charge.policy_year, charge.due_on) == (2026, date(2026, 8, 1))
+    charge.delete()
+    lease.started_on, lease.ended_on, lease.collection_status = (
+        date(2025, 6, 1),
+        date(2026, 6, 30),
+        "ended",
+    )
     lease.save()
     rows = detail_cards.lease_collections(lease, TODAY)
     assert rows.insurance is not None and rows.insurance.code == "unbilled"
