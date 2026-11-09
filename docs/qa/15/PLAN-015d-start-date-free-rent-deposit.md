@@ -184,6 +184,9 @@ verdict; the P&L and Revenue figures before and after are recorded in the entry.
    discount rate and the invoice total is the net, so the processor's invoice reads as ours; the
    fallback — the rent line sent net, the two lines on our side only — applies only if the sandbox
    rejects or mis-totals the rate (TODO-VERIFY at implementation; the owner is told which case holds).
+   **Outcome (2026-11-09):** the sandbox keeps the rate and the net total but its hosted page shows the
+   line gross with no discount (TODO-VERIFY-075), so the owner chose the fallback: the rent line net, the
+   concession named in the line's details (PLAN-015g).
 3. **An earlier start into a billed, paid month** is not refused: the extra days are billed as a
    prorated charge, with a confirmation stating the period and the amount before saving, admin only,
    recorded in the audit log.

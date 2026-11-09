@@ -433,8 +433,8 @@ only by the sandbox test suites; secret). See `docs/STAX_CLIENT.md`.
 - Run against live and sandbox from one deploy (Rule 6).
 - Send email itself for invoices **while the company setting "Invoice e-mails sent by" is the processor**
   (the default). ADR-0020 (2026-11-07): when the owner switches it to the company, the app e-mails the
-  invoice itself with its PDF, the portal pay link and the processor's hosted pay link, and no longer asks
-  the processor to send its own. The processor's receipt e-mail stays for payments made through it; the
+  invoice itself with its PDF and the portal pay link (the processor's hosted pay link was removed on
+  2026-11-09: its page offered card payment, TODO-VERIFY-076), and no longer asks the processor to send its own. The processor's receipt e-mail stays for payments made through it; the
   app e-mails its receipt PDF only for payments recorded outside it (Zelle, wire, check, cash).
 
 ---

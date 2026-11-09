@@ -1253,3 +1253,8 @@ attachment is rendered at delivery. The company settings gain an address and a P
 the renderer can read. The PDF renderer is reportlab (as the lease-end statement, ADR-0012) with the
 Inter font embedded. A switch back to the processor stops the app's invoice e-mails at once; messages
 already queued are delivered or held as any other.
+
+**Amended 2026-11-09 (the owner; PLAN-015g).** The invoice e-mail carries the portal pay link only. The
+processor's hosted pay link is removed: on the sandbox its page offered card payment although the invoice
+is created ACH-only (TODO-VERIFY-076), and Rule 1 allows no card path. It may return when the merchant's
+hosted page is ACH-only; that is a new decision, not a setting.
