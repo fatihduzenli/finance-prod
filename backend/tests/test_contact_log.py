@@ -137,8 +137,9 @@ def page_of(client: Client, path: str) -> str:
 
 
 def table_of(page: str) -> str:
-    """The contact log: its entries (PLAN-012f D6: a list of ledger/contacts/_log_entry.html)."""
-    return page.split('id="contact-entries"')[1].split("</ul>")[0]
+    """The contact log: its entries (PLAN-012f D6: a list of ledger/contacts/_log_entry.html).
+    The list closes on its own line; an entry's menus close theirs inside it (PLAN-015f)."""
+    return page.split('id="contact-entries"')[1].split("\n</ul>")[0]
 
 
 # --- D2: the edit window ---------------------------------------------------------------------
@@ -1046,7 +1047,8 @@ def test_the_full_list_filters_by_status_and_shows_badges(today: date) -> None:
     client, _ = client_for(Role.VIEWER)
     full = table_of(page_of(client, f"/operators/{operator.pk}/contacts/"))
     assert "Kept one." in full and "Still open." in full and "Closing call." in full
-    assert 'promise-kept">Kept<' in full and 'promise-open">Open<' in full
+    # PLAN-015f §3.1: a closed promise's badge names its day (the closing call's).
+    assert 'promise-kept">Kept on Oct 6<' in full and 'promise-open">Open<' in full
     only_kept = table_of(page_of(client, f"/operators/{operator.pk}/contacts/?status=kept"))
     assert "Kept one." in only_kept
     assert "Still open." not in only_kept and "Closing call." not in only_kept

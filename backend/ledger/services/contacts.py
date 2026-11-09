@@ -81,7 +81,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
-from finance.dates import day_text
+from finance.dates import day_short_text, day_text
 from ledger.models import (
     AuditLog,
     CollectionStatus,
@@ -259,6 +259,50 @@ def _closes(promise: ContactEntry, day: str) -> str:
         f"Closed {format_amount(promise.promised_amount or Decimal(0))} by "
         f"{day} as {promise.get_status_display()}"
     )
+
+
+def promise_sentence(amount: Decimal, on: date) -> str:
+    """The sentence a promise's note starts with (owner, 2026-11-01): "Promised $500.00 by
+    Nov 1, 2026."; the Log contact form writes it, the log leaves it out when it is the whole
+    note (PLAN-015f §3.1)."""
+    return f"Promised {format_amount(amount)} by {day_text(on)}."
+
+
+def note_text(entry: ContactEntry) -> str:
+    """PLAN-015f §3.1: the entry's note as the log shows it: its body, or ``""`` for a promise
+    whose body is only :func:`promise_sentence` of its amount and date."""
+    if (
+        entry.kind == ContactKind.PROMISE
+        and entry.promised_amount is not None
+        and entry.promised_date is not None
+        and entry.body.strip() == promise_sentence(entry.promised_amount, entry.promised_date)
+    ):
+        return ""
+    return entry.body
+
+
+def outcome_text(entry: ContactEntry) -> str:
+    """PLAN-015f §3.1: a closed promise's outcome as its badge reads it: "Kept on Nov 28" (the
+    keeping payment's settled day, else the day of the entry that recorded it), "Rescheduled
+    to Dec 5" (the date of the promise that replaced it: its ``closed_by``), "Broken"; the
+    status alone when that day is unknown; ``""`` for an open promise or any other entry.
+    Reads the joins of :func:`entries` and :func:`store_entries` only."""
+    if entry.kind != ContactKind.PROMISE or entry.status == ContactStatus.OPEN:
+        return ""
+    day: date | None = None
+    if entry.status == ContactStatus.KEPT:
+        payment = entry.kept_by_payment
+        if payment is not None and payment.settled_on is not None:
+            day = payment.settled_on
+        elif entry.closed_by is not None:
+            day = entry.closed_by.happened_on
+        return f"Kept on {day_short_text(day)}" if day is not None else entry.get_status_display()
+    if entry.status == ContactStatus.RESCHEDULED:
+        closer = entry.closed_by
+        day = closer.promised_date if closer is not None else None
+        if day is not None:
+            return f"Rescheduled to {day_short_text(day)}"
+    return entry.get_status_display()
 
 
 def with_status(rows: QuerySet[ContactEntry], status: str) -> QuerySet[ContactEntry]:

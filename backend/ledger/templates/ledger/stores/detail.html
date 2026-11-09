@@ -86,4 +86,4 @@
   {% if form_dialog %}{% include "ledger/stores/_form_dialog.html" with dialog=form_dialog open=True %}{% endif %}
   {% if created_dialog %}{% include "ledger/leases/_created_dialog.html" %}{% endif %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if space.actions %}{% include "ledger/_menu_script.html" %}{% endif %}{% if space.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if space.actions or billing %}{% include "ledger/_menu_script.html" %}{% endif %}{% if space.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

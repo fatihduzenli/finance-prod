@@ -44,6 +44,11 @@ class LogRow:
     #: that promise's row (PLAN-012c-b D5); both ``""`` otherwise.
     closes_text: str = ""
     closes_url: str = ""
+    #: PLAN-015f §3.1: the note line (``""`` for a promise whose body is only the
+    #: auto-sentence: no second line) and a closed promise's badge ("Kept on Nov 28",
+    #: "Rescheduled to Dec 5", "Broken"; ``""`` while open).
+    note: str = ""
+    outcome_text: str = ""
 
 
 def include_deleted(request: HttpRequest) -> bool:
@@ -93,6 +98,8 @@ def log_rows(
                 and entry.operator.archived_at is None,
                 closes_text=contacts.closes_sentence(closed) if closed is not None else "",
                 closes_url=_closes_url(request, closed, store) if closed is not None else "",
+                note=contacts.note_text(entry),
+                outcome_text=contacts.outcome_text(entry),
             )
         )
     return rows

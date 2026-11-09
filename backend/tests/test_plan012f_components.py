@@ -341,7 +341,7 @@ def test_the_contact_tabs_show_each_entry_with_its_avatar() -> None:
     for path in (f"/stores/{lease.store_id}/?tab=contacts", f"/operators/{operator.pk}/"):
         html = page(billing, path)
         assert MARKUP not in html, path
-        log = section(html, 'id="contact-entries"', "</ul>")
+        log = section(html, 'id="contact-entries"', "\n</ul>")  # menus close theirs inside
         promise_entry = section(log, f'id="contact-{pledged.pk}"', "</li>")
         assert '<span class="avatar avatar-pending" aria-hidden="true">P</span>' in promise_entry
         assert '<strong class="contact-kind">Promise to pay</strong>' in promise_entry
