@@ -82,7 +82,13 @@ def test_the_lease_menu_is_a_details_element_with_three_items_and_a_danger_end()
     assert "<summary" in menu and "Lease" in menu.split("</summary>")[0]
     links = re.findall(r'<a [^>]*href="([^"]+)"[^>]*>([^<]+)</a>', menu)
     labels = [label.strip() for _, label in links]
-    assert labels == ["Edit lease", "Transfer to another operator", "End lease"], labels
+    # PLAN-015f §3.2: Pause collection joined the menu (the lease is active).
+    assert labels == [
+        "Edit lease",
+        "Pause collection",
+        "Transfer to another operator",
+        "End lease",
+    ], labels
     end_link = re.search(r'<a [^>]*href="[^"]+/end-lease/"[^>]*>', menu)
     assert end_link is not None and "menu-danger" in end_link.group(0)
     # Nothing in the menu is a form that a click could post by accident.

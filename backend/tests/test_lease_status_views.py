@@ -127,6 +127,12 @@ def status_row(html: str) -> str:
     return html[start : html.index("</dd>", start)]
 
 
+def lease_menu(html: str) -> str:
+    """The page's Lease ▾ menu (PLAN-015f §3.2: the Status row's controls moved there)."""
+    start = html.index('id="lease-menu"')
+    return html[start : html.index("</details>", start)]
+
+
 def jobs_of(lease: Lease) -> list[str]:
     return list(
         Job.objects.filter(entity_id=lease.pk).order_by("created_at").values_list("kind", flat=True)
@@ -148,10 +154,14 @@ def status_actions(lease: Lease) -> list[str]:
 
 def test_an_active_lease_shows_active_and_pause_collection_to_admin(admin: Client) -> None:
     lease = a_world()
-    row = status_row(body(admin, store_url(lease)))
+    html = body(admin, store_url(lease))
+    row = status_row(html)
     assert 'class="badge badge-paid"' in row and "Active</span>" in row
-    # PLAN-015b §9.4: the card's words are "Pause" and "Resume"; the ids are unchanged.
-    assert f'id="pause-collection" href="{pause_url(lease)}">Pause</a>' in row
+    # PLAN-015f §3.2: Pause collection is in the Lease ▾ menu, with its id; the row is the badge.
+    menu = lease_menu(html)
+    assert f'id="pause-collection" href="{pause_url(lease)}">Pause collection</a>' in menu
+    assert_absent(row, "pause-collection")
+    assert_absent(menu, "resume-collection")
     assert_absent(row, "resume-collection")
     assert_absent(row, "activate-lease")
     assert_absent(row, "pause-reason")
@@ -160,9 +170,14 @@ def test_an_active_lease_shows_active_and_pause_collection_to_admin(admin: Clien
 def test_a_paused_lease_shows_paused_since_its_reason_and_resume(admin: Client) -> None:
     lease = a_world()
     service.pause_collection(lease.pk, reason="Store closed for repairs.", actor=None)
-    row = status_row(body(admin, store_url(lease)))
+    html = body(admin, store_url(lease))
+    row = status_row(html)
     assert 'class="badge badge-pending"' in row and "Paused</span>" in row
-    assert f'id="resume-collection" href="{resume_url(lease)}">Resume</a>' in row
+    # PLAN-015f §3.2: Resume collection is in the Lease ▾ menu; the reason stays on the card.
+    menu = lease_menu(html)
+    assert f'id="resume-collection" href="{resume_url(lease)}">Resume collection</a>' in menu
+    assert_absent(row, "resume-collection")
+    assert_absent(menu, "pause-collection")
     # The pause's own day, as the card words it (the audit row is stamped by the real clock,
     # which the pinned ``today`` does not move: a fixed "Nov 7, 2026" broke after midnight).
     pause = service.collection_pause(Lease.objects.get(pk=lease.pk))
@@ -184,9 +199,12 @@ def test_billing_sees_the_status_and_no_pause_or_resume(billing: Client, status:
 
 def test_a_prospective_lease_shows_prospective_and_activate_now(billing: Client) -> None:
     lease = a_world(CollectionStatus.PROSPECTIVE)
-    row = status_row(body(billing, store_url(lease)))
+    html = body(billing, store_url(lease))
+    row = status_row(html)
     assert 'class="badge badge-neutral"' in row and "Prospective</span>" in row
-    assert f'id="activate-lease" href="{activate_url(lease)}">Activate now</a>' in row
+    # PLAN-015f §3.2: Activate now is in the Lease ▾ menu, which billing gets for it.
+    assert f'id="activate-lease" href="{activate_url(lease)}">Activate now</a>' in lease_menu(html)
+    assert_absent(row, "activate-lease")
 
 
 def test_a_store_whose_lease_ended_has_no_status_row(billing: Client) -> None:
@@ -221,8 +239,9 @@ def test_the_earliest_upcoming_prospective_lease_is_the_status_rows(billing: Cli
     sooner = a_lease(
         later.store, an_operator("Soon Co"), started=date(2026, 12, 1), status="prospective"
     )
-    row = status_row(body(billing, store_url(later)))
-    assert f'href="{activate_url(sooner)}"' in row
+    html = body(billing, store_url(later))
+    assert f'href="{activate_url(sooner)}"' in lease_menu(html)  # PLAN-015f §3.2
+    assert f'href="{activate_url(later)}"' not in html
 
 
 @pytest.mark.parametrize(

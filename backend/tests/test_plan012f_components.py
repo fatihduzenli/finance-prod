@@ -524,7 +524,10 @@ def test_the_card_buttons_and_inputs_follow_the_spec() -> None:
 def test_the_lease_menu_is_a_drop_down_button_ending_with_the_arrow() -> None:
     lease = a_lease(a_store("3310 MENU", 3310), an_operator("Menu Co"))
     html = page(client_for(Role.ADMIN)[0], f"/stores/{lease.store_id}/")
-    summary = re.search(r'id="lease-menu"><summary class="btn btn-menu">([^<]+)</summary>', html)
+    summary = re.search(
+        r'id="lease-menu"><summary class="btn btn-menu" aria-haspopup="menu">([^<]+)</summary>',
+        html,
+    )
     assert summary is not None and summary.group(1).endswith("▾")
 
 

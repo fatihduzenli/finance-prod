@@ -1,7 +1,9 @@
 """PLAN-015f §3.1 in a browser: an open promise's "Outcome ▾" and "⋯" menus on the store's
 Notes & follow-ups tab; the arrow keys move between a menu's items (Home and End to the ends),
 Escape closes it and gives the focus back to its summary, Tab leaves it; on a phone the two
-summaries stay on one line and an open list stays on the screen."""
+summaries stay on one line and an open list stays on the screen. PLAN-015f §3.2: the Lease ▾
+menu reaches Pause collection from the keyboard; a menu of buttons (the operator's More ▾)
+gets the menu roles and the arrow keys from the shared script."""
 
 from __future__ import annotations
 
@@ -143,3 +145,39 @@ def test_the_entry_menus_stay_on_one_line_on_the_phone(
     assert listed["x"] >= 0 and listed["x"] + listed["width"] <= PHONE["width"]
     width = page.evaluate("document.documentElement.scrollWidth")
     assert width <= PHONE["width"]
+
+
+def test_the_lease_menu_opens_pause_collection_from_the_keyboard(
+    live_server: LiveServer, laptop: BrowserContext
+) -> None:
+    store, _ = a_world()
+    page = signed_in(laptop, live_server, "e2e-menus-lease")
+    page.goto(f"{live_server.url}/stores/{store.pk}/")
+    expect(page.locator("#header-status a")).to_have_count(0)
+    page.locator("#lease-menu summary").focus()
+    page.keyboard.press("Enter")
+    page.keyboard.press("ArrowDown")
+    assert focused_text(page) == "Edit lease"
+    page.keyboard.press("ArrowDown")
+    assert focused_text(page) == "Pause collection"
+    page.keyboard.press("Enter")
+    page.wait_for_url("**/leases/*/pause-collection/")
+    expect(page.locator("#pause-collection-dialog")).to_be_visible()
+
+
+def test_a_menu_of_buttons_gets_the_roles_and_the_arrow_keys(
+    live_server: LiveServer, laptop: BrowserContext
+) -> None:
+    _, promise = a_world()
+    page = signed_in(laptop, live_server, "e2e-menus-buttons")
+    page.goto(f"{live_server.url}/operators/{promise.operator_id}/")
+    more = page.locator("#more-menu")
+    expect(more.locator("summary")).to_have_attribute("aria-haspopup", "menu")
+    expect(more.locator("ul")).to_have_attribute("role", "menu")
+    expect(more.locator("#archive-operator")).to_have_attribute("role", "menuitem")
+    more.locator("summary").focus()
+    page.keyboard.press("Enter")
+    page.keyboard.press("ArrowDown")
+    assert page.evaluate("document.activeElement.id") == "archive-operator"
+    page.keyboard.press("Escape")
+    expect(more.locator("ul")).to_be_hidden()
