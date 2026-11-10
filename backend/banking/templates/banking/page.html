@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% load filters dates money responsive %}
 {% block title %}Bank deposits{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Bank deposits</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} deposit{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><form method="post" action="{% url 'banking:fetch_now' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="fetch-now"{% if readiness %} disabled{% endif %}>Fetch now</button></form></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Bank deposits</h1><p class="page-sub" id="list-counts">{{ page.paginator.count }} deposit{{ page.paginator.count|pluralize }}</p></div><div class="page-actions"><form method="post" action="{% url 'banking:fetch_now' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="fetch-now"{% if readiness %} disabled{% endif %}>Fetch now</button></form></div></div>{% endblock %}
 {% block content %}
   {% comment %}Admin › Bank deposits (docs/qa/PLAN-014 I4; banking.views.page): the credits read from the business's bank account, new ones first by default, 50 a page. A new deposit shows the suggestion (store, charge, confidence) made over what is owed now, with Confirm (records it through the store page's payment entry), Choose another, Split and Ignore; a recorded or ignored one shows what it became and Undo. When nothing can be fetched, the one sentence says why.{% endcomment %}
   {% if readiness %}<p class="side-note warning" id="bank-readiness">{{ readiness }}</p>{% endif %}

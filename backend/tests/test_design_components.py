@@ -134,6 +134,9 @@ LIST_PAGES = [
     "/audit/",
     "/settings/",
     "/search/?q=zzz",
+    # PLAN-015 Batch 2: the two Admin lists of the list family.
+    "/admin-settings/bank-deposits/",
+    "/admin-settings/outbox/",
 ]
 
 
