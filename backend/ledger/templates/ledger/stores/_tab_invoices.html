@@ -1,4 +1,4 @@
-{% comment %}The Invoices tab (docs/qa/PLAN-012d D3, finding 12d-1): ledger.services.workspace.invoices_tab. A never-sent draft has Edit, Send by e-mail (single submit; PLAN-012f-b D15) and Delete (no note, no confirmation page); a sent invoice keeps its cancel form. On the operator page (D14) the operator's drafts and invoices, with a Store column; Send and Delete come back to it. After Save in the builder (ledger:invoices:saved) the "Invoice saved" dialog opens over this tab (_saved_dialog.html).{% endcomment %}
+{% comment %}The Invoices tab (docs/qa/PLAN-012d D3, finding 12d-1): ledger.services.workspace.invoices_tab. A never-sent draft has Edit, Send by e-mail (single submit; PLAN-012f-b D15) and Delete (no note, no confirmation page); a sent invoice keeps its cancel form. On the operator page (D14) the operator's drafts and invoices, with a Store column; Send and Delete come back to it. After Save in the builder (ledger:invoices:saved) the "Invoice saved" dialog opens over this tab (_saved_dialog.html). PLAN-015 Batch 2: the Status cell is a {% chip %} by the internal status (Sent unpaid; Draft, Ready, Closed and Void neutral) with its display word.{% endcomment %}
 {% load components money dates %}
 {% load responsive %}
 <h2>Drafts</h2>
@@ -40,7 +40,7 @@
         <td>{{ invoice.due_date|day }}</td>
         <td class="money">{{ invoice.total|money }}</td>
         <td class="money">{{ invoice.amount_paid|money }}</td>
-        <td>{{ invoice.get_internal_status_display }}</td>
+        <td data-role="status">{% if invoice.internal_status == "sent" %}{% chip "unpaid" invoice.get_internal_status_display %}{% else %}{% chip "neutral" invoice.get_internal_status_display %}{% endif %}</td>
         <td>{{ invoice.provider_status|default:"—" }}</td>
         <td><a class="btn btn-sm invoice-pdf" href="{% url 'ledger:invoices:pdf' pk=invoice.pk %}">Download PDF</a>{% if item.cancel_url %} <a class="btn btn-sm invoice-cancel" href="{{ item.cancel_url }}">Cancel</a>{% endif %}</td>
       </tr>

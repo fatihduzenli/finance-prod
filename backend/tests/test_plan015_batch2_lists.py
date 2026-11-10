@@ -7,21 +7,43 @@ the Invoices tab, with the Bank deposits state as a segmented control."""
 
 from __future__ import annotations
 
+import dataclasses
 import html as html_module
 import re
+from collections.abc import Sequence
 from datetime import date
 
 import pytest
 from django.db import connection
-from django.test import Client
+from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
 
 from accounts.roles import Role
-from ledger.models import PaymentStatus
+from banking import services as bank_services
+from banking.models import BankTransaction, Confidence
+from ledger.models import (
+    HeldReason,
+    InvoiceStatus,
+    MessageStatus,
+    Operator,
+    OutboundMessage,
+    PaymentStatus,
+)
+from ledger.services import messaging
 from ledger.services.payments_ledger import PaymentFilter, parse_filter
+from ledger.views.outbox import STATUS_TONES, status_cell
 from ledger.views.payments import period_links
-from tests.receivables_helpers import a_lease, a_payment, a_rent_charge, a_store, an_operator
+from tests.receivables_helpers import (
+    a_lease,
+    a_payment,
+    a_rent_charge,
+    a_store,
+    an_invoice,
+    an_operator,
+)
+from tests.test_banking import OCTOBER, deposit, lease_at, owner
 from tests.test_operator_views import client_for
+from tests.test_plan014_d_messaging import a_world, at, queued
 
 pytestmark = pytest.mark.django_db
 
@@ -280,3 +302,317 @@ def test_the_period_links_add_no_query_to_the_list() -> None:
 
     plain = count("/payments/")
     assert count(f"/payments/?date_from={MONTH[0]}&date_to={MONTH[1]}") == plain
+
+
+# --- §3.4 The Operators list's avatar tile --------------------------------------------------------
+
+
+def operator_cell(html: str, operator: Operator) -> str:
+    link = f'href="/operators/{operator.pk}/">'
+    at = html.index(link, html.index('<table id="operators"'))
+    start = html.rindex("<td", 0, at)
+    return html[start : html.index("</td>", at)]
+
+
+@pytest.mark.parametrize(
+    ("name", "initials"),
+    [
+        ("Acme", "AC"),  # one word: its first two letters
+        ("Kaya Holdings", "KH"),
+        ("Atlas Retail Group", "AR"),  # the first letters of the first two words
+        ("!!! ...", "—"),  # no letter: the component's dash
+    ],
+)
+def test_the_operator_cell_leads_with_the_avatar_tile_beside_the_name(
+    name: str, initials: str
+) -> None:
+    operator = an_operator(name)
+    cell = operator_cell(page(client_for(Role.VIEWER)[0], "/operators/"), operator)
+    assert re.search(
+        r'<span class="cell-title-avatar"><span class="avatar-tile" aria-hidden="true">'
+        + re.escape(initials)
+        + r'</span><a class="cell-title" href="/operators/[^"]+/">'
+        + re.escape(html_module.escape(name))
+        + "</a></span>$",
+        cell,
+    ), cell
+
+
+def test_the_archived_and_needs_review_badges_stay_on_the_avatar_line() -> None:
+    operator = an_operator("Old Ops")
+    Operator.objects.filter(pk=operator.pk).update(
+        archived_at="2026-10-01T00:00:00Z", needs_review=True
+    )
+    cell = operator_cell(page(client_for(Role.VIEWER)[0], "/operators/?archived=1"), operator)
+    line = cell[cell.index('<span class="cell-title-avatar">') :]
+    assert line.index('class="avatar-tile"') < line.index('class="cell-title"')
+    assert line.index('class="cell-title"') < line.index('<span class="badge">Archived</span>')
+    assert "Needs review" in line and line.endswith("</span>")
+
+
+# --- §3.5 The Outbox's status chips ---------------------------------------------------------------
+
+
+def test_every_message_status_has_a_chip_tone() -> None:
+    assert set(STATUS_TONES) == set(MessageStatus.values)
+    assert STATUS_TONES == {
+        "queued": "pending",
+        "sent": "paid",
+        "failed": "unpaid",
+        "suppressed": "neutral",
+        "catch_all": "neutral",
+        "held": "pending",
+        "waiting": "pending",
+        "combined": "neutral",
+    }
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({"status": MessageStatus.QUEUED}, ("pending", "Waiting", "")),
+        ({"status": MessageStatus.SENT}, ("paid", "Sent", "")),
+        (
+            {"status": MessageStatus.FAILED, "error": "ConnectTimeout"},
+            ("unpaid", "Failed", "ConnectTimeout"),
+        ),
+        ({"status": MessageStatus.FAILED}, ("unpaid", "Failed", "")),
+        ({"status": MessageStatus.SUPPRESSED}, ("neutral", "Suppressed", "")),
+        ({"status": MessageStatus.CATCH_ALL}, ("neutral", "Sent to the test inbox", "")),
+        (
+            {"status": MessageStatus.HELD, "held_reason": HeldReason.SANDBOX},
+            ("pending", "Held", "held on sandbox"),
+        ),
+        (
+            {"status": MessageStatus.HELD, "held_reason": HeldReason.NOT_SET_UP},
+            ("pending", "Held", "not sent (mail not set up)"),
+        ),
+        (
+            {"status": MessageStatus.WAITING, "scheduled_for": date(2026, 11, 5)},
+            ("pending", "Waiting for the 3-day fold", "until Nov 5, 2026"),
+        ),
+        ({"status": MessageStatus.COMBINED}, ("neutral", "Combined", "")),
+    ],
+)
+def test_the_status_cell_is_the_tone_the_word_and_the_rest_of_the_status_text(
+    fields: dict[str, object], expected: tuple[str, str, str]
+) -> None:
+    assert status_cell(OutboundMessage(**fields)) == expected
+
+
+def test_a_combined_row_keeps_the_whole_combined_sentence_for_its_link() -> None:
+    primary = OutboundMessage(rule="D", status=MessageStatus.SENT)
+    combined = OutboundMessage(status=MessageStatus.COMBINED, combined_into=primary)
+    assert status_cell(combined) == ("neutral", "Combined", "Combined into the D message: Sent")
+
+
+def outbox_row(html: str, message: OutboundMessage) -> str:
+    start = html.index(f'<tr id="message-{message.pk}">')
+    return html[start : html.index("</tr>", start)]
+
+
+def status_td(row: str) -> str:
+    found = re.search(r'<td data-role="status"[^>]*>(.*?)</td>', row, re.S)
+    assert found is not None, row
+    return found[1]
+
+
+def chip_html(tone: str, word: str) -> tuple[str, str]:
+    """The chip's opening (its pair and glyph) and its end (the words), as {% chip %} draws them."""
+    glyph = {"paid": "check", "neutral": "circle"}.get(tone, "dot")
+    return (
+        f'<span class="status-chip status-chip-{tone}"><svg class="icon icon-{glyph}" width="12"'
+    ), f"<span>{word}</span></span>"
+
+
+def test_the_outbox_page_draws_each_status_as_a_chip_over_its_rest() -> None:
+    lease, charge = a_world()
+    with override_settings(MAIL_ENABLED=False):
+        message = queued(lease, charge, now=at(10))
+        messaging.send(message.pk, now=at(10))
+    admin = client_for(Role.ADMIN)[0]
+    cases = [
+        (
+            {"status": "held", "held_reason": "not_set_up"},
+            "pending",
+            "Held",
+            "not sent (mail not set up)",
+        ),
+        ({"status": "sent", "held_reason": ""}, "paid", "Sent", ""),
+        (
+            {"status": "failed", "held_reason": "", "error": "Timeout"},
+            "unpaid",
+            "Failed",
+            "Timeout",
+        ),
+        ({"status": "queued", "error": ""}, "pending", "Waiting", ""),
+    ]
+    for fields, tone, word, rest in cases:
+        OutboundMessage.objects.filter(pk=message.pk).update(**fields)
+        cell = status_td(outbox_row(page(admin, "/admin-settings/outbox/"), message))
+        start, end = chip_html(tone, word)
+        assert cell.startswith(start) and end in cell, (fields, cell)
+        if rest:
+            assert cell.endswith(f'</span><span class="cell-subline">{rest}</span>'), cell
+        else:
+            assert "cell-subline" not in cell, cell
+
+
+def test_the_outbox_combined_row_links_its_rest_to_the_message_sent_for_it() -> None:
+    lease, charge = a_world()
+    with override_settings(MAIL_ENABLED=False):
+        primary = queued(lease, charge, rule="D", now=at(10))
+        other = queued(lease, charge, rule="C", now=at(10))
+        messaging.send(primary.pk, now=at(10))
+    OutboundMessage.objects.filter(pk=primary.pk).update(
+        status=MessageStatus.HELD, held_reason=HeldReason.NOT_SET_UP
+    )
+    OutboundMessage.objects.filter(pk=other.pk).update(
+        status=MessageStatus.COMBINED, held_reason="", combined_into=primary
+    )
+    cell = status_td(outbox_row(page(client_for(Role.ADMIN)[0], "/admin-settings/outbox/"), other))
+    start, end = chip_html("neutral", "Combined")
+    assert cell.startswith(start) and end in cell
+    assert cell.endswith(
+        f'<span class="cell-subline"><a href="#message-{primary.pk}">'
+        "Combined into the D message: Held (not sent (mail not set up))</a></span>"
+    ), cell
+
+
+# --- §3.5 and §3.6 Bank deposits ------------------------------------------------------------------
+
+
+def suggestion_of(html: str, txn: BankTransaction) -> str:
+    start = html.index(f'<tr id="deposit-{txn.pk}">')
+    return status_td(html[start : html.index("</tr>", start)])
+
+
+@pytest.mark.parametrize(
+    ("confidence", "tone", "word"),
+    [
+        (Confidence.EXACT, "paid", "Exact"),
+        (Confidence.STRONG, "pending", "Strong"),
+        (Confidence.WEAK, "partial", "Weak"),
+    ],
+)
+def test_a_suggestion_leads_with_its_confidence_chip(
+    confidence: str, tone: str, word: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lease = lease_at(2611, "Chip")
+    charge = a_rent_charge(lease, OCTOBER, due="1200.00")
+    an_invoice(owner(lease), 611, "1200.00", rent_charge=charge)
+    txn = deposit("1200.00", description="WIRE INV-2026-0611")
+    real = bank_services.rows
+
+    def with_confidence(
+        transactions: Sequence[BankTransaction], today: date
+    ) -> list[bank_services.Row]:
+        # The page's rows as the matcher made them, the suggestion's confidence set to the case.
+        found = real(transactions, today)
+        assert found and all(row.suggestion and row.suggestion.lease for row in found)
+        return [
+            dataclasses.replace(
+                row, suggestion=dataclasses.replace(row.suggestion, confidence=confidence)
+            )
+            if row.suggestion is not None
+            else row
+            for row in found
+        ]
+
+    monkeypatch.setattr(bank_services, "rows", with_confidence)
+    cell = suggestion_of(page(client_for(Role.BILLING)[0], "/admin-settings/bank-deposits/"), txn)
+    start, end = chip_html(tone, word)
+    assert cell.startswith(start) and end in cell, cell
+    assert "#2611 Chip" in cell and "badge" not in cell
+
+
+def test_no_match_is_a_neutral_chip_and_the_kind_stays_a_badge() -> None:
+    txn = deposit("13.37", description="UNKNOWN SENDER")
+    html = page(client_for(Role.BILLING)[0], "/admin-settings/bank-deposits/")
+    cell = suggestion_of(html, txn)
+    start, end = chip_html("neutral", "No match")
+    assert cell.startswith(start) and end in cell, cell
+    row = html[html.index(f'<tr id="deposit-{txn.pk}">') :]
+    assert re.search(r'<span class="badge">[A-Z][a-z]+</span>', row[: row.index("</tr>")])
+
+
+STATES = [
+    ("new", "New"),
+    ("confirmed", "Confirmed"),
+    ("split", "Split"),
+    ("ignored", "Ignored"),
+    ("all", "All"),
+]
+
+
+def states_of(html: str) -> list[tuple[str, str, bool]]:
+    start = html.index('<div class="segmented" id="deposit-states"')
+    control = html[start : html.index("</div>", start)]
+    assert control.startswith(
+        '<div class="segmented" id="deposit-states" role="group" aria-label="State">'
+    )
+    return [
+        (html_module.unescape(href), label, bool(current))
+        for href, current, label in re.findall(
+            r'<a href="([^"]*)"( aria-current="page")?>([^<]+)</a>', control
+        )
+    ]
+
+
+@pytest.mark.parametrize("current", [value for value, _ in STATES])
+def test_the_state_is_a_segmented_control_of_links_before_fetch_now(current: str) -> None:
+    html = page(client_for(Role.BILLING)[0], f"/admin-settings/bank-deposits/?status={current}")
+    assert states_of(html) == [
+        (f"/admin-settings/bank-deposits/?status={value}", label, value == current)
+        for value, label in STATES
+    ]
+    actions = header_of(html)[header_of(html).index('<div class="page-actions">') :]
+    assert actions.index('id="deposit-states"') < actions.index('id="fetch-now"')
+
+
+def test_the_filter_card_is_gone_and_new_is_the_default() -> None:
+    html = page(client_for(Role.BILLING)[0], "/admin-settings/bank-deposits/")
+    assert 'class="card filter-card"' not in html and 'id="filters"' not in html
+    assert "filters.js" not in html and 'class="filters-chips"' not in html
+    assert [label for _, label, current in states_of(html) if current] == ["New"]
+
+
+def test_a_hostile_state_is_refused_as_today_and_never_echoed() -> None:
+    html = page(client_for(Role.BILLING)[0], "/admin-settings/bank-deposits/?status=%3Cscript%3E")
+    assert "<script>" not in html.split("</header>")[0].split('id="page-header"')[-1]
+    assert "&lt;script&gt;" not in html and "%3Cscript%3E" not in html
+    # The view falls back to New, so the list shown is the new deposits and New says so.
+    assert [label for _, label, current in states_of(html) if current] == ["New"]
+
+
+# --- §3.5 The Invoices tab's status chips ---------------------------------------------------------
+
+INVOICE_CHIPS = [
+    (InvoiceStatus.DRAFT, "neutral", "Draft"),
+    (InvoiceStatus.READY, "neutral", "Ready"),
+    (InvoiceStatus.SENT, "unpaid", "Sent"),
+    (InvoiceStatus.CLOSED, "neutral", "Closed"),
+    (InvoiceStatus.VOID, "neutral", "Void"),
+]
+
+
+@pytest.mark.parametrize("owner", ["store", "operator"])
+def test_the_invoices_tab_draws_a_chip_for_each_internal_status(owner: str) -> None:
+    operator = an_operator("Tab Co")
+    lease = a_lease(a_store("2612 TAB", 2612), operator)
+    invoices = {}
+    for number, (status, _, _) in enumerate(INVOICE_CHIPS, start=1):
+        charge = a_rent_charge(lease, date(2026, number, 1), due="100.00")
+        invoices[status] = an_invoice(
+            operator, 6120 + number, "100.00", rent_charge=charge, internal_status=status
+        )
+    path = f"/stores/{lease.store_id}/" if owner == "store" else f"/operators/{lease.operator_id}/"
+    html = page(client_for(Role.BILLING)[0], f"{path}?tab=invoices&filter=all")
+    at = html.index('<table id="store-invoices"')
+    table = html[at : html.index("</table>", at)]
+    for status, tone, word in INVOICE_CHIPS:
+        row = table[table.index(f">{invoices[status].invoice_number}<") :]
+        row = row[: row.index("</tr>")]
+        cell = status_td(row)
+        start, end = chip_html(tone, word)
+        assert cell.startswith(start) and cell.endswith(end), (status, cell)

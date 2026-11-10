@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
-{% load filters dates responsive %}
+{% load components filters dates responsive %}
 {% block title %}Outbox{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><h1>Outbox</h1><p class="page-sub" id="list-counts">{{ page.paginator.count }} message{{ page.paginator.count|pluralize }}</p></div><div class="page-actions">{% if held_for_settings %}<form method="post" action="{% url 'ledger:outbox:send_held_for_settings' %}" id="outbox-send-held-for-settings" class="js-single-submit" onsubmit="return window.confirm('Send all held for settings: {{ release.text }}?');">{% csrf_token %}<input type="hidden" name="count" value="{{ held_for_settings }}"><button class="btn" type="submit">Send all held for settings ({{ held_for_settings }})</button></form>{% endif %}<a class="btn" id="outbox-preview" href="{% url 'ledger:outbox:preview' %}">Preview next 30 days</a></div></div>{% endblock %}
 {% block content %}
-  {% comment %}Admin › Outbox (docs/qa/PLAN-014 D5): every message, newest first, 50 a page; filters by status and by the days queued. A row opens its stored subject and body (a combined message's lists every charge); a row combined into another links to it and reads its outcome. "Send now" sends a held message again once mail is set up (and, on the sandbox, its address is on the allowlist); the service refuses otherwise with a sentence. "Send all held for settings" (owner, 2026-11-02) is shown while messages are held for a blank company name or support e-mail: its confirmation says what it will do (held messages → e-mails, superseded) and the form posts their number back; they go grouped per lease as at the daily job.{% endcomment %}
+  {% comment %}Admin › Outbox (docs/qa/PLAN-014 D5): every message, newest first, 50 a page; filters by status and by the days queued. A row opens its stored subject and body (a combined message's lists every charge); a row combined into another links to it and reads its outcome. "Send now" sends a held message again once mail is set up (and, on the sandbox, its address is on the allowlist); the service refuses otherwise with a sentence. "Send all held for settings" (owner, 2026-11-02) is shown while messages are held for a blank company name or support e-mail: its confirmation says what it will do (held messages → e-mails, superseded) and the form posts their number back; they go grouped per lease as at the daily job. PLAN-015 Batch 2: the Status cell is a {% chip %} (views.outbox.status_cell: the tone and the status's word) over the rest of the status text (the held reason, the error, the fold's day; a combined row's link to its message).{% endcomment %}
   <div class="card filter-card">{% filters active=active_filters %}
       <span class="filter-field"><label for="status">Status</label>
       <select name="status" id="status">
@@ -34,7 +34,7 @@
           <td>{{ message.operator.display_name }}</td>
           <td><details class="message-text"><summary>{{ message.template.display_name }}</summary><p><strong>{{ message.rendered_subject|default:"—" }}</strong></p><pre class="message-body">{{ message.rendered_body }}</pre></details></td>
           <td>{{ message.get_rule_display }}</td>
-          <td>{% if message.combined_into_id %}<a href="#message-{{ message.combined_into_id }}">{{ status }}</a>{% else %}{{ status }}{% endif %}</td>
+          <td data-role="status">{% with tone=status.0 label=status.1 rest=status.2 %}{% chip tone label %}{% if rest %}<span class="cell-subline">{% if message.combined_into_id %}<a href="#message-{{ message.combined_into_id }}">{{ rest }}</a>{% else %}{{ rest }}{% endif %}</span>{% endif %}{% endwith %}</td>
           <td>{{ to|default:"—" }}</td>
           <td>{% if message.scheduled_for %}{{ message.scheduled_for|moment }}{% else %}—{% endif %}</td>
           <td>{% if message.status == "held" %}<form method="post" action="{% url 'ledger:outbox:send_now' pk=message.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-sm" type="submit">Send now</button></form>{% endif %}</td>

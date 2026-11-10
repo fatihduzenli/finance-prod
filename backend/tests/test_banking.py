@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import date
@@ -1165,7 +1166,12 @@ def test_the_page_shows_the_readiness_sentence_and_the_suggestion() -> None:
     html = client_for(Role.BILLING)[0].get(reverse("banking:page")).content.decode()
     assert services.OFF in html
     assert "#1991 Istanbul" in html
-    assert 'class="badge badge-paid">Exact</span>' in html
+    # PLAN-015 Batch 2 re-pin: the confidence is a status chip (✓ Exact in the paid pair).
+    assert re.search(
+        r'<span class="status-chip status-chip-paid"><svg class="icon icon-check"[^>]*>.*?</svg>'
+        r"<span>Exact</span></span>",
+        html,
+    )
     assert "Remember FATIH TRADING LLC for #1991 Istanbul" in html
 
 
