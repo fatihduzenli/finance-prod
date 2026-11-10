@@ -157,7 +157,8 @@ def test_the_tiles_tooltip_opens_on_focus(live_server: LiveServer, laptop: Brows
     a_world()
     page = signed_in(laptop, live_server, "e2e-14a-tiles", "light", Role.BILLING)
     page.goto(f"{live_server.url}/payments/")
-    tiles = page.locator("#payments-totals .tile")
+    # PLAN-015 Batch 2 re-pin: the five tiles are five KPI cards v2.
+    tiles = page.locator("#payments-totals .kpi2")
     assert tiles.count() == 5
     tooltip = page.locator("#totals-help")
     assert not tooltip.is_visible()

@@ -321,7 +321,8 @@ td.line-number { white-space: nowrap; color: var(--muted); }
    .kpi2 ({% kpi2 %}): the dashboard mockup's KPI card. Its head (.kpi2-head): the 32 px tinted
    square (.kpi2-icon, --link on --month-current) and the titles (.kpi2-title 15/600, the muted
    12 px .kpi2-sub under it); the figure row (.kpi2-amount): the 28/700 .kpi2-value (.tone-unpaid
-   red) and the pill .kpi2-pill-<paid|unpaid|pending|neutral>; the footer (.kpi2-link): the link text
+   red, .tone-paid green, .tone-muted a zero; PLAN-015 Batch 2) and the pill
+   .kpi2-pill-<paid|unpaid|pending|neutral>; the footer (.kpi2-link): the link text
    in --link 13/600 and the arrow at the far right.
    .period-control ({% period_control %}): the .segmented track as a GET form.
    .avatar-tile ({% avatar_tile %}): the 28 px (.avatar-tile-36: 36 px) tinted square with the
@@ -337,6 +338,8 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .kpi2-amount { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
 .kpi2-value { color: var(--text); font-size: var(--fs-kpi); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .kpi2-value.tone-unpaid { color: var(--unpaid-text); }
+.kpi2-value.tone-paid { color: var(--paid-text); }
+.kpi2-value.tone-muted { color: var(--muted); }
 .kpi2-pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 600; line-height: 1.3; white-space: nowrap; }
 .kpi2-pill-paid { background: var(--paid-bg); color: var(--paid-text); }
 .kpi2-pill-unpaid { background: var(--unpaid-bg); color: var(--unpaid-text); }

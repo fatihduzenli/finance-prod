@@ -267,7 +267,15 @@ def test_the_old_stores_list_urls_still_answer_the_same_rows() -> None:
 # --- A6: the five tiles ---------------------------------------------------------------------------
 
 
+def kpi_value(totals: str, value_id: str) -> re.Match[str] | None:
+    """The ``kpi2-value`` span carrying ``value_id`` (PLAN-015 Batch 2: the tiles became cards)."""
+    return re.search(rf'<span class="kpi2-value([^"]*)" id="{value_id}">', totals)
+
+
 def test_the_payments_totals_are_five_tiles_with_tones_and_a_tooltip() -> None:
+    # PLAN-015 Batch 2 re-pin: the five tiles are five {% kpi2 %} cards; the tones moved from
+    # the tile (tone-paid, tone-unpaid, is-zero) to the card's figure (tone-paid, tone-unpaid,
+    # tone-muted).
     lease = a_lease(a_store("1441"), an_operator("Tiles Co"))
     charge = a_rent_charge(lease, date(2026, 9, 1), due="3500.00")
     a_payment(charge, "100.00", date(2026, 9, 5))
@@ -276,24 +284,16 @@ def test_the_payments_totals_are_five_tiles_with_tones_and_a_tooltip() -> None:
         client_for(Role.BILLING)[0],
         "/payments/?date_by=initiated&date_from=2026-09-01&date_to=2026-09-30",
     )
-    tiles = re.findall(r'<div class="tile[^"]*"', html[html.index('id="payments-totals"') :])[:5]
-    assert len(tiles) == 5
+    totals = section(html, "payments-totals")
+    assert totals.count('<div class="kpi2">') == 5
     labels = ["Settled", "Pending", "Returned", "Refunded", "Deposits held"]
-    for label in labels:
-        assert label in html[html.index('id="payments-totals"') :], label
-    totals = html[html.index('id="payments-totals"') :]
-    settled = re.search(
-        r'<div class="tile([^"]*)"[^>]*>(?:(?!</div>).)*id="total-settled"', totals, re.S
-    )
-    returned = re.search(
-        r'<div class="tile([^"]*)"[^>]*>(?:(?!</div>).)*id="total-returned"', totals, re.S
-    )
-    refunded = re.search(
-        r'<div class="tile([^"]*)"[^>]*>(?:(?!</div>).)*id="total-refunded"', totals, re.S
-    )
+    assert re.findall(r'<p class="kpi2-title">([^<]+)</p>', totals) == labels
+    settled = kpi_value(totals, "total-settled")
+    returned = kpi_value(totals, "total-returned")
+    refunded = kpi_value(totals, "total-refunded")
     assert settled and "tone-paid" in settled.group(1)
-    assert returned and "tone-unpaid" in returned.group(1) and "is-zero" not in returned.group(1)
-    assert refunded and "is-zero" in refunded.group(1)
+    assert returned and "tone-unpaid" in returned.group(1) and "tone-muted" not in returned.group(1)
+    assert refunded and "tone-muted" in refunded.group(1)
     card = section(html, "payment-totals-card")
     assert 'role="tooltip"' in card and 'aria-describedby="totals-help"' in card
     assert "Pending payments are never counted as collected" in card
@@ -302,11 +302,8 @@ def test_the_payments_totals_are_five_tiles_with_tones_and_a_tooltip() -> None:
 
 def test_a_zero_returned_tile_is_muted_not_red() -> None:
     html = page(client_for(Role.BILLING)[0], "/payments/")
-    totals = html[html.index('id="payments-totals"') :]
-    returned = re.search(
-        r'<div class="tile([^"]*)"[^>]*>(?:(?!</div>).)*id="total-returned"', totals, re.S
-    )
-    assert returned and "is-zero" in returned.group(1) and "tone-unpaid" not in returned.group(1)
+    returned = kpi_value(section(html, "payments-totals"), "total-returned")
+    assert returned and "tone-muted" in returned.group(1) and "tone-unpaid" not in returned.group(1)
 
 
 # --- A7: numeric headers aligned like their cells ------------------------------------------------
