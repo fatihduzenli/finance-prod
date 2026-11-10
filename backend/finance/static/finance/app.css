@@ -1405,6 +1405,12 @@ td.cell-chevron a:hover { color: var(--text); }
 .tile.tone-paid .tile-value { color: var(--paid-text); }
 .tile.tone-unpaid .tile-value { color: var(--unpaid-text); }
 .tile.is-zero .tile-value { color: var(--muted); font-weight: 600; }
+/* PLAN-015 Batch 2: the Payments totals as {% kpi2 %} cards. The ⓘ stays beside its label (its
+   tooltip opens to the right of it); the five cards fit one row on a laptop (10rem each, as on the
+   phone), their figures 22 px so a five-figure sum keeps one line. */
+#payment-totals-card { justify-content: flex-start; }
+#payments-totals.kpi2-row { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+#payments-totals .kpi2-value { font-size: 22px; }
 .info-wrap { position: relative; display: inline-flex; }
 .info { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); font: inherit; font-size: var(--fs-md); cursor: pointer; }
 .info:hover, .info:focus-visible { color: var(--text); }
