@@ -66,6 +66,7 @@ from ledger.services import (
 )
 from ledger.services import report_index as index_figures
 from ledger.views.operators import csv_response, role_required
+from ledger.wording import format_amount
 
 logger = logging.getLogger(__name__)
 
@@ -181,14 +182,40 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
 
 
 def _kpis(total: pnl.Figures, rows: list[pnl.PnlRow]) -> dict[str, Any]:
-    """The four cards over the table (DESIGN-SPEC §4 Profit and loss), from the total: Billed
-    and Collected are its rent and fees summed (Costs and Margin are the total's own, unknown
-    when any input is); ``unknown_stores`` counts the stores with an unknown input, for the
-    Margin card's "why" line."""
+    """The four cards over the table (DESIGN-SPEC §4 Profit and loss; PLAN-015 Batch 4 §3.2,
+    the {% kpi2 %} cards), from the total: Billed and Collected are its rent and fees summed
+    (Costs and Margin are the total's own, unknown when any input is); ``unknown_stores``
+    counts the stores with an unknown input, for the Margin card's sub-line. Each card's
+    sub-line is written here: Billed "rent $X · fees $Y", Collected "incl. $Z withheld
+    deposit" when there is one, Costs "landlord $X · other $Y · fee costs $Z" (other only
+    when not zero, "unknown" for an unknown part), Margin "n store(s) unknown"."""
+    unknown_stores = len({row.store_id for row in rows if row.unknown})
+
+    def known(amount: Decimal | None) -> str:
+        return "unknown" if amount is None else format_amount(amount)
+
+    costs = [f"landlord {known(total.landlord_rent)}"]
+    if total.other_costs is None or total.other_costs:
+        costs.append(f"other {known(total.other_costs)}")
+    costs.append(f"fee costs {known(total.fee_costs)}")
     return {
         "billed": total.net_rent + total.fees_billed,
         "collected": total.rent_collected + total.fees_collected,
-        "unknown_stores": len({row.store_id for row in rows if row.unknown}),
+        "unknown_stores": unknown_stores,
+        "billed_sub": (
+            f"rent {format_amount(total.net_rent)} · fees {format_amount(total.fees_billed)}"
+        ),
+        "collected_sub": (
+            f"incl. {format_amount(total.withheld_deposits)} withheld deposit"
+            if total.withheld_deposits
+            else ""
+        ),
+        "costs_sub": " · ".join(costs),
+        "margin_sub": (
+            f"{unknown_stores} store{'s' if unknown_stores != 1 else ''} unknown"
+            if unknown_stores
+            else ""
+        ),
     }
 
 
@@ -334,6 +361,13 @@ def _aging_page(
             "active_filters": active_filters,
             "report": report,
             "lines": _aging_lines(report) if report is not None else [],
+            # PLAN-015 Batch 4 §3.4: the Unpaid card's "n store(s)" (the rows of a store; the
+            # "No store" rows of one-off charges are not one).
+            "store_count": (
+                sum(1 for row in report.rows if row.store_id is not None)
+                if report is not None
+                else 0
+            ),
             "too_slow": TOO_SLOW if report is None else "",
             "buckets": receivables.AGING_BUCKETS,
             "today": timezone.localdate(),
