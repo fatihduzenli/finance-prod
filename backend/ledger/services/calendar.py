@@ -52,7 +52,7 @@ import secrets
 import uuid
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from urllib.parse import urlsplit
 
 from django.conf import settings
@@ -64,8 +64,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 import mail
-from finance.dates import day_text
+from finance.dates import clock_text, day_text
 from ledger.models import (
+    CALENDAR_DEFAULT_REMINDER_TIME,
+    CALENDAR_REMINDER_TIMES,
     CALENDAR_TITLE_MAX_LENGTH,
     AuditLog,
     CalendarEntry,
@@ -127,6 +129,14 @@ ENTITY_ENTRY = "calendar_entry"
 ENTITY_FEED = "calendar_feed"
 #: The longest body accepted.
 BODY_MAX_LENGTH = 2000
+#: The times a reminder's e-mail can be set for (PLAN-015h §3.1): the half hours from 6:00 AM
+#: to 9:00 PM New York, both included; the column's constraint names the same list.
+REMINDER_TIMES: tuple[time, ...] = CALENDAR_REMINDER_TIMES
+#: The select's choices: the value ``HH:MM``, the words ``2:30 PM``.
+REMINDER_TIME_CHOICES: tuple[tuple[str, str], ...] = tuple(
+    (f"{value:%H:%M}", clock_text(value)) for value in REMINDER_TIMES
+)
+DEFAULT_REMINDER_TIME = CALENDAR_DEFAULT_REMINDER_TIME
 
 TITLE_REQUIRED = "A title is required."
 TITLE_TOO_LONG = f"A title is at most {CALENDAR_TITLE_MAX_LENGTH} characters."

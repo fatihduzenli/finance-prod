@@ -14,6 +14,7 @@ account numbers by :mod:`ledger.validators` on save and, on PostgreSQL, by a tri
 from __future__ import annotations
 
 import uuid
+from datetime import time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -3365,6 +3366,13 @@ class CalendarEntryKind(models.TextChoices):
 
 #: Longest calendar title: it is an event's summary line (PLAN-011b D8).
 CALENDAR_TITLE_MAX_LENGTH = 120
+#: The New York times a calendar entry's reminder e-mail can be set for (PLAN-015h): the half
+#: hours from 06:00 to 21:00, both included (no hour a clock change repeats or skips).
+CALENDAR_REMINDER_TIMES: tuple[time, ...] = tuple(
+    time(hour, minute) for hour in range(6, 22) for minute in (0, 30) if (hour, minute) <= (21, 0)
+)
+#: The reminder's time until one is chosen: the hour of the old morning e-mail.
+CALENDAR_DEFAULT_REMINDER_TIME = time(9, 0)
 
 
 class CalendarEntry(GuardedModel):
@@ -3372,7 +3380,8 @@ class CalendarEntry(GuardedModel):
 
     Entries are shared staff notes: every staff user sees every entry, on the page and
     in their own calendar feed. There is no private entry. ``email_morning`` asks for an
-    e-mail to the author on the morning of ``on`` (the daily tick, PLAN-011b D8).
+    e-mail to the author on ``on`` at ``email_at``, New York time (the worker's reminder check,
+    PLAN-015h; PLAN-011b D8 sent it in the morning).
     """
 
     kind = _choice(CalendarEntryKind)
@@ -3393,6 +3402,8 @@ class CalendarEntry(GuardedModel):
     title = guarded_char(CALENDAR_TITLE_MAX_LENGTH)
     body = free_text()
     email_morning = models.BooleanField(default=False)
+    #: The reminder's New York wall-clock time; meaningful while ``email_morning`` is on.
+    email_at = models.TimeField(default=CALENDAR_DEFAULT_REMINDER_TIME)
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
@@ -3405,6 +3416,10 @@ class CalendarEntry(GuardedModel):
         constraints = [
             _not_blank("calendar_entries", "title"),
             _valid_choice("calendar_entries", "kind", CalendarEntryKind),
+            models.CheckConstraint(
+                condition=Q(email_at__in=CALENDAR_REMINDER_TIMES),
+                name="calendar_entries_email_at_offered",
+            ),
         ]
 
 

@@ -10,7 +10,8 @@ screen only; Python that builds a sentence for a page calls them, and the templa
 - :func:`day_text` ``Nov 1, 2026``; :func:`day_short_text` ``Nov 1`` (only where the text
   around it names the year); :func:`day_long_text` ``Tuesday, Oct 20, 2026``;
   :func:`month_text` ``Oct 2026``; :func:`month_long_text` ``October 2026`` (a period's
-  name, PLAN-014 A3); :func:`moment_text` ``Nov 1, 2026 · 14:02``.
+  name, PLAN-014 A3); :func:`moment_text` ``Nov 1, 2026 · 14:02``; :func:`clock_text` ``2:30 PM``
+  (a wall-clock time chosen from a list, the calendar reminder's, PLAN-015h).
 - A ``datetime`` is read in New York (PLAN-011b D1: storage is UTC, every day the business
   names is a New York day); a naive ``datetime`` is taken to be UTC, as the pages already do.
   A ``date`` is used as it is.
@@ -23,13 +24,14 @@ the same on every machine.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo
 
 from finance.env_guard import PROJECT_TIME_ZONE
 
 __all__ = [
     "NEW_YORK",
+    "clock_text",
     "day_long_text",
     "day_short_text",
     "day_text",
@@ -124,3 +126,13 @@ def moment_text(value: date | datetime) -> str:
         raise TypeError(f"expected a datetime, got {type(value).__name__}")
     local = _new_york(value)
     return f"{day_text(local.date())} · {local:%H:%M}"
+
+
+def clock_text(value: time) -> str:
+    """``2:30 PM``: a wall-clock time on the 12-hour clock (``6:00 AM``, ``12:00 PM``), no
+    leading zero, upper-case AM or PM after one space. Anything but a ``time`` is a
+    :class:`TypeError`."""
+    if not isinstance(value, time):
+        raise TypeError(f"expected a time, got {type(value).__name__}")
+    hour = value.hour % 12 or 12
+    return f"{hour}:{value.minute:02d} {'AM' if value.hour < 12 else 'PM'}"
