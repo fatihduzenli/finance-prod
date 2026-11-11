@@ -1059,8 +1059,9 @@ def test_kpi2_badge_tones(tone: str) -> None:
     assert f'<span class="kpi2-pill kpi2-pill-{tone}">3 unmatched</span>' in html
 
 
-# PLAN-015 Batch 2: the Payments list's totals add the paid (green) and muted (a zero) figures.
-@pytest.mark.parametrize("tone", ["unpaid", "paid", "muted"])
+# PLAN-015 Batch 2: the Payments list's totals add the paid (green) and muted (a zero) figures;
+# Batch 6: the pending figure (Daily charges' Skipped).
+@pytest.mark.parametrize("tone", ["unpaid", "paid", "muted", "pending"])
 def test_kpi2_value_tones(tone: str) -> None:
     html = rendered("{% kpi2 'banknote' 'Settled' value='$1.00' value_tone=t %}", t=tone)
     assert f'<span class="kpi2-value tone-{tone}">$1.00</span>' in html
@@ -1079,8 +1080,10 @@ def test_kpi2_names_its_figure_when_given_an_id() -> None:
 @pytest.mark.parametrize(
     "arguments",
     [
-        # PLAN-015 Batch 2 re-pin: paid became a figure tone; pending never is one.
-        "value_tone='pending'",
+        # PLAN-015 Batch 2 re-pin: paid became a figure tone. Batch 6 re-pin (Opus): pending
+        # became one too (Daily charges' Skipped); overdue and partial never are.
+        "value_tone='overdue'",
+        "value_tone='partial'",
         "value_tone='red'",
         "badge='x' badge_tone='overdue'",
         "badge='x' badge_tone=''",
@@ -1248,6 +1251,7 @@ def test_the_new_components_take_their_colours_from_documented_pairs() -> None:
     assert "color: var(--unpaid-text)" in rule(".kpi2-value.tone-unpaid")
     assert "color: var(--paid-text)" in rule(".kpi2-value.tone-paid")  # PLAN-015 Batch 2
     assert "color: var(--muted)" in rule(".kpi2-value.tone-muted")
+    assert "color: var(--pending-text)" in rule(".kpi2-value.tone-pending")  # PLAN-015 Batch 6
     tokens = TOKENS_CSS.read_text()
     assert "pair: --link on --month-current" in tokens
     assert "pair[dark]: --link on --month-current over --surface" in tokens
@@ -1290,7 +1294,7 @@ def test_every_dark_pair_meets_wcag_aa_with_the_dark_values() -> None:
     assert failures == []
 
 
-@pytest.mark.parametrize("tone", ["unpaid", "paid", "muted"])
+@pytest.mark.parametrize("tone", ["unpaid", "paid", "muted", "pending"])  # pending: Batch 6
 def test_the_kpi2_figure_tones_meet_aa_on_the_card_in_both_themes(tone: str) -> None:
     """PLAN-015 Batch 2: each {% kpi2 %} figure colour (.kpi2-value.tone-*) on the card's
     --surface, with the light values and with the dark block's, at the text minimum."""

@@ -7,16 +7,19 @@ Settings, Message templates and Preferences cards' heads and the template status
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
-from django.test import Client
+from django.template import Context, Template
+from django.test import Client, override_settings
 
 from accounts.roles import Role
 from ledger.views import audit as audit_views
 from ledger.views import dashboard as dashboard_view
 from ledger.views import reports as report_views
+from tests import test_run_layout as run_layout
 from tests.receivables_helpers import an_operator
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
@@ -53,6 +56,10 @@ def content_of(html: str) -> str:
 
 def admin() -> Client:
     return client_for(Role.ADMIN)[0]
+
+
+def rendered_icon(name: str) -> str:
+    return Template("{% load icons %}{% icon name 16 %}").render(Context({"name": name}))
 
 
 # --- §3.1 The headers -----------------------------------------------------------------------------
@@ -172,3 +179,89 @@ def test_no_template_keeps_the_plain_warning_paragraph() -> None:
         if '<p class="warning"' in path.read_text(encoding="utf-8")
     ]
     assert found == []
+
+
+# --- §3.2 Daily charges ------------------------------------------------------------------------
+
+
+@pytest.fixture
+def run_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: run_layout.TODAY)
+
+
+def kpi_cards(html: str) -> dict[str, tuple[str, str, str, str]]:
+    """Daily charges' figure row: per figure id, (icon path, title, the figure's class, figure)."""
+    row = html[
+        html.index('<section class="kpi-row kpi2-row" id="run-kpis" aria-label="Figures">') :
+    ]
+    row = row[: row.index("</section>")]
+    found = {}
+    for card in row.split('<div class="kpi2">')[1:]:
+        icon = re.search(r'<span class="kpi2-icon" aria-hidden="true">(.*?)</span>', card, re.S)
+        title = re.search(r'<p class="kpi2-title">(.*?)</p>', card)
+        value = re.search(r'<span class="(kpi2-value[^"]*)" id="([a-z-]+)">(.*?)</span>', card)
+        assert icon and title and value, card
+        found[value.group(2)] = (icon.group(1), title.group(1), value.group(1), value.group(3))
+    return found
+
+
+@pytest.mark.usefixtures("run_day")
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=Decimal("2000.00"))
+def test_daily_charges_four_figures_are_kpi2_cards_with_their_ids_icons_and_tones() -> None:
+    billing = client_for(Role.BILLING)[0]
+    run_layout.world(billing)
+    cards = kpi_cards(page(billing, "/run/"))
+    assert list(cards) == ["kpi-created", "kpi-due", "kpi-skipped", "kpi-large"]
+    icons = {name: rendered_icon(name) for name in ("check", "calendar", "alert")}
+    assert cards["kpi-created"] == (icons["check"], "Created today", "kpi2-value", "5")
+    assert cards["kpi-due"] == (icons["calendar"], "Due today", "kpi2-value", "$7,000.00")
+    assert cards["kpi-skipped"] == (icons["alert"], "Skipped", "kpi2-value tone-pending", "1")
+    assert cards["kpi-large"] == (icons["alert"], "Large debits", "kpi2-value tone-unpaid", "1")
+    assert 'class="kpi"' not in page(billing, "/run/")
+
+
+@pytest.mark.usefixtures("run_day")
+def test_with_nothing_due_every_daily_charges_figure_is_a_muted_zero() -> None:
+    cards = kpi_cards(page(client_for(Role.BILLING)[0], "/run/"))
+    assert [(card[2], card[3]) for card in cards.values()] == [
+        ("kpi2-value tone-muted", "0"),
+        ("kpi2-value tone-muted", "$0.00"),
+        ("kpi2-value tone-muted", "0"),
+        ("kpi2-value tone-muted", "0"),
+    ]
+
+
+def opens_with_card_head(html: str, section_id: str) -> str:
+    """The section's first element: the card head (its markup up to the head's end)."""
+    found = re.search(
+        rf'<section [^>]*id="{section_id}"[^>]*>\s*<div class="card-head[^"]*">', html
+    )
+    assert found is not None, section_id
+    return html[found.end() : html.index("</div>", found.end())]
+
+
+@pytest.mark.usefixtures("run_day")
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=Decimal("2000.00"))
+def test_every_daily_charges_card_opens_with_the_card_head() -> None:
+    billing = client_for(Role.BILLING)[0]
+    run_layout.world(billing)
+    html = page(billing, "/run/")
+    heads = {
+        "due-today-card": '<h2 id="due-today-title">Due today</h2>',
+        "skipped-today-card": '<h2 id="skipped-today-title">Skipped today</h2>',
+        "recent-runs-card": '<h2 id="recent-runs-title">Recent runs</h2>',
+        "last-run-card": "<h2>Created by the last run</h2>",
+        "autopay-charges-card": "<h2>Repeating debits created today</h2>",
+        "insurance-due-card": "<h2>Insurance due in the next ",
+        "today-run": "<h2>Today's run</h2>",
+        "failed-attempts": '<h2 id="failed-heading">Failed payment attempts: ',
+        "not-sent-card": '<h2 id="not-sent">Invoices created but not sent: ',
+        "last-reconciliation-card": "<h2>Last nightly check</h2>",
+    }
+    for section_id, title in heads.items():
+        assert opens_with_card_head(html, section_id).startswith(title), section_id
+    due_head = html[html.index('<div class="card-head run-due-header">') :]
+    due_head = due_head[: due_head.index("</a></div>")]
+    assert due_head.index('id="due-today-title"') < due_head.index('id="due-filter"')
+    assert due_head.index('id="due-filter"') < due_head.index('id="export-csv"')
+    assert '<div class="card-header' not in html[html.index('id="run-kpis"') :]

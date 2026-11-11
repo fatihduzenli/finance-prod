@@ -303,26 +303,16 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .line-trash[hidden], .no-js-remove[hidden] { display: none; }
 .table-total { font-weight: 600; text-align: right; margin: var(--space-2) 0 var(--space-4); }
 
-/* --- KPI card ----------------------------------------------------------------------------
-   .kpi: a card with its label (.kpi-label, 12 px muted), its value (.kpi-value, 28/700;
-   .tone-unpaid red) and a third line (.kpi-note, 12 px muted); written as markup by Admin ›
-   Daily charges since the {% kpi %} tag left with PLAN-015 Batch 5 (every other figure row is
-   {% kpi2 %}). .kpi-row: the cards in a row; .kpi-link: a card that is a link. */
+/* --- KPI row ------------------------------------------------------------------------------
+   .kpi-row: a row of {% kpi2 %} cards (with .kpi2-row). The old hand-written .kpi card left with
+   PLAN-015 Batch 6, when Admin › Daily charges, its last user, took the {% kpi2 %} cards. */
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-5); }
-.kpi { display: flex; flex-direction: column; gap: var(--space-1); height: 100%; box-sizing: border-box; padding: 18px 20px; border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface); }
-.kpi-label { color: var(--muted); font-size: var(--fs-sm); }
-.kpi-value { color: var(--text); font-size: var(--fs-kpi); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.kpi-value.tone-unpaid { color: var(--unpaid-text); }
-.kpi-note { color: var(--muted); font-size: var(--fs-sm); }
-.kpi-note a { color: var(--link); }
-.kpi-link { display: block; color: inherit; text-decoration: none; }
-.kpi-link:hover .kpi { border-color: var(--input-border); }
 
 /* --- Design v2's components (docs/qa/PLAN-015-design-v2.md §4.1; DESIGN-SPEC §3) -----------
    .kpi2 ({% kpi2 %}): the dashboard mockup's KPI card. Its head (.kpi2-head): the 32 px tinted
    square (.kpi2-icon, --link on --month-current) and the titles (.kpi2-title 15/600, the muted
    12 px .kpi2-sub under it); the figure row (.kpi2-amount): the 28/700 .kpi2-value (.tone-unpaid
-   red, .tone-paid green, .tone-muted a zero; PLAN-015 Batch 2) and the pill
+   red, .tone-paid green, .tone-muted a zero; PLAN-015 Batch 2; .tone-pending, Batch 6) and the pill
    .kpi2-pill-<paid|unpaid|pending|neutral>; the footer (.kpi2-link): the link text
    in --link 13/600 and the arrow at the far right.
    .period-control ({% period_control %}): the .segmented track as a GET form.
@@ -341,6 +331,7 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .kpi2-value.tone-unpaid { color: var(--unpaid-text); }
 .kpi2-value.tone-paid { color: var(--paid-text); }
 .kpi2-value.tone-muted { color: var(--muted); }
+.kpi2-value.tone-pending { color: var(--pending-text); }
 .kpi2-pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 600; line-height: 1.3; white-space: nowrap; }
 .kpi2-pill-paid { background: var(--paid-bg); color: var(--paid-text); }
 .kpi2-pill-unpaid { background: var(--unpaid-bg); color: var(--unpaid-text); }
@@ -362,6 +353,8 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); }
 .card-head .section-label { margin: 0; }
 .card-head .card-link { font-weight: 600; }
+/* PLAN-015 Batch 6: a card's own title in the head row keeps no margin of its own (the head's). */
+.card-head > h2 { margin: 0; }
 
 /* --- Progress bar ------------------------------------------------------------------------
    .progress ({% progress segments %}): a 10 px bar (.progress-bar) of stacked segments
@@ -624,11 +617,9 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
    tile and the name with an ellipsis, the balance 20/700 red above zero, the store count, the
    chip). Row 3, .dashboard-row-activity: the Recent activity card (the head with the search and
    the kind select, the table, the list footer) beside the narrower mini calendar column, which
-   ends after its card (.dashboard-side-fit; owner 2026-11-01). The other pages' headers keep
-   .page-title (the title, then the long date in .page-date) and the header search. */
+   ends after its card (.dashboard-side-fit; owner 2026-11-01). (PLAN-015 Batch 6: the
+   other pages' headers take the same title block; .page-title and .page-date left.) */
 .page-header .page-actions .nav-search { flex: 0 0 320px; }
-.page-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-4); }
-.page-date { color: var(--muted); font-size: var(--fs-base); }
 .badge.promise-open { background: var(--pending-bg); color: var(--pending-text); }
 .page-sub { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-base); }
 .dashboard-row-v2 { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--space-5); align-items: stretch; margin: 0 0 var(--space-5); }
@@ -790,7 +781,7 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
 .card > p:first-child, .card > ul:first-child, .card > dl:first-child { margin-top: 0; }
 .table-card { padding: 0; overflow: clip; }
 .table-card > .table-cards > table > tbody > tr:last-child > td, .table-card > .table-scroll > table > tbody > tr:last-child > td, .table-card > table > tbody > tr:last-child > td { border-bottom: 0; }
-.table-card > p, .table-card > .card-header, .table-card > h2 { margin: 0; padding: 16px 20px 12px; }
+.table-card > p, .table-card > .card-header, .table-card > .card-head, .table-card > h2 { margin: 0; padding: 16px 20px 12px; }
 /* Admin › Settings (PLAN-014 B2): a row's inline form (a field and its small button), the row's
    actions side by side, and the Add form under the table. */
 .settings-inline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; }
@@ -1245,8 +1236,6 @@ fieldset.card > legend + * { clear: both; }
   /* The workspaces' figure row (PLAN-015 Batch 3): a lone last card (the store page's third)
      spans the row rather than sitting at half width; an even row (the operator's four) is as is. */
   .page-header-inner > .kpi2-row > :last-child:nth-child(odd) { grid-column: 1 / -1; }
-  .kpi { padding: var(--space-3) 14px; }
-  .kpi-value { font-size: 20px; }
   .dashboard-row-v2, .dashboard-row-activity, .workspace-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   .dashboard-row-v2 { margin-bottom: var(--space-4); }
   /* The mini calendar (PLAN-012g C3): no popover; a tap moves the day's list into #mini-panel;
@@ -1417,7 +1406,7 @@ td.cell-chevron a:hover { color: var(--text); }
 /* --- Report family (PLAN-012f-b E-1) ---------------------------------------------------------
    DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png. The filter card (the shared
    search and filters form since PLAN-014 A5; .pnl-detail-check its rows box); the four figures
-   ({% kpi2 %} cards since PLAN-015 Batch 4; .kpi-value.tone-paid stays for the other .kpi pages);
+   ({% kpi2 %} cards since PLAN-015 Batch 4);
    the table card: its header (the title, the muted count line, the held pills at the right,
    .pnl-held), the two-row header with its group heads centred (.grp-head) and a hairline at
    the left of each column group (.grp-start), the margins bold, a negative in the unpaid text
@@ -1426,8 +1415,6 @@ td.cell-chevron a:hover { color: var(--text); }
    scrolls sideways inside its card when the window is narrow; the phone draws the rows as
    the two-line cards of the cards tables. */
 .pnl-filters .pnl-detail-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
-.kpi-value.tone-paid { color: var(--paid-text); }
-.kpi .unknown { color: var(--muted); font-weight: 600; }
 .pnl-held { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); margin-left: auto; }
 .pnl-card .table-cards { overflow-x: auto; }
 .pnl-table th.grp-head { text-align: center; }
@@ -1475,8 +1462,9 @@ a.report-card:hover, .report-card-form:hover { border-color: var(--input-border)
    DESIGN-SPEC §4 Daily charges, daily-charges-laptop.png. The result strip (.run-strip): the
    icon, the sentence and "Nightly check →" at the right on a 10 px tinted bar, green
    (.run-strip-ok), yellow when the latest run skipped a lease (.run-strip-warn), red when the
-   latest "Update from …" failed (.run-strip-error), grey before the first run; the Skipped
-   figure in the pending text colour; the "Due today" card's header (the title, the segmented
+   latest "Update from …" failed (.run-strip-error), grey before the first run; the four figures
+   ({% kpi2 %} cards since PLAN-015 Batch 6, the Skipped figure in the pending text colour); the
+   "Due today" card's head (.card-head) (the title, the segmented
    filter beside it, "Download spreadsheet" at the right; the amount bold, a carried balance owed in
    red, "Open ›" at the right); the teal Created badge
    (.badge.run-created, the link colour on the current month's tint, a measured pair); the two
@@ -1491,7 +1479,6 @@ a.report-card:hover, .report-card-form:hover { border-color: var(--input-border)
 .run-strip-text { flex: 1 1 auto; margin: 0; min-width: 0; }
 .run-strip-link { flex: 0 0 auto; color: inherit; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .run-strip-link:hover { text-decoration: underline; }
-.kpi-value.tone-pending { color: var(--pending-text); }
 .run-due-header .segmented { margin-left: var(--space-2); }
 .badge.run-created { background: var(--month-current); color: var(--link); }
 td.money.tone-unpaid { color: var(--unpaid-text); }
@@ -1826,7 +1813,7 @@ p.detail-more-notes { padding-left: 0; }
   .contact-menus .menu-sm ul { position: absolute; }
   /* A list's card gives way to its rows' cards. */
   .table-card { padding: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
-  .table-card > p, .table-card > .card-header, .table-card > h2 { padding: 0 0 var(--space-3); }
+  .table-card > p, .table-card > .card-header, .table-card > .card-head, .table-card > h2 { padding: 0 0 var(--space-3); }
   /* Tables become cards: one bordered block per row, a "label: value" line per cell. */
   .table-cards > table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .table-cards > table, .table-cards > table tbody, .table-cards > table tfoot, .table-cards > table tr, .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { display: block; width: 100%; box-sizing: border-box; }

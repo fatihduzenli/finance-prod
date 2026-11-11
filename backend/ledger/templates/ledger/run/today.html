@@ -4,7 +4,7 @@
 {% block title %}Daily charges, {{ run.day|day }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><span>Admin</span> <span aria-hidden="true">›</span></nav><h1>Daily charges</h1><p class="page-sub" id="run-date">{{ run.day|day_long }}</p></div>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form><form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
-  {% comment %}The page's frame (DESIGN-SPEC §4 Daily charges, daily-charges-laptop.png; PLAN-012f-b E-2): the result strip of the latest run (green; yellow when it skipped a lease; red when the latest "Update from …" failed), the four figures, the "Due today" card with its read-only filter (?due=), "Skipped today" beside "Recent runs", then the latest run's created charges, the repeating debits and the insurance due; then the cards that left the dashboard (PLAN-015 Batch 1, ledger/run/_operations.html). No per-row Confirm and no row actions (the owner's exclusion, plan D17).{% endcomment %}
+  {% comment %}The page's frame (DESIGN-SPEC §4 Daily charges, daily-charges-laptop.png; PLAN-012f-b E-2): the result strip of the latest run (green; yellow when it skipped a lease; red when the latest "Update from …" failed), the four figures, the "Due today" card with its read-only filter (?due=), "Skipped today" beside "Recent runs", then the latest run's created charges, the repeating debits and the insurance due; then the cards that left the dashboard (PLAN-015 Batch 1, ledger/run/_operations.html). No per-row Confirm and no row actions (the owner's exclusion, plan D17). PLAN-015 Batch 6: the four figures are {% kpi2 %} cards (their ids on the figures; a zero muted, Skipped pending and Large debits red above zero) and every card opens with its .card-head.{% endcomment %}
   {% if not health.ok %}
     <ul class="messages" id="provider-banner">
       {% for text in health.messages %}<li class="error" role="alert">{{ text }}</li>{% endfor %}
@@ -27,15 +27,15 @@
     <ul id="match-report">{% for line in match_lines %}<li>{{ line }}</li>{% endfor %}</ul>
   {% endif %}
 
-  <section class="kpi-row run-kpis" id="run-kpis" aria-label="Figures">
-    <div class="kpi" id="kpi-created"><span class="kpi-label">Created today</span><span class="kpi-value">{{ run_figures.created }}</span><span class="kpi-note">{{ run_figures.created_today }} today · {{ run_figures.caught_up }} catch-up</span></div>
-    <div class="kpi" id="kpi-due"><span class="kpi-label">Due today</span><span class="kpi-value">{{ run_figures.due_amount|money }}</span><span class="kpi-note">{{ run_figures.debits }} bank debit{{ run_figures.debits|pluralize }} · {{ run_figures.others }} e-mail</span></div>
-    <div class="kpi" id="kpi-skipped"><span class="kpi-label">Skipped</span><span class="kpi-value{% if run_figures.skipped %} tone-pending{% endif %}">{{ run_figures.skipped }}</span>{% if run_figures.reasons %}<span class="kpi-note">{{ run_figures.reasons|join:" · " }}</span>{% endif %}</div>
-    <div class="kpi" id="kpi-large"><span class="kpi-label">Large debits</span><span class="kpi-value{% if run_figures.large %} tone-unpaid{% endif %}">{{ run_figures.large }}</span><span class="kpi-note">above {{ threshold|money }} · needs admin</span></div>
+  <section class="kpi-row kpi2-row" id="run-kpis" aria-label="Figures">
+    {% with created_today=run_figures.created_today|stringformat:"d" caught_up=run_figures.caught_up|stringformat:"d" %}{% firstof created_today|add:" today · "|add:caught_up|add:" catch-up" as sub %}{% kpi2 "check" "Created today" sub run_figures.created value_tone=run_figures.created|yesno:",muted" value_id="kpi-created" %}{% endwith %}
+    {% with debits=run_figures.debits|stringformat:"d" others=run_figures.others|stringformat:"d" plural=run_figures.debits|pluralize %}{% firstof debits|add:" bank debit"|add:plural|add:" · "|add:others|add:" e-mail" as sub %}{% kpi2 "calendar" "Due today" sub run_figures.due_amount|money value_tone=run_figures.due_amount|yesno:",muted" value_id="kpi-due" %}{% endwith %}
+    {% kpi2 "alert" "Skipped" run_figures.reasons|join:" · " run_figures.skipped value_tone=run_figures.skipped|yesno:"pending,muted" value_id="kpi-skipped" %}
+    {% with above=threshold|money %}{% firstof "above "|add:above|add:" · needs admin" as sub %}{% kpi2 "alert" "Large debits" sub run_figures.large value_tone=run_figures.large|yesno:"unpaid,muted" value_id="kpi-large" %}{% endwith %}
   </section>
 
   <section class="card table-card" id="due-today-card" aria-labelledby="due-today-title">
-  <div class="card-header run-due-header"><h2 id="due-today-title">Due today</h2><nav class="segmented" aria-label="Show" id="due-filter">{% for value, label in due_filters %}<a href="{% url 'ledger:run:today' %}{% if value != 'all' %}?due={{ value }}{% endif %}" id="due-filter-{{ value }}"{% if value == due_filter %} aria-current="page"{% endif %}>{{ label }}{% if value == "all" %} {{ due_count }}{% endif %}</a>{% endfor %}</nav><a class="card-link" id="export-csv" href="{% url 'ledger:run:export' %}">Download spreadsheet</a></div>
+  <div class="card-head run-due-header"><h2 id="due-today-title">Due today</h2><nav class="segmented" aria-label="Show" id="due-filter">{% for value, label in due_filters %}<a href="{% url 'ledger:run:today' %}{% if value != 'all' %}?due={{ value }}{% endif %}" id="due-filter-{{ value }}"{% if value == due_filter %} aria-current="page"{% endif %}>{{ label }}{% if value == "all" %} {{ due_count }}{% endif %}</a>{% endfor %}</nav><a class="card-link" id="export-csv" href="{% url 'ledger:run:export' %}">Download spreadsheet</a></div>
   {% responsive_table %}
   <table id="due-today">
     <thead><tr><th>Store</th><th>Debit</th><th>Collected by</th><th class="money">Amount</th><th class="money">Carried balance</th><th>Status</th><th><span class="visually-hidden">Open</span></th></tr></thead>
@@ -61,7 +61,7 @@
 
   <div class="run-pair">
   <section class="card" id="skipped-today-card" aria-labelledby="skipped-today-title">
-  <h2 id="skipped-today-title">Skipped today</h2>
+  <div class="card-head"><h2 id="skipped-today-title">Skipped today</h2></div>
   {% if skipped_rows %}
     <ul class="run-list" id="skipped-today">
       {% for row in skipped_rows %}<li><a class="cell-title" href="{% url 'ledger:stores:detail' pk=row.lease.store.pk %}">{{ row.title }}</a> · {{ row.reason }}</li>{% endfor %}
@@ -72,7 +72,7 @@
   </section>
 
   <section class="card" id="recent-runs-card" aria-labelledby="recent-runs-title">
-  <h2 id="recent-runs-title">Recent runs</h2>
+  <div class="card-head"><h2 id="recent-runs-title">Recent runs</h2></div>
   {% if recent_runs %}
     <ul class="run-list" id="recent-runs">
       {% for record, clock in recent_runs %}<li><span>{{ record.day|day_short }} · {{ clock }} · {% if record.actor %}by {{ record.actor|staff }}{% else %}automatic{% endif %}</span><span class="run-list-end">{{ record.total_created }} created{% if record.caught_up %} ({{ record.caught_up }} catch-up){% endif %} · {{ record.skipped }} skipped {% status_badge "OK" "paid" %}</span></li>{% endfor %}
@@ -85,7 +85,7 @@
 
   {% if last_run %}
     <section class="card" id="last-run-card">
-    <h2>Created by the last run</h2>
+    <div class="card-head"><h2>Created by the last run</h2></div>
     {% responsive_table %}
     <table id="created-charges">
       <thead><tr><th>Store</th><th>Month</th><th class="money">Amount</th><th>Created</th><th>Charge</th></tr></thead>
@@ -109,7 +109,7 @@
   {% endif %}
 
   <section class="card" id="autopay-charges-card">
-  <h2>Repeating debits created today</h2>
+  <div class="card-head"><h2>Repeating debits created today</h2></div>
   {% responsive_table %}
   <table id="autopay-charges">
     <thead><tr><th>Charge</th><th>Store</th><th>Due</th><th class="money">Amount</th><th>Status</th></tr></thead>
@@ -131,7 +131,7 @@
   </section>
 
   <section class="card" id="insurance-due-card">
-  <h2>Insurance due in the next {{ insurance_days }} days</h2>
+  <div class="card-head"><h2>Insurance due in the next {{ insurance_days }} days</h2></div>
   {% responsive_table %}
   <table id="insurance-due">
     <thead><tr><th>Due</th><th>Store</th><th>Policy year</th><th class="money">Premium</th><th>Charge</th></tr></thead>

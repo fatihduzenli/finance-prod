@@ -199,26 +199,36 @@ def world(billing: Client) -> dict[str, Lease]:
 
 
 def kpi(html: str, element_id: str) -> str:
-    return text_of(between(html, f'id="{element_id}">', "</div>"))
+    """The text of the {% kpi2 %} card whose figure has the id: its title, its sub-line, its
+    figure (re-pinned, Opus, PLAN-015 Batch 6: the cards are KPI cards v2, the ids on the
+    figures, so the figure reads after the sub-line)."""
+    row = between(html, '<section class="kpi-row kpi2-row" id="run-kpis"', "</section>")
+    cards = row.split('<div class="kpi2">')[1:]
+    [card] = [card for card in cards if f'id="{element_id}">' in card]
+    return text_of(card)
 
 
 @override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"))
 def test_the_four_figures_come_from_todays_debits(billing: Client) -> None:
     world(billing)
     html = page(billing)
-    assert kpi(html, "kpi-created") == "Created today 5 4 today · 1 catch-up"
-    assert kpi(html, "kpi-due") == "Due today $7,000.00 2 bank debits · 2 e-mail"
-    assert kpi(html, "kpi-skipped") == "Skipped 1 Collection is paused"
-    assert 'class="kpi-value tone-pending">1<' in html
-    assert kpi(html, "kpi-large") == "Large debits 1 above $2,000.00 · needs admin"
-    assert 'class="kpi-value tone-unpaid">1<' in html
+    assert kpi(html, "kpi-created") == "Created today 4 today · 1 catch-up 5"
+    assert kpi(html, "kpi-due") == "Due today 2 bank debits · 2 e-mail $7,000.00"
+    assert kpi(html, "kpi-skipped") == "Skipped Collection is paused 1"
+    assert '<span class="kpi2-value tone-pending" id="kpi-skipped">1</span>' in html
+    assert kpi(html, "kpi-large") == "Large debits above $2,000.00 · needs admin 1"
+    assert '<span class="kpi2-value tone-unpaid" id="kpi-large">1</span>' in html
 
 
 def test_with_nothing_due_the_figures_are_zero_and_not_coloured(billing: Client) -> None:
     html = page(billing)
-    assert kpi(html, "kpi-created") == "Created today 0 0 today · 0 catch-up"
-    assert kpi(html, "kpi-due").startswith("Due today $0.00 0 bank debits")
-    assert "tone-pending" not in html and 'class="kpi-value tone-unpaid"' not in html
+    assert kpi(html, "kpi-created") == "Created today 0 today · 0 catch-up 0"
+    assert kpi(html, "kpi-due").startswith("Due today 0 bank debits")
+    assert kpi(html, "kpi-due").endswith(" $0.00")
+    # Re-pinned (PLAN-015 Batch 6): a zero figure is muted, never pending or red.
+    assert "tone-pending" not in html and 'class="kpi2-value tone-unpaid"' not in html
+    for element_id in ("kpi-created", "kpi-due", "kpi-skipped", "kpi-large"):
+        assert f'<span class="kpi2-value tone-muted" id="{element_id}">' in html, element_id
     assert "No debit is due today." in html
 
 
@@ -396,7 +406,8 @@ def test_the_style_sheet_carries_the_strip_colours_and_the_phone_rule() -> None:
         ".run-strip-ok { background: var(--paid-bg); color: var(--paid-text);",
         ".run-strip-warn { background: var(--pending-bg); color: var(--pending-text);",
         ".run-strip-error { background: var(--unpaid-bg); color: var(--error-text);",
-        ".kpi-value.tone-pending { color: var(--pending-text); }",
+        # Re-pinned (PLAN-015 Batch 6): the Skipped figure is a {% kpi2 %} card's.
+        ".kpi2-value.tone-pending { color: var(--pending-text); }",
         ".badge.run-created { background: var(--month-current); color: var(--link); }",
     ):
         assert rule in css, rule
