@@ -58,3 +58,14 @@ Happy paths per §4. Boundaries: a builder draft with no lines (the Lines card's
 - The plain `card form-card` pages (store cost, contact edit/correct/outcome, enrol, link invoice, reschedule, resolve a deposit) keep their single-card frame; they can take the step head later if wanted.
 - Invoice preview/print are documents and are not restyled.
 - The dialogs stay as the approved modals.
+## 9. Addendum (owner, 2026-11-11, folded into Batch 5's PR)
+
+### 9.1 The LEASE card loses the rows the figure row shows
+- `stores/_header.html`: the Rent (`#header-rent`), Autopay (`#header-autopay`, with its "Set up" link `#autopay-set-up` and the `autopay_moved` note) and Open balance (`#header-open-balance`) rows go from the LEASE card on both the store page and the operator page's selected store. The Status, Operator/Store, Lease, Free rent, Debit day, Deposit, Sign fee, Insurance, Credit, Company, Billing and Bank rows stay as they are. `header.autopay_moved` (the "moved" note) moves to the Autopay figure card's sub-line when set (after "Next debit …", joined with " · "); nothing else is lost.
+- `stores/_figures.html`: the Autopay card's footer link reads **"Set up"** and points to `side_autopay_url` while `header.autopay == "Not set up"` and the lease exists (what the card's row link did), and **"Manage"** to the Autopay tab otherwise; the link keeps `id="autopay-set-up"` in the first case so the e2e and unit tests that click it still find it (re-pin their location, not their words).
+- The operator page's selected-store figure row (§3.2 of Batch 3) is unchanged; its LEASE card follows the store page's.
+- Re-pin: `test_plan012f_pages.py` (two hits), `test_operator_workspace.py` (two), `test_store_workspace.py`, `test_plan014_b_store_page.py`, `test_copy_pass.py` (the row words), `test_plan015_batch3_workspaces.py` (the Autopay card's link); grep every test for the three ids and `autopay-set-up`; new tests: the three rows absent on both pages; the Autopay card's "Set up" link with its id when not set up and "Manage" when set up; the moved note on the card.
+- Visual: the store tabs, store-log-contact, operator, operator-form, operator-log-contact baselines change (the card shorter); regenerate with `"store or operator"` in the batch's visual run and list them.
+
+### 9.2 The move-in checklist's "Trash removal"
+No code change: `FeeType.show_in_setup` is the per-type "show in the move-in checklist" switch (`checklist_types()` lists the active fee types with it on), editable in the Django admin's Fee types; its default for a new type is off. "Trash removal" is not in the code or any seed — it is a fee type on staging with the box ticked, which the owner unticks himself (told in the report). Nothing for Opus.
