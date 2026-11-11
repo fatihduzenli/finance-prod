@@ -4,6 +4,7 @@
 {% block content %}
   {% comment %}One template (docs/qa/PLAN-014 D4): its subject and body, saved by "Save" (audited) or rendered by "Preview" with the chosen store's current lease and sample amounts (nothing saved, nothing queued). Both buttons post the same fields; a refusal shows the page again with the text as typed.{% endcomment %}
   <section class="card" id="template-card">
+    <div class="card-head"><h2>Template</h2></div>
     <form method="post" action="{% url 'ledger:settings:template_edit' pk=template.pk %}" id="template-form">{% csrf_token %}
       <div class="field"><label for="template-subject">Subject</label><input type="text" name="subject" id="template-subject" value="{{ subject }}" maxlength="{{ subject_max }}" required></div>
       <div class="field"><label for="template-body">Message</label><textarea name="body" id="template-body" rows="12" maxlength="{{ body_max }}" required>{{ body }}</textarea><span class="help" id="template-placeholders">Placeholders you can use: {{ placeholders }}</span></div>
@@ -16,7 +17,7 @@
   </section>
   {% if preview %}
     <section class="card" id="template-preview">
-      <div class="card-header"><h2>Preview</h2></div>
+      <div class="card-head"><h2>Preview</h2></div>
       {% if preview.ok %}
         <p class="help">The store's real names and links, with sample amounts and dates. Nothing was saved or sent.</p>
         <p id="preview-subject"><strong>{{ preview.subject }}</strong></p>

@@ -19,6 +19,7 @@ from django.utils import timezone
 
 from accounts.roles import Role
 from finance.templatetags.components import CHIP_GLYPHS
+from ledger.models import MessageTemplate
 from ledger.views import audit as audit_views
 from ledger.views import dashboard as dashboard_view
 from ledger.views import reports as report_views
@@ -467,3 +468,95 @@ def test_the_nightly_check_cards_open_with_the_card_head() -> None:
         ' href="/reconciliation/export.csv">Download spreadsheet</a>'
     )
     assert 'class="card-header' not in content_of(html)
+
+
+# --- §3.5 Settings, Message templates, Preferences -----------------------------------------------
+
+
+def test_the_five_settings_cards_open_with_the_card_head_in_their_order() -> None:
+    html = page(admin(), "/admin-settings/")
+    heads = [
+        ("brands-card", '<h2 id="brands">Brands</h2>'),
+        ("mail-card", '<h2 id="mail">Mail</h2>'),
+        ("company-card", '<h2 id="company">Company</h2>'),
+        ("bank-deposits-card", '<h2 id="bank-deposits">Bank deposits</h2>'),
+        ("templates-card", '<h2 id="message-templates">Message templates</h2>'),
+    ]
+    for section_id, title in heads:
+        assert opens_with_card_head(html, section_id).startswith(title), section_id
+    starts = [html.index(f'id="{section_id}"') for section_id, _ in heads]
+    assert starts == sorted(starts)
+    assert 'class="card-header' not in content_of(html)
+
+
+def template_status(html: str, code: str) -> str:
+    row = html[html.index(f'<tr id="template-{code}">') :]
+    row = row[: row.index("</tr>")]
+    found = re.search(r'<td data-role="status"[^>]*>(.*?)</td>', row, re.S)
+    assert found is not None, row
+    return found.group(1)
+
+
+def test_every_template_status_is_a_chip_active_paid_inactive_neutral() -> None:
+    MessageTemplate.objects.update(active=True)  # the boundary: every template active
+    templates = list(MessageTemplate.objects.all())
+    assert templates
+    html = page(admin(), "/admin-settings/templates/")
+    for template in templates:
+        assert template_status(html, template.code) == (
+            f'<span class="status-chip status-chip-paid">{rendered_chip_glyph("paid")}'
+            "<span>Active</span></span>"
+        ), template.code
+    off = templates[0]
+    MessageTemplate.objects.filter(pk=off.pk).update(active=False)
+    html = page(admin(), "/admin-settings/templates/")
+    assert template_status(html, off.code) == (
+        f'<span class="status-chip status-chip-neutral">{rendered_chip_glyph("neutral")}'
+        "<span>Inactive</span></span>"
+    )
+
+
+def test_an_internal_template_keeps_its_badge() -> None:
+    internal = MessageTemplate.objects.filter(internal=True).first()
+    assert internal is not None
+    html = page(admin(), "/admin-settings/templates/")
+    row = html[html.index(f'<tr id="template-{internal.code}">') :]
+    assert '</a> <span class="badge">Internal</span></td>' in row[: row.index("</tr>")]
+
+
+def test_the_template_editor_cards_open_with_the_card_head() -> None:
+    template = MessageTemplate.objects.get(code="returned_debit")
+    client = admin()
+    html = page(client, f"/admin-settings/templates/{template.pk}/")
+    assert opens_with_card_head(html, "template-card") == "<h2>Template</h2>"
+    response = client.post(
+        f"/admin-settings/templates/{template.pk}/preview/",
+        {"subject": template.subject, "body": template.body, "store": ""},
+    )
+    assert response.status_code == 200
+    assert opens_with_card_head(response.content.decode(), "template-preview") == (
+        "<h2>Preview</h2>"
+    )
+
+
+def test_the_preferences_cards_open_with_the_card_head() -> None:
+    html = page(client_for(Role.VIEWER)[0], "/settings/")
+    assert opens_with_card_head(html, "appearance-card") == '<h2 id="appearance">Appearance</h2>'
+    assert opens_with_card_head(html, "calendar-feed-card") == (
+        '<h2 id="calendar-feed">Calendar feed</h2>'
+    )
+
+
+def test_the_admin_templates_name_the_processor_only_through_the_company() -> None:
+    for relative in (
+        "run/today.html",
+        "run/_operations.html",
+        "audit/page.html",
+        "webhooks/list.html",
+        "webhooks/detail.html",
+        "reconciliation/page.html",
+        "settings/index.html",
+        "settings/templates.html",
+        "settings/template_edit.html",
+    ):
+        assert "stax" not in (TEMPLATES / relative).read_text(encoding="utf-8").lower(), relative

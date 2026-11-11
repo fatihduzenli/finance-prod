@@ -5,7 +5,7 @@
 {% block content %}
   {% comment %}Admin › Settings (docs/qa/PLAN-014 B2): one card per section. Brands: each row renames in place (the name and Save), makes the brand active or inactive and moves it up or down, each a small POST of its own; Add takes a name. Nothing deletes a brand; the Stores column says how many stores carry each one (an inactive brand stays on its stores, the store form stops offering it).{% endcomment %}
   <section class="card table-card settings-card" id="brands-card">
-    <div class="card-header"><h2 id="brands">Brands</h2></div>
+    <div class="card-head"><h2 id="brands">Brands</h2></div>
     {% responsive_table %}
     <table id="brands-table" aria-labelledby="brands">
       <thead><tr><th>Name</th><th>Active</th><th class="money">Order</th><th class="money">Stores</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
@@ -32,7 +32,7 @@
   </section>
   {% comment %}PLAN-014 D1, D2: the Mail card. Whether mail is set up reads the key's presence, never its value. The two lists take one address per line; on the sandbox only the allowlist's addresses are ever mailed, every other message is held in the Outbox.{% endcomment %}
   <section class="card settings-card" id="mail-card">
-    <div class="card-header"><h2 id="mail">Mail</h2></div>
+    <div class="card-head"><h2 id="mail">Mail</h2></div>
     <p id="mail-status">{{ mail_status }}</p>
     <form method="post" action="{% url 'ledger:settings:mail_save' %}" id="mail-form">{% csrf_token %}
       <div class="field"><label for="mail-sender">Send as</label><input type="email" name="sender_email" id="mail-sender" value="{{ mail.sender_email }}" maxlength="254" autocomplete="off"><span class="help">The company mailbox the messages are sent from.</span></div>
@@ -45,7 +45,7 @@
   </section>
   {% comment %}PLAN-015c (ADR-0020): the Company card. The address prints in the band of the invoice and receipt PDFs (the lines that are set, joined by commas). "Invoice e-mails sent by" names the processor (its display name; the default, nothing changes) or the company (its short name): the app then e-mails each invoice itself with its PDF, held in the Outbox while mail is not set up. Posted to the Mail card's route with section=company.{% endcomment %}
   <section class="card settings-card" id="company-card">
-    <div class="card-header"><h2 id="company">Company</h2></div>
+    <div class="card-head"><h2 id="company">Company</h2></div>
     <form method="post" action="{% url 'ledger:settings:mail_save' %}" id="company-form">{% csrf_token %}
       <input type="hidden" name="section" value="company">
       <div class="field"><label for="company-address1">Address line 1</label><input type="text" name="address_line1" id="company-address1" value="{{ company_card.address_line1 }}" maxlength="200" autocomplete="off"></div>
@@ -62,7 +62,7 @@
   </section>
   {% comment %}PLAN-014 I2: the Bank deposits card. Whether the Plaid keys are here reads their presence, never a value. The switches turn the module on and the automatic confirmation of exact matches. Connect a bank account (admin, once the module is on and a bank source exists) asks the server for a link token, opens Plaid Link (Plaid's script, loaded only here and only then, banking/static/banking/link.js) and posts back only the public token, the chosen account's id and the institution's name; the server exchanges the token and keeps the access token encrypted. Locally without keys the fake source connects a fake account with one click (no script). The mask is Plaid's last four of the business's own account.{% endcomment %}
   <section class="card settings-card" id="bank-deposits-card">
-    <div class="card-header"><h2 id="bank-deposits">Bank deposits</h2></div>
+    <div class="card-head"><h2 id="bank-deposits">Bank deposits</h2></div>
     <p id="bank-keys">{{ bank.keys }}</p>
     {% if bank.fake %}<p class="help" id="bank-fake">Here the fake bank source is used: deposits come from a fixture and nothing reaches Plaid.</p>{% endif %}
     <form method="post" action="{% url 'ledger:settings:bank_save' %}" id="bank-form">{% csrf_token %}
@@ -86,7 +86,7 @@
     {% endif %}
   </section>
   <section class="card settings-card" id="templates-card">
-    <div class="card-header"><h2 id="message-templates">Message templates</h2></div>
+    <div class="card-head"><h2 id="message-templates">Message templates</h2></div>
     <p>The subject and text of every message, with the placeholders each may use. <a href="{% url 'ledger:settings:templates' %}" id="templates-link">Edit message templates</a> · <a href="{% url 'ledger:outbox:page' %}" id="outbox-link">Outbox</a></p>
   </section>
 {% endblock %}
