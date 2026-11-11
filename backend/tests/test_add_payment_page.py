@@ -20,7 +20,6 @@ from django.urls import reverse
 from django.utils.html import escape
 
 from accounts.roles import Role
-from tests.text_helpers import assert_absent
 from ledger.forms import (
     ADD_PAYMENT_REFERENCE_HELP,
     DEBIT_TODAY_NEEDS_ADMIN,
@@ -38,7 +37,7 @@ from tests.test_bank_debit import enabled, fake, invoiced, setup_charge, today
 from tests.test_charge_now import LAST_FOUR, NICKNAME
 from tests.test_one_off_charges import an_operator, created, fresh, item
 from tests.test_operator_views import client_for
-from tests.text_helpers import has_token
+from tests.text_helpers import assert_absent, has_token
 
 pytestmark = pytest.mark.django_db
 
