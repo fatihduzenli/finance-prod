@@ -176,5 +176,6 @@ def test_the_statement_tiles_read_the_figures() -> None:
     for value in (figures.open_total, figures.withheld, Decimal(str(figures.deductions_total))):
         shown = f"${value:,.2f}"
         assert shown in text, (shown, text[:800])
-    tiles = re.findall(r'class="[^"]*\bkpi\b[^"]*"', body)
+    # Re-pinned (Opus, PLAN-015 Batch 5): the statement's tiles are kpi2 cards.
+    tiles = re.findall(r'class="kpi2"', body.split('id="statement-tiles"', 1)[1])
     assert len(tiles) >= 3
