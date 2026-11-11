@@ -20,6 +20,7 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
+from django.test import Client
 from django.utils import timezone
 
 import mail
@@ -32,6 +33,7 @@ from payments.models import Job, JobKind
 from tests.auth_helpers import make_user
 from tests.job_helpers import run_queued_jobs
 from tests.test_collections import mail_set_up
+from tests.test_operator_views import client_for
 
 pytestmark = pytest.mark.django_db
 
@@ -97,6 +99,50 @@ def tick() -> str:
     # The tick also queues the day's read of the dispute list (tested in test_disputes.py).
     Job.objects.filter(kind=JobKind.DISPUTES_SYNC).delete()
     return out.getvalue()
+
+
+ADD = "/calendar/new/"
+
+
+def dialog_post(client: Client, **overrides: str) -> tuple[int, str, list[str]]:
+    """The New calendar entry dialog's POST: the status, the body and the errors on the time
+    (a refused save shows the page again with the dialog's form)."""
+    data = {
+        "kind": "reminder",
+        "on": TODAY.isoformat(),
+        "title": "Call the landlord",
+        "body": "",
+        "email_morning": "on",
+        "email_at": "14:30",
+        "link_kind": "",
+        "link_id": "",
+        **overrides,
+    }
+    response = client.post(ADD, data)
+    form = response.context["entry_form"] if response.status_code == 200 else None
+    errors = list(form.errors.get("email_at", [])) if form is not None else []
+    return response.status_code, response.content.decode(), errors
+
+
+def edit_post(client: Client, entry: CalendarEntry, **overrides: str) -> tuple[int, str, list[str]]:
+    """The edit page's POST of ``entry`` as stored, with ``overrides``: the status, the body and
+    the errors on the time."""
+    data = {
+        "kind": entry.kind,
+        "on": entry.on.isoformat(),
+        "title": entry.title,
+        "body": entry.body,
+        "email_at": f"{entry.email_at:%H:%M}",
+        "store": "",
+        "operator": "",
+        "lease": "",
+        **({"email_morning": "on"} if entry.email_morning else {}),
+        **overrides,
+    }
+    response = client.post(f"/calendar/{entry.pk}/edit/", data)
+    form = response.context["form"] if response.status_code == 200 else None
+    errors = list(form.errors.get("email_at", [])) if form is not None else []
+    return response.status_code, response.content.decode(), errors
 
 
 def migrate_to(*targets: tuple[str, str]) -> Any:
@@ -332,3 +378,102 @@ def test_a_reminder_on_a_clock_change_day_goes_at_its_wall_clock_time(
     reminder(author, on=day, at_time=time(9, 0))
     assert calendar.queue_due_reminders(before) == 0
     assert calendar.queue_due_reminders(due) == 1
+
+
+# --- (e) The past time, and a value off the list -------------------------------------------------
+
+
+@pytest.fixture
+def billing_user() -> tuple[Client, User]:
+    return client_for(Role.BILLING, "reminder-billing")
+
+
+def test_a_new_reminder_today_at_a_time_just_past_is_refused(
+    billing_user: tuple[Client, User], clock: Any
+) -> None:
+    client, _ = billing_user
+    clock(at(TODAY, 14, 30) + timedelta(seconds=1))
+    status, _, errors = dialog_post(client, email_at="14:30")
+    assert status == 200 and errors == [calendar.TIME_PASSED]
+    assert CalendarEntry.objects.count() == 0
+    # The same time tomorrow saves; a later time today saves.
+    assert dialog_post(client, on=(TODAY + timedelta(days=1)).isoformat())[0] == 302
+    assert dialog_post(client, email_at="15:00")[0] == 302
+    # The switch off: the time is not a reminder, nothing to refuse.
+    status, _, _ = dialog_post(client, email_at="06:00", email_morning="")
+    assert status == 302
+    assert CalendarEntry.objects.count() == 3
+
+
+def test_a_reminder_at_this_very_minute_is_refused(clock: Any, author: User) -> None:
+    clock(at(TODAY, 14, 30))
+    outcome = calendar.save_entry(
+        entry_input(on=TODAY, email_at=time(14, 30)), actor=author, is_admin=False
+    )
+    assert (outcome.ok, outcome.message, outcome.field) == (False, calendar.TIME_PASSED, "email_at")
+    assert CalendarEntry.objects.count() == 0 and AuditLog.objects.count() == 0
+
+
+def test_an_edit_of_only_the_title_of_todays_passed_reminder_saves(
+    billing_user: tuple[Client, User], clock: Any
+) -> None:
+    client, user = billing_user
+    entry = reminder(user, at_time=time(9, 0))
+    clock(at(TODAY, 15))
+    status, _, _ = edit_post(client, entry, title="Call the landlord again")
+    assert status == 302
+    entry.refresh_from_db()
+    assert (entry.title, entry.email_at) == ("Call the landlord again", time(9, 0))
+    # Moving the time to another past one is refused, nothing changed.
+    status, body, errors = edit_post(client, entry, email_at="10:00")
+    assert status == 200 and errors == [calendar.TIME_PASSED] and calendar.TIME_PASSED in body
+    entry.refresh_from_db()
+    assert entry.email_at == time(9, 0)
+    # Turning the switch on again for a past time, or moving a passed reminder to today, too.
+    entry_off = reminder(user, at_time=time(9, 0), email_morning=False, title="Off")
+    assert edit_post(client, entry_off, email_morning="on")[2] == [calendar.TIME_PASSED]
+    tomorrow = reminder(user, on=TODAY + timedelta(days=1), at_time=time(9, 0), title="Moved")
+    assert edit_post(client, tomorrow, on=TODAY.isoformat())[2] == [calendar.TIME_PASSED]
+    # A later time today saves.
+    assert edit_post(client, entry, email_at="16:00")[0] == 302
+
+
+CARD = "4111 1111 1111 1111"
+
+
+@pytest.mark.parametrize("value", ["06:15", "22:00", "9:00", CARD, "x" * 300])
+def test_a_time_off_the_list_is_refused_with_its_words(
+    billing_user: tuple[Client, User], clock: Any, value: str
+) -> None:
+    client, user = billing_user
+    clock(at(TODAY, 10))
+    tomorrow = (TODAY + timedelta(days=1)).isoformat()
+    status, body, errors = dialog_post(client, on=tomorrow, email_at=value)
+    assert status == 200 and errors == ["Pick a time from the list."]
+    assert CARD not in body
+    entry = reminder(user, on=TODAY + timedelta(days=2))
+    status, body, errors = edit_post(client, entry, email_at=value)
+    assert status == 200 and errors == ["Pick a time from the list."]
+    assert "Pick a time from the list." in body and CARD not in body
+    assert CalendarEntry.objects.count() == 1
+
+
+def test_no_time_sent_is_nine(billing_user: tuple[Client, User], clock: Any) -> None:
+    client, _ = billing_user
+    clock(at(TODAY, 10))
+    status, _, _ = dialog_post(client, on=(TODAY + timedelta(days=1)).isoformat(), email_at="")
+    assert status == 302
+    assert CalendarEntry.objects.get().email_at == time(9, 0)
+
+
+def test_the_dialog_and_the_edit_page_store_the_chosen_time(
+    billing_user: tuple[Client, User], clock: Any
+) -> None:
+    client, _ = billing_user
+    clock(at(TODAY, 10))
+    assert dialog_post(client, email_at="14:30")[0] == 302
+    entry = CalendarEntry.objects.get()
+    assert (entry.email_morning, entry.email_at) == (True, time(14, 30))
+    assert edit_post(client, entry, email_at="20:30")[0] == 302
+    entry.refresh_from_db()
+    assert entry.email_at == time(20, 30)
