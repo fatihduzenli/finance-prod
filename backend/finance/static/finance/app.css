@@ -1245,6 +1245,9 @@ fieldset.card > legend + * { clear: both; }
   .more-list .more-user .user-role { color: var(--muted); }
   /* The dashboard (DESIGN-SPEC §6): KPI cards two per row, the rest stacked. */
   .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+  /* The workspaces' figure row (PLAN-015 Batch 3): a lone last card (the store page's third)
+     spans the row rather than sitting at half width; an even row (the operator's four) is as is. */
+  .page-header-inner > .kpi2-row > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .kpi { padding: var(--space-3) 14px; }
   .kpi-value { font-size: 20px; }
   .dashboard-row-v2, .dashboard-row-activity, .workspace-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }

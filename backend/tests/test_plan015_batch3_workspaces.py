@@ -218,6 +218,14 @@ def test_the_figure_row_shows_at_every_width_and_the_strip_css_is_gone() -> None
     # The phone keeps the dashboard's rules: two cards a row (768 px and narrower), then as
     # many 10rem cards as fit under 720 px (the third goes under the first two at 390 px).
     assert ".kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr));" in phone_block(css)
+    # A lone last card of a workspace's row (the store page's Autopay) spans the row on a phone;
+    # the operator's four cards are two rows of two. Scoped to the page header's row, so the
+    # Payments totals (five cards, not in a page header) keep their grid.
+    assert (
+        ".page-header-inner > .kpi2-row > :last-child:nth-child(odd) { grid-column: 1 / -1; }"
+        in phone_block(css)
+    )
+    assert css.count(":last-child:nth-child(odd)") == 1
     narrow = css.split("@media (max-width: 719.98px) {", 1)[1].split("\n}\n", 1)[0]
     assert (
         ".kpi-row.kpi2-row { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }"
