@@ -7,6 +7,7 @@
   {% include "ledger/_job_status.html" %}
 
   <section class="card" id="webhook-event-card">
+  <div class="card-head"><h2 class="section-label">Event</h2></div>
   <dl id="webhook-event" class="detail-list">
     <dt>Received</dt><dd>{{ event.received_at|moment }}</dd>
     <dt>Type</dt><dd>{{ event.event_type }}</dd>
@@ -23,7 +24,7 @@
   </section>
 
   <section class="card" id="payload-card">
-  <h2>Content (without account data)</h2>
+  <div class="card-head"><h2>Content (without account data)</h2></div>
   {% if payload_rows %}
     {% responsive_table %}
     <table id="payload">

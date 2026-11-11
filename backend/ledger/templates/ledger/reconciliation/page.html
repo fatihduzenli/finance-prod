@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive dates people %}
+{% load components responsive dates people %}
 {% block title %}Nightly check{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><h1>Nightly check</h1><p class="page-sub" id="reconciliation-sub">Each night the check re-reads open invoices, recent transactions, bank deposits and ACH rejections from {{ company.provider_name }}, and marks pending payments that are too old. Times are shown in {{ timezone }}. Identifiers are masked.</p></div>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:reconciliation:run' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="run-now"{% if job_refresh %} disabled{% endif %}>Run the nightly check now</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
@@ -7,12 +7,12 @@
   {% include "ledger/_job_status.html" %}
 
   <section class="card" id="last-run-card">
-  <h2>Last run</h2>
+  <div class="card-head"><h2>Last run</h2></div>
   {% if last %}
     <dl id="last-run" class="detail-list">
       <dt>Started</dt><dd id="last-started">{{ last.started_local }}</dd>
       <dt>How</dt><dd>{{ last.run.get_trigger_display }}</dd>
-      <dt>Status</dt><dd id="last-status">{{ last.run.get_status_display }}</dd>
+      <dt>Status</dt><dd id="last-status">{% with status=last.run.status words=last.run.get_status_display %}{% if status == "done" %}{% chip "paid" words %}{% elif status == "running" %}{% chip "pending" words %}{% elif status == "failed" %}{% chip "unpaid" words %}{% else %}{% chip "neutral" words %}{% endif %}{% endwith %}</dd>
       <dt>Step reached</dt><dd>{{ last.run.get_step_reached_display|default:"—" }}</dd>
       <dt>Duration</dt><dd id="last-duration">{% if last.run.duration_ms is not None %}{{ last.run.duration_ms }} ms{% else %}—{% endif %}</dd>
       <dt>{{ company.provider_name }} requests</dt><dd id="last-requests">{{ last.run.requests }}</dd>
@@ -36,7 +36,7 @@
   </section>
 
   <section class="card" id="findings-card">
-  <div class="card-header"><h2>Findings</h2><a class="btn card-link" id="export-csv" href="{% url 'ledger:reconciliation:export' %}">Download spreadsheet</a></div>
+  <div class="card-head"><h2>Findings</h2><a class="btn card-link" id="export-csv" href="{% url 'ledger:reconciliation:export' %}">Download spreadsheet</a></div>
   <p class="muted">{{ open_count }} unresolved. Unresolved first, newest first.</p>
   {% responsive_table %}
   <table id="mismatches">
@@ -78,7 +78,7 @@
   {% endif %}
 
   <section class="card" id="recent-runs-card">
-  <h2>Recent runs</h2>
+  <div class="card-head"><h2>Recent runs</h2></div>
   {% responsive_table %}
   <table id="recent-runs">
     <thead><tr><th>Started</th><th>How</th><th>Status</th><th>Step</th><th>Requests</th><th>Duration</th><th>Note</th></tr></thead>

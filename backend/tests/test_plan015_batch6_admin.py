@@ -7,6 +7,7 @@ Settings, Message templates and Preferences cards' heads and the template status
 from __future__ import annotations
 
 import re
+import uuid
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -14,11 +15,20 @@ from typing import Any
 import pytest
 from django.template import Context, Template
 from django.test import Client, override_settings
+from django.utils import timezone
 
 from accounts.roles import Role
+from finance.templatetags.components import CHIP_GLYPHS
 from ledger.views import audit as audit_views
 from ledger.views import dashboard as dashboard_view
 from ledger.views import reports as report_views
+from ledger.views import webhooks as webhook_views
+from payments.models import (
+    ReconciliationRun,
+    ReconciliationStatus,
+    ReconciliationTrigger,
+    WebhookEvent,
+)
 from tests import test_run_layout as run_layout
 from tests.receivables_helpers import an_operator
 from tests.test_operator_views import client_for
@@ -60,6 +70,13 @@ def admin() -> Client:
 
 def rendered_icon(name: str) -> str:
     return Template("{% load icons %}{% icon name 16 %}").render(Context({"name": name}))
+
+
+def rendered_chip_glyph(tone: str) -> str:
+    """The glyph {% chip %} leads a chip of the tone with (finance.templatetags.components)."""
+    return Template("{% load icons %}{% icon name 12 %}").render(
+        Context({"name": CHIP_GLYPHS[tone]})
+    )
 
 
 # --- §3.1 The headers -----------------------------------------------------------------------------
@@ -265,3 +282,188 @@ def test_every_daily_charges_card_opens_with_the_card_head() -> None:
     assert due_head.index('id="due-today-title"') < due_head.index('id="due-filter"')
     assert due_head.index('id="due-filter"') < due_head.index('id="export-csv"')
     assert '<div class="card-header' not in html[html.index('id="run-kpis"') :]
+
+
+# --- §3.3 The Activity log and Messages from the processor -------------------------------------
+
+
+def an_event(outcome: str, event_type: str = "update_invoice") -> WebhookEvent:
+    return WebhookEvent.objects.create(
+        event_type=event_type,
+        provider_object_id=f"object-{uuid.uuid4().hex[:8]}",
+        dedupe_hash=uuid.uuid4().hex,
+        outcome=outcome,
+    )
+
+
+def outcome_cell(html: str, event: WebhookEvent) -> str:
+    row = html[html.index(f'href="/webhooks/{event.pk}/"') :]
+    row = row[: row.index("</tr>")]
+    found = re.search(r'<td data-role="status"[^>]*>(.*?)</td>', row, re.S)
+    assert found is not None, row
+    return found.group(1)
+
+
+#: Every outcome the processor stores (payments.webhooks: received on arrival, processed with or
+#: without its note, ignored with its reason, failed, dead_letter after the third failure, an empty
+#: one), an unknown word, and the chip each shows with the words of WebhookEvent.outcome_words.
+OUTCOMES = [
+    ("received", "pending", "Received"),
+    ("processed", "paid", "Processed"),
+    ("processed: unlinked (2 candidates)", "paid", "Processed: unlinked (2 candidates)"),
+    ("ignored", "neutral", "Ignored"),
+    ("ignored: not matched", "neutral", "Ignored: not matched"),
+    ("failed", "unpaid", "Failed"),
+    ("dead_letter", "unpaid", "Gave up"),
+    ("something_new: x", "neutral", "something_new: x"),
+]
+
+
+@pytest.mark.parametrize(("outcome", "tone", "words"), OUTCOMES)
+def test_each_message_outcome_is_a_chip_in_its_tone(outcome: str, tone: str, words: str) -> None:
+    event = an_event(outcome)
+    cell = outcome_cell(page(client_for(Role.VIEWER)[0], "/webhooks/"), event)
+    assert cell.startswith(f'<span class="status-chip status-chip-{tone}">'), cell
+    assert cell.endswith(f"<span>{words}</span></span>"), cell
+
+
+def test_a_message_without_an_outcome_shows_a_dash_and_no_chip() -> None:
+    event = an_event("")
+    assert outcome_cell(page(client_for(Role.VIEWER)[0], "/webhooks/"), event) == "—"
+
+
+def test_an_outcome_word_is_escaped_in_its_chip() -> None:
+    event = an_event("<b>odd</b>: <i>x</i>")
+    cell = outcome_cell(page(client_for(Role.VIEWER)[0], "/webhooks/"), event)
+    assert "<b>" not in cell and "&lt;b&gt;odd&lt;/b&gt;: &lt;i&gt;x&lt;/i&gt;" in cell
+    assert cell.startswith('<span class="status-chip status-chip-neutral">')
+
+
+def filter_card(html: str) -> str:
+    start = html.index('<div class="card filter-card">')
+    return html[start : html.index("</form></div>", start)]
+
+
+@pytest.mark.parametrize("path", ["/audit/", "/webhooks/"])
+def test_the_two_filter_forms_carry_no_inline_style(path: str) -> None:
+    card = filter_card(page(admin(), path))
+    assert "style=" not in card
+    assert card.count('<span class="filter-field">') == (6 if path == "/audit/" else 2)
+    actions = card[card.index('<span class="filter-actions">') :]
+    assert '<button class="btn" type="submit">' in actions and "Download spreadsheet</a>" in actions
+
+
+def test_the_activity_log_filter_keeps_its_fields_and_buttons() -> None:
+    card = filter_card(page(admin(), "/audit/"))
+    for name in ("action", "user", "entity_type", "entity_id", "from", "to"):
+        assert f'name="{name}"' in card, name
+    assert '<button class="btn" type="submit">Show</button>' in card
+    assert 'id="audit-export"' in card
+
+
+#: The list footer's shape (ledger/_list_footer.html) with the page's own words.
+FOOTER = re.compile(
+    r'<div class="pager list-footer" role="navigation" aria-label="Pages">\s*'
+    r'<span class="pager-count">(.*?)</span>\s*<span class="pager-pages">(.*?)</span>\s*</div>',
+    re.S,
+)
+
+
+def test_the_activity_log_pager_is_the_list_footer_inside_the_table_card() -> None:
+    html = page(admin(), "/audit/")
+    card = html[html.index('<div class="card table-card">') :]
+    found = FOOTER.search(card)
+    assert found is not None
+    assert found.group(1) == "Page 1"
+    assert found.group(2) == (
+        '<span class="btn btn-sm pager-off" aria-disabled="true">Newer</span>'
+        '<span class="btn btn-sm pager-off" aria-disabled="true">Older</span>'
+    )
+    assert card.index("</table>") < found.start()
+
+
+def test_the_messages_pager_is_the_list_footer_with_previous_and_next(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_views, "PAGE_SIZE", 1)
+    for _ in range(3):
+        an_event("processed")
+    client = client_for(Role.VIEWER)[0]
+    found = FOOTER.search(page(client, "/webhooks/?page=2"))
+    assert found is not None
+    assert found.group(1) == "Page 2 of 3 (3 messages)"
+    assert found.group(2) == (
+        '<a class="btn btn-sm" rel="prev" href="?page=1">Previous</a>'
+        '<a class="btn btn-sm" rel="next" href="?page=3">Next</a>'
+    )
+    first = FOOTER.search(page(client, "/webhooks/?outcome=processed"))
+    assert first is not None
+    assert first.group(2) == (
+        '<span class="btn btn-sm pager-off" aria-disabled="true">Previous</span>'
+        '<a class="btn btn-sm" rel="next" href="?outcome=processed&amp;page=2">Next</a>'
+    )
+
+
+def test_one_page_of_messages_draws_no_pager() -> None:
+    an_event("processed")
+    assert 'class="pager' not in page(client_for(Role.VIEWER)[0], "/webhooks/")
+
+
+def test_the_message_detail_cards_open_with_the_card_head() -> None:
+    event = an_event("processed")
+    html = page(client_for(Role.VIEWER)[0], f"/webhooks/{event.pk}/")
+    assert opens_with_card_head(html, "webhook-event-card") == (
+        '<h2 class="section-label">Event</h2>'
+    )
+    assert opens_with_card_head(html, "payload-card") == "<h2>Content (without account data)</h2>"
+
+
+# --- §3.4 The Nightly check -----------------------------------------------------------------------
+
+
+def a_run(status: str) -> ReconciliationRun:
+    return ReconciliationRun.objects.create(
+        trigger=ReconciliationTrigger.SCHEDULED, status=status, started_at=timezone.now()
+    )
+
+
+def last_status(html: str) -> str:
+    return html.split('<dd id="last-status">', 1)[1].split("</dd>", 1)[0]
+
+
+@pytest.mark.parametrize(
+    ("status", "tone", "words"),
+    [
+        (ReconciliationStatus.DONE, "paid", "Done"),
+        (ReconciliationStatus.RUNNING, "pending", "Running"),
+        (ReconciliationStatus.FAILED, "unpaid", "Failed"),
+    ],
+)
+def test_the_last_runs_status_is_a_chip_in_its_tone(status: str, tone: str, words: str) -> None:
+    a_run(status)
+    shown = last_status(page(client_for(Role.BILLING)[0], "/reconciliation/"))
+    assert shown == (
+        f'<span class="status-chip status-chip-{tone}">{rendered_chip_glyph(tone)}'
+        f"<span>{words}</span></span>"
+    )
+
+
+def test_before_any_run_the_nightly_check_says_so_in_its_card() -> None:
+    html = page(client_for(Role.BILLING)[0], "/reconciliation/")
+    card = html[html.index('id="last-run-card"') :]
+    card = card[: card.index("</section>")]
+    assert '<p class="muted empty" id="no-run">No nightly check has run yet.</p>' in card
+    assert 'id="last-status"' not in card
+
+
+def test_the_nightly_check_cards_open_with_the_card_head() -> None:
+    a_run(ReconciliationStatus.DONE)
+    html = page(client_for(Role.BILLING)[0], "/reconciliation/")
+    assert opens_with_card_head(html, "last-run-card") == "<h2>Last run</h2>"
+    assert opens_with_card_head(html, "recent-runs-card") == "<h2>Recent runs</h2>"
+    findings = opens_with_card_head(html, "findings-card")
+    assert findings == (
+        '<h2>Findings</h2><a class="btn card-link" id="export-csv"'
+        ' href="/reconciliation/export.csv">Download spreadsheet</a>'
+    )
+    assert 'class="card-header' not in content_of(html)

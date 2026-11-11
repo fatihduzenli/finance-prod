@@ -1005,7 +1005,11 @@ def test_run_now_is_admin_only_queued_once_and_run_by_the_worker(fake: FakeProvi
     assert (run.trigger, run.requested_by) == (ReconciliationTrigger.MANUAL, user)
     page = admin.get("/reconciliation/").content.decode()
     assert 'http-equiv="refresh"' not in page
-    assert 'id="last-status">Done' in page
+    # Re-pinned (Opus, PLAN-015 Batch 6 §3.4): the status is a paid chip in the dd#last-status
+    # (the chip component takes no id of its own); its words are unchanged.
+    status = page.split('<dd id="last-status">', 1)[1].split("</dd>", 1)[0]
+    assert status.startswith('<span class="status-chip status-chip-paid">')
+    assert status.endswith("<span>Done</span></span>")
 
 
 def test_the_nav_links_the_page(fake: FakeProvider) -> None:

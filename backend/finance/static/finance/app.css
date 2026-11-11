@@ -744,6 +744,12 @@ button.mini-num:hover { background: var(--month-current); }
 /* A label and its control wrap together (the last pair keeps Show beside it). */
 .filter-card .actions { flex-wrap: wrap; row-gap: var(--space-2); }
 .filter-field { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+/* PLAN-015 Batch 6: the Activity log's and Messages' own filter forms in the filter card's classes
+   (their inline styles gone): a field's label beside it, the text fields 12rem wide, and the
+   buttons together (.filter-actions: Show or Filter, then Download spreadsheet). */
+.filter-field > label { margin: 0; }
+#audit-filters .filter-field > input[type=text] { width: 12rem; }
+.filter-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .grid-card { padding: 0; overflow: hidden; }
 .column-counts { font-weight: 400; }
 
@@ -1345,6 +1351,9 @@ fieldset.card > legend + * { clear: both; }
 .list-card > .table-cards > table > tbody > tr:last-child > td { border-bottom: 1px solid var(--border); }
 .list-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); margin: 0; padding: var(--space-3) var(--space-5); }
 .list-footer .pager-count { color: var(--muted); font-size: var(--fs-base); }
+/* PLAN-015 Batch 6: in a table card outside the list family (the Activity log, Messages) the
+   footer keeps a hairline above it, where the family's last row draws its own. */
+.table-card:not(.list-card) > .list-footer { border-top: 1px solid var(--border); }
 .pager-pages { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .pager-pages .pager-off { color: var(--muted); opacity: .6; cursor: default; }
 .pager-pages .pager-off:hover { border-color: var(--input-border); }
