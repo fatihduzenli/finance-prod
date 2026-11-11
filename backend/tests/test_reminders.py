@@ -8,6 +8,7 @@ summary. The engine itself (queue, window, send) is tested in ``test_messaging_e
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -559,7 +560,9 @@ def test_c_is_sent_to_the_billing_email_with_its_text(clock: Any, memory: Memory
     assert sent.to == "ana@example.com"
     assert sent.subject == "Payment overdue — #900 Store 900 Testville"
     assert "We have not yet received $2,450.00 for Rent October 2026" in sent.text
-    assert "fee" not in sent.text.lower()  # E3: no late fee
+    # E3: no late fee. The links are left out: a signed token can spell "fee" by chance
+    # (the full gate of 2026-11-11 hit one).
+    assert "fee" not in re.sub(r"https?://\S+", "", sent.text).lower()
     assert rules_of(charge) == [("C", 1)]
 
 
