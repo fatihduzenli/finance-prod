@@ -34,12 +34,16 @@ each user can revoke their own; it carries the same shared items for everyone. E
 read is audited (``calendar_feed.read``) with the user and the feed's row id, never the
 token.
 
-**Morning e-mails** (D8). The daily tick calls :func:`queue_morning_emails`: one
-``calendar_email`` job per stored entry of the day with ``email_morning`` (to its author)
-and per open promise to pay due that day (to the promise's author), at most one per item
-and day (a fixed replay key). The worker runs :func:`send_morning_email`, which sends
-through :func:`mail.get_sender`: held (not sent) while mail is not set up, and on the
-sandbox to an address off the company settings' allowlist (PLAN-014 D2), as every message.
+**Reminder and morning e-mails** (D8, PLAN-015h). An entry with ``email_morning`` asks for an
+e-mail to its author on its day at ``email_at`` (New York; one of :data:`REMINDER_TIMES`): the
+worker's reminder check calls :func:`queue_due_reminders` every 15 minutes, which queues one
+``calendar_email`` job per entry of the day whose time has come. The daily tick calls
+:func:`queue_morning_emails`: one job per open promise to pay due that day (to the promise's
+author). Each item gets at most one job per day (a fixed replay key shared by both paths), so a
+worker that was down sends late the same day and never twice; a past day is never queued. The
+worker runs :func:`send_morning_email`, which sends through :func:`mail.get_sender`: held (not
+sent) while mail is not set up, and on the sandbox to an address off the company settings'
+allowlist (PLAN-014 D2), as every message.
 """
 
 from __future__ import annotations
@@ -64,7 +68,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 import mail
-from finance.dates import clock_text, day_text
+from finance.dates import NEW_YORK, clock_text, day_text
 from ledger.models import (
     CALENDAR_DEFAULT_REMINDER_TIME,
     CALENDAR_REMINDER_TIMES,
@@ -143,6 +147,7 @@ TITLE_TOO_LONG = f"A title is at most {CALENDAR_TITLE_MAX_LENGTH} characters."
 BODY_TOO_LONG = f"The text is at most {BODY_MAX_LENGTH} characters."
 PAYMENT_DATA = "This text may not contain card or account numbers."
 NOT_YOURS = "Only the author or an admin can change this entry."
+TIME_PASSED = "That time has passed today — pick a later time."
 SAVED = "Calendar entry saved."
 DELETED = "Calendar entry deleted."
 
@@ -162,6 +167,8 @@ class CalendarItem:
     operator_id: uuid.UUID | None = None
     lease_id: uuid.UUID | None = None
     entry: CalendarEntry | None = None
+    #: A stored entry's reminder time when it asks for the e-mail; ``None`` otherwise.
+    email_at: time | None = None
 
     @property
     def generated(self) -> bool:
@@ -215,6 +222,7 @@ def entry_item(entry: CalendarEntry, host: str | None = None) -> CalendarItem:
         operator_id=operator_id,
         lease_id=entry.lease_id,
         entry=entry,
+        email_at=entry.email_at if entry.email_morning else None,
     )
 
 
@@ -502,6 +510,7 @@ class EntryInput:
     title: str
     body: str = ""
     email_morning: bool = False
+    email_at: time = DEFAULT_REMINDER_TIME
     store: uuid.UUID | None = None
     operator: uuid.UUID | None = None
     lease: uuid.UUID | None = None
@@ -542,6 +551,7 @@ def _state(entry: CalendarEntry) -> dict[str, object]:
         "title": entry.title,
         "body": entry.body,
         "email_morning": entry.email_morning,
+        "email_at": f"{entry.email_at:%H:%M}",
         "store": str(entry.store_id) if entry.store_id else None,
         "operator": str(entry.operator_id) if entry.operator_id else None,
         "lease": str(entry.lease_id) if entry.lease_id else None,
@@ -572,16 +582,33 @@ def _write(entry: CalendarEntry, data: EntryInput, title: str, body: str) -> Non
     entry.title = title
     entry.body = body
     entry.email_morning = data.email_morning
+    entry.email_at = data.email_at
     entry.store_id = data.store
     entry.operator_id = data.operator
     entry.lease_id = data.lease
+
+
+def _time_passed(data: EntryInput, stored: CalendarEntry | None) -> bool:
+    """A reminder asked for today at a time already past (PLAN-015h §3.2): a new entry's, or an
+    existing entry's whose reminder changed (the switch, the time or the day), so an edit that
+    leaves a reminder already sent today as it was still saves."""
+    if not data.email_morning or data.on != timezone.localdate():
+        return False
+    if data.email_at > timezone.localtime().time():
+        return False
+    return stored is None or (stored.email_morning, stored.email_at, stored.on) != (
+        data.email_morning,
+        data.email_at,
+        data.on,
+    )
 
 
 def save_entry(
     data: EntryInput, *, actor: User, is_admin: bool, entry_id: uuid.UUID | None = None
 ) -> EntryOutcome:
     """Create an entry, or change ``entry_id`` (its author or an admin). The title and
-    the body are stored as :func:`visible_text`. Refusals change nothing."""
+    the body are stored as :func:`visible_text`. A reminder for today at a time already past is
+    refused (:data:`TIME_PASSED`, on ``email_at``). Refusals change nothing."""
     title = visible_text(data.title or "")
     body = visible_text(data.body or "")
     refusal = _refusal(data, title, body)
@@ -591,10 +618,14 @@ def save_entry(
         if entry_id is None:
             entry = CalendarEntry(author=actor)
             before = None
+            if _time_passed(data, None):
+                return EntryOutcome(False, TIME_PASSED, "email_at")
         else:
             entry = CalendarEntry.objects.select_for_update().get(pk=entry_id)
             if not can_change(entry, actor, is_admin=is_admin):
                 return EntryOutcome(False, NOT_YOURS)
+            if _time_passed(data, entry):
+                return EntryOutcome(False, TIME_PASSED, "email_at")
             before = _state(entry)
         _write(entry, data, title, body)
         try:
@@ -757,7 +788,7 @@ def ics(found: Iterable[CalendarItem], *, now: datetime, base_url: str) -> str:
     return "".join(f"{fold(line)}\r\n" for line in lines)
 
 
-# --- Morning e-mails (D8) ------------------------------------------------------------------
+# --- Reminder and morning e-mails (D8, PLAN-015h) ------------------------------------------
 
 #: The ``params`` key of a ``calendar_email`` job: the day (ISO) it is the morning of.
 MORNING_DAY = "on"
@@ -776,7 +807,6 @@ MORNING_FAILED = "Failed: {cause}."
 
 @dataclass(frozen=True, slots=True)
 class MorningReport:
-    entries: int
     promises: int
 
 
@@ -793,13 +823,23 @@ def _queue_morning(entity: CalendarEntry | ContactEntry, today: date) -> bool:
     return True
 
 
-def queue_morning_emails(today: date) -> MorningReport:
-    """Queue the morning e-mails of ``today``: each stored entry of the day that asks for
-    one (to its author), and each open promise to pay due that day (to the author of the
-    promise). Entries and promises without an author are left out."""
+def queue_due_reminders(now: datetime) -> int:
+    """Queue the reminder e-mails whose time has come (the worker's check, PLAN-015h §3.4):
+    each stored entry of ``now``'s New York day that asks for one, has an author and whose
+    ``email_at`` is at or before ``now``'s New York wall-clock time, earliest first. An entry
+    already queued that day (by either path) is not queued again; another day is never
+    looked at, so a reminder missed yesterday stays unsent. How many were queued."""
+    local = now.astimezone(NEW_YORK)
     entries = CalendarEntry.objects.filter(
-        on=today, email_morning=True, author__isnull=False
-    ).order_by("created_at", "id")
+        on=local.date(), email_morning=True, author__isnull=False, email_at__lte=local.time()
+    ).order_by("email_at", "created_at", "id")
+    return sum(_queue_morning(entry, local.date()) for entry in entries)
+
+
+def queue_morning_emails(today: date) -> MorningReport:
+    """Queue the morning e-mails of ``today`` (the daily tick): each open promise to pay due
+    that day, to the author of the promise; promises without an author are left out. The
+    calendar entries' reminders are the worker's (:func:`queue_due_reminders`)."""
     promises = ContactEntry.objects.filter(
         kind=ContactKind.PROMISE,
         promised_date=today,
@@ -807,9 +847,7 @@ def queue_morning_emails(today: date) -> MorningReport:
         deleted_at__isnull=True,
         author__isnull=False,
     ).order_by("created_at", "id")
-    queued_entries = sum(_queue_morning(entry, today) for entry in entries)
-    queued_promises = sum(_queue_morning(promise, today) for promise in promises)
-    return MorningReport(entries=queued_entries, promises=queued_promises)
+    return MorningReport(promises=sum(_queue_morning(promise, today) for promise in promises))
 
 
 def _author_address(author: User | None) -> str:

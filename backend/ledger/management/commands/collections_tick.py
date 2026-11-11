@@ -16,9 +16,11 @@ re-debit due today or on the next business day (:func:`ledger.services.nsf.creat
 PLAN-014 F3: one ``schedule_create`` job each), fetches the day's bank deposits
 (:func:`banking.services.fetch`, PLAN-014 I2: only when the module is on, a bank source exists
 and an account is connected; it refreshes the new deposits' suggestions and confirms the exact
-ones when that setting is on), and queues the day's morning e-mails
-(:func:`ledger.services.calendar.queue_morning_emails`, one ``calendar_email`` job each),
-which the worker sends. It also queues the day's read
+ones when that setting is on), and queues the day's promise reminders
+(:func:`ledger.services.calendar.queue_morning_emails`, one ``calendar_email`` job per promise
+to pay due today), which the worker sends; the calendar entries' reminder e-mails are the
+worker's own check at each entry's time (:func:`ledger.services.calendar.queue_due_reminders`,
+PLAN-015h). It also queues the day's read
 of the dispute list (:func:`ledger.services.disputes.queue_daily`, one ``disputes_sync``
 job, PLAN-012 D8), and deletes the lease-end drafts whose terms were never set after
 seven days (:func:`ledger.services.lease_end.sweep_drafts`, PLAN-012b-b D9). After the
@@ -58,8 +60,8 @@ from ledger.services import (
 
 class Command(BaseCommand):
     help = (
-        "Create the day's rent charges; queue the day's reminders, morning e-mails and "
-        "dispute list read for the worker."
+        "Create the day's rent charges; queue the day's reminders, promise reminders and "
+        "dispute list read for the worker (calendar reminders are the worker's own check)."
     )
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -93,7 +95,6 @@ class Command(BaseCommand):
             f"Reminders not queued (already queued, or no lease to bill): {reminded.skipped}. "
             f"Automatic re-debits scheduled: {redebits}. "
             f"{bank_deposits.tick_line(deposits)} "
-            f"Morning e-mails queued: {morning.entries}. "
             f"Promise reminders queued: {morning.promises}. Promises kept by a payment: {kept}. "
             f"Dispute list read queued: {'yes' if dispute_read else 'no'}. "
             f"Lease-end drafts without terms removed: {swept}. "
