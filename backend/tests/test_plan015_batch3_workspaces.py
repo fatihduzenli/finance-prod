@@ -193,6 +193,12 @@ def test_the_figure_row_shows_at_every_width_and_the_strip_css_is_gone() -> None
         ".kpi-row.kpi2-row { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }"
         in narrow
     )
+    # A figure with words wraps between them on a phone, so the page never scrolls sideways
+    # (the 390 px baselines keep their 390 px width).
+    assert ".page-header-inner > .kpi2-row .kpi2-value { white-space: normal; }" in narrow
+    assert narrow.index(".kpi2-value { font-size: 22px; white-space: nowrap;") < narrow.index(
+        ".page-header-inner > .kpi2-row .kpi2-value"
+    )
 
 
 # --- §3.2 The operator's figure row --------------------------------------------------------------
@@ -306,7 +312,8 @@ def chip_of(tile: str) -> tuple[str, str, str]:
         re.S,
     )
     assert len(found) == 1, tile
-    return found[0]
+    tone, glyph, words = found[0]
+    return str(tone), str(glyph), str(words)
 
 
 def test_each_tile_is_one_link_with_the_chip_of_its_balance() -> None:

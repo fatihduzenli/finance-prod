@@ -1790,6 +1790,9 @@ p.detail-more-notes { padding-left: 0; }
   .kpi-row.kpi2-row { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
   .kpi2-row > div { min-width: 0; }
   .kpi2-value { font-size: 22px; white-space: nowrap; overflow-wrap: normal; }
+  /* The workspaces' figure row (PLAN-015 Batch 3): a figure with words ("$3,500.00 / month",
+     "$3,500.00 by Oct 23, 2026") wraps between its words, never inside the amount. */
+  .page-header-inner > .kpi2-row .kpi2-value { white-space: normal; }
   main, main.wide { margin: 0; padding: var(--space-4); border: 0; border-radius: 0; max-width: none; }
   dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 10px; }
   /* A 16 px field keeps a phone from zooming in on focus. */
