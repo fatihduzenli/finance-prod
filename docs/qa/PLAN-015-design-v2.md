@@ -3,8 +3,7 @@
 Fable's plan under the root `CLAUDE.md` §1.2 for the owner's request of 2026-11-05: "re-design my
 entire pages according to this screenshot". The reference is `docs/design/dashboard-v2-dark-laptop.png`
 (717 × 619, dark, laptop). Opus builds; Fable gates each batch; one PR per batch, merged in order.
-**Status: Batches 0 and 1 approved by the owner on 2026-11-05 (§9 answered); Batches 2–6 wait for the
-owner's review of the dashboard on staging, possibly until after Step 13b.**
+**Status: complete. Batches 0 and 1 approved by the owner on 2026-11-05 (§9 answered); the dashboard reviewed and approved on 2026-11-10; Batches 2–6 built, gated and verified on staging 2026-11-10 to 2026-11-11 (PRs #65–#69; `docs/qa/15/PLAN-015-batch-{2..6}-*.md`, QA-015).**
 
 ## 1. Objective
 
