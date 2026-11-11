@@ -6,7 +6,7 @@
   {% url 'ledger:reports:payments_by_method' as action %}{% url 'ledger:reports:payments_by_method_export' as export %}
   {% include "ledger/reports/_range.html" with action=action export=export %}
   {% if too_slow %}
-    <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
+    <p class="side-note warning" id="report-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
   <p class="muted">Settled payments by settled month and method, less the refunds settled that month. Deposits and deposit refunds are left out, as on the dashboard's "paid this month". Amounts in US dollars.</p>
   <p class="muted" id="cards-note">{{ cards_note }}</p>

@@ -94,7 +94,10 @@ def test_the_header_has_the_admin_crumb_the_title_the_date_and_the_two_buttons(
         header
     )
     assert "<h1>Daily charges</h1>" in header
-    assert '<span class="page-date" id="run-date">Thursday, Oct 15, 2026</span>' in header
+    # Re-pinned (Opus, PLAN-015 Batch 6 §3.1): the date is the title block's sub-line.
+    assert '<h1>Daily charges</h1><p class="page-sub" id="run-date">Thursday, Oct 15, 2026</p>' in (
+        header
+    )
     assert 'class="btn" type="submit" id="match-invoices"' in header
     assert ">Update from Stax</button>" in header
     assert 'class="btn btn-primary" type="submit" id="create-charges"' in header

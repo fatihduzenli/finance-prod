@@ -33,7 +33,7 @@
     <ul class="messages" id="aging-messages">{% for text in selected.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}
   {% if too_slow %}
-    <p class="warning" id="aging-too-slow" role="status">{{ too_slow }}</p>
+    <p class="side-note warning" id="aging-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
   <section class="kpi-row kpi2-row" id="aging-kpis" aria-label="Figures">
     {% with stores=store_count|stringformat:"d" word=store_count|pluralize:"store,stores" %}{% if report.totals.total > 0 %}{% kpi2 "alert" "Unpaid" stores|add:" "|add:word report.totals.total|money value_tone="unpaid" value_id="aging-kpi-unpaid" %}{% else %}{% kpi2 "alert" "Unpaid" stores|add:" "|add:word report.totals.total|money value_tone="muted" value_id="aging-kpi-unpaid" %}{% endif %}{% endwith %}

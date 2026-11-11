@@ -1,10 +1,8 @@
 {% extends "finance/base.html" %}
 {% load responsive dates people %}
 {% block title %}Nightly check{% endblock %}
-{% block header %}<div class="page-header"><h1>Nightly check</h1>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:reconciliation:run' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="run-now"{% if job_refresh %} disabled{% endif %}>Run the nightly check now</button></form></div>{% endif %}</div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Nightly check</h1><p class="page-sub" id="reconciliation-sub">Each night the check re-reads open invoices, recent transactions, bank deposits and ACH rejections from {{ company.provider_name }}, and marks pending payments that are too old. Times are shown in {{ timezone }}. Identifiers are masked.</p></div>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:reconciliation:run' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="run-now"{% if job_refresh %} disabled{% endif %}>Run the nightly check now</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <p class="muted">Each night the check re-reads open invoices, recent transactions, bank deposits and ACH rejections from {{ company.provider_name }}, and marks pending payments that are too old. Times are shown in {{ timezone }}. Identifiers are masked.</p>
-
   {% if can_run %}<p id="run-now-note"><span class="muted">Runs the nightly check now. Only one runs at a time.</span></p>{% endif %}
   {% include "ledger/_job_status.html" %}
 

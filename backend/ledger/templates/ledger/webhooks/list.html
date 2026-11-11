@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% load responsive dates %}
 {% block title %}Messages from {{ company.provider_name }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Messages from {{ company.provider_name }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Messages from {{ company.provider_name }}</h1></div></div>{% endblock %}
 {% block content %}
   <div class="card filter-card"><form method="get" action="{% url 'ledger:webhooks:list' %}" class="actions" role="search">
     <label for="outcome" style="margin:0;">Outcome</label>

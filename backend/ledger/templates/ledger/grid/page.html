@@ -73,7 +73,7 @@
   <p class="legend muted">{% for value, label in statuses %}{% if value == "not_due" %}<span class="cell-not-due">{{ label }}</span>{% else %}{% status_badge label value %}{% endif %}{% endfor %} <span>{{ note_marker }} has a note</span> {% if not too_slow %}<span id="grid-count">{{ grid.rows|length }} store{{ grid.rows|length|pluralize }}.</span> {% endif %}Amounts in US dollars. A cell sums the store's rent charges of the month.</p>
 
   {% if too_slow %}
-    <p class="warning" id="grid-too-slow" role="status">{{ too_slow }}</p>
+    <p class="side-note warning" id="grid-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
   <section class="card grid-card" id="grid-card" aria-label="Month grid">
   <div class="grid-scroll-top" id="grid-scroll-top" aria-hidden="true" hidden><div></div></div>

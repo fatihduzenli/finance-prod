@@ -4,7 +4,7 @@
 {% block title %}Reports{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><h1>Reports</h1><p class="page-sub" id="reports-lede">Every report downloads as a spreadsheet.</p></div></div>{% endblock %}
 {% block content %}
-  {% if too_slow %}<p class="warning" id="reports-too-slow" role="status">{{ too_slow }}</p>{% endif %}
+  {% if too_slow %}<p class="side-note warning" id="reports-too-slow" role="status">{{ too_slow }}</p>{% endif %}
   <section class="report-group" id="reports-collections" aria-labelledby="reports-collections-title">
     <h2 id="reports-collections-title">Collections</h2>
     <div class="report-cards">

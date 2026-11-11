@@ -21,7 +21,7 @@
   {% endif %}
 
   {% if too_slow %}
-    <p class="warning" id="pnl-too-slow" role="status">{{ too_slow }}</p>
+    <p class="side-note warning" id="pnl-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
   <section class="kpi-row kpi2-row" id="pnl-kpis" aria-label="Figures">
     {% kpi2 "banknote" "Billed" kpis.billed_sub kpis.billed|money value_id="kpi-billed" %}

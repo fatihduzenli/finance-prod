@@ -2,7 +2,7 @@
 {% load static dates %}
 {% comment %}One help topic (docs/qa/PLAN-012e2-fewer-actions.md D10; the frame, PLAN-012f-b E-3, DESIGN-SPEC §4 Help): the header's title only; the topic card beside one article card (the topic's title, "Updated {date} · {n} min read", its own template rendered by finance.help.topic as "body"), then "Still stuck? E-mail …" when the company settings name a support e-mail. Static.{% endcomment %}
 {% block title %}Help{% endblock %}
-{% block header %}<div class="page-header"><h1>Help</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Help</h1></div></div>{% endblock %}
 {% block content %}
   <div class="help-layout" id="help-layout">
     {% include "finance/help/_topics.html" %}
