@@ -440,7 +440,6 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .note-item .note-item-more { font-size: var(--fs-sm); }
 .note-item .note-item-meta { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-sm); }
 .note-item-meta .note-pin-glyph { margin-right: var(--space-1); vertical-align: -2px; }
-.note-list-all { margin: var(--space-3) 0 0; font-size: var(--fs-sm); }
 
 /* --- Grid cell block ---------------------------------------------------------------------
    td.cell (ledger.views.dashboard.cell_html): a month of the grid. .cell-block: a rounded
@@ -542,7 +541,8 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
    body (.workspace-grid): the two-thirds .workspace-main (the open tab as a card, the other
    cards under it) and the one-third .workspace-side (the action bar of the operator page's
    store, then #workspace-header: the LEASE, NEXT, STORE COST (with the cost rows' History
-   under it) and DOCUMENTS cards, each a .section-label over a .side-list of label and value,
+   under it) and DOCUMENTS cards, each opening with its .card-head (PLAN-015 Batch 3: the
+   h2.section-label left, the card's link right) over a .side-list of label and value,
    .doc-list for the documents).
    The figure row (PLAN-015 Batch 3: .kpi-row.kpi2-row#summary-strip, the {% kpi2 %} cards of
    ledger/stores/_figures.html and ledger/operators/_figures.html) spans the header's width
@@ -566,9 +566,9 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .workspace-side > .action-bar { margin: 0 0 var(--space-4); }
 .workspace-header { display: flex; flex-direction: column; gap: var(--space-4); }
 .workspace-header .card { margin: 0; }
-.workspace-header .card-header { margin-bottom: var(--space-3); }
+.workspace-header .card-head { margin-bottom: var(--space-3); }
 .workspace-header .section-label { margin: 0 0 var(--space-3); font-size: var(--fs-base); }
-.workspace-header .card-header .section-label { margin: 0; }
+.workspace-header .card-head .section-label { margin: 0; }
 #cost-history summary { color: var(--link); font-size: var(--fs-base); cursor: pointer; }
 #cost-history .table-cards { overflow-x: auto; }
 .side-list { display: grid; grid-template-columns: minmax(6rem, 40%) minmax(0, 1fr); gap: 7px var(--space-3); margin: 0; font-size: var(--fs-base); }
@@ -1618,8 +1618,8 @@ p.detail-more-notes { padding-left: 0; }
 .store-tile-title { font-size: var(--fs-md); font-weight: 700; overflow-wrap: anywhere; }
 .operator-side > .card { margin: 0 0 var(--space-4); }
 .operator-side .section-label { margin: 0 0 var(--space-3); font-size: var(--fs-base); }
-.operator-side .card-header { margin-bottom: var(--space-3); }
-.operator-side .card-header .section-label { margin: 0; }
+.operator-side .card-head { margin-bottom: var(--space-3); }
+.operator-side .card-head .section-label { margin: 0; }
 .operator-side .side-strong.tone-unpaid { color: var(--unpaid-text); }
 .operator-side .card-note { margin: var(--space-3) 0 0; }
 #portal-card #statement-links { margin: 0 0 var(--space-3); font-size: var(--fs-base); }

@@ -15,6 +15,7 @@ from django.test import Client
 
 from accounts.roles import Role
 from ledger.models import ContactKind, Operator, PaymentStatus, RentChargeStatus
+from ledger.services import store_costs
 from tests.receivables_helpers import a_lease, a_payment, a_rent_charge, a_store, an_operator
 from tests.test_operator_views import client_for
 from tests.test_plan012f_d_pages import APP_CSS, phone_block
@@ -356,3 +357,94 @@ def test_the_tile_css_is_the_dashboards_one_class_and_the_old_strip_is_gone() ->
     assert ".workspace-main > .store-tiles { grid-template-columns: minmax(0, 1fr);" in phone_block(
         css
     )
+
+
+# --- §3.3 The side cards' heads -------------------------------------------------------------------
+
+#: The side cards of the store page (and of the operator page's selected store): (the card's
+#: id, its label, the head's link id or None).
+STORE_SIDE = [
+    ("lease-card", "Lease", None),
+    ("notes-card", "Notes", "notes-card-all"),
+    ("next-card", "Next", None),
+    ("store-cost", "Store cost", "change-cost"),
+    ("documents-card", "Documents", "documents-upload"),
+]
+OPERATOR_SIDE = [
+    ("contact-card", "Contact", None),
+    ("payment-card", "Payment", None),
+    ("recent-contact-card", "Recent contact", "recent-add-contact"),
+    ("portal-card", "Portal", None),
+]
+
+
+def head_of(html: str, card_id: str) -> str:
+    """The card's first child, which must be its head: ``div.card-head`` up to its close."""
+    opened = re.search(rf'<(?:div|section) class="card" id="{card_id}"[^>]*>\s*', html)
+    assert opened, card_id
+    rest = html[opened.end() :]
+    assert rest.startswith('<div class="card-head"><h2 class="section-label"'), card_id
+    return rest[: rest.index("</div>") + len("</div>")]
+
+
+def assert_heads(html: str, cards: list[tuple[str, str, str | None]]) -> None:
+    for card_id, label, link_id in cards:
+        head = head_of(html, card_id)
+        assert re.search(rf'<h2 class="section-label"( id="[a-z-]+")?>{label}</h2>', head), head
+        links = re.findall(r'<a class="card-link"[^>]* id="([a-z-]+)"', head)
+        assert links == ([link_id] if link_id else []), (card_id, head)
+        if link_id:  # the link sits after the label, at the right
+            assert head.index("</h2>") < head.index(f'id="{link_id}"')
+
+
+def test_every_store_side_card_opens_with_its_head() -> None:
+    from tests.test_notes_card import a_note
+
+    lease = a_store_world()
+    a_note(lease.store, "Called about the deposit.", minutes=1)
+    assert store_costs.set_cost(lease.store, Decimal("1500.00"), date(2026, 1, 1)).ok
+    html = page(client_for(Role.ADMIN)[0], f"/stores/{lease.store_id}/")
+    side = html[html.index('<aside class="workspace-side"') :]
+    assert_heads(side, STORE_SIDE)
+    assert "card-header" not in side  # the side column's old header row is gone
+    # The labelled-by ids stay on their h2.
+    for card_id, heading in (
+        ("notes-card", "notes-card-heading"),
+        ("store-cost", "store-cost-heading"),
+    ):
+        assert f'id="{card_id}" aria-labelledby="{heading}"' in side
+        assert f'<h2 class="section-label" id="{heading}">' in head_of(side, card_id)
+    # The History details card is as it was, under STORE COST.
+    assert '<div class="card" id="cost-history-card">\n  <details id="cost-history">' in side
+
+
+def test_a_viewer_sees_the_heads_without_the_links_it_may_not_use() -> None:
+    lease = a_store_world()
+    html = page(client_for(Role.VIEWER)[0], f"/stores/{lease.store_id}/")
+    side = html[html.index('<aside class="workspace-side"') :]
+    assert_heads(side, [(card_id, label, None) for card_id, label, _ in STORE_SIDE])
+
+
+def test_every_operator_side_card_and_the_selected_stores_open_with_their_heads() -> None:
+    operator, leases = three_stores()
+    html = page(client_for(Role.ADMIN)[0], operator_page(operator, store=str(leases[0].store_id)))
+    side = html[html.index('<aside class="workspace-side operator-side"') :]
+    assert_heads(side, OPERATOR_SIDE)
+    for card_id, label, link_id in STORE_SIDE:
+        if card_id == "notes-card":  # no note yet: no "All notes" link
+            link_id = None
+        assert_heads(side, [(card_id, label, link_id)])
+    assert "card-header" not in side
+    for card_id in ("contact-card", "payment-card", "recent-contact-card", "portal-card"):
+        heading = re.search(rf'id="{card_id}" aria-labelledby="([a-z-]+)"', side)
+        assert heading and f'id="{heading.group(1)}">' in head_of(side, card_id), card_id
+
+
+def test_the_side_heads_take_the_old_header_rows_spacing() -> None:
+    css = APP_CSS.read_text(encoding="utf-8")
+    assert ".workspace-header .card-head { margin-bottom: var(--space-3); }" in css
+    assert ".workspace-header .card-head .section-label { margin: 0; }" in css
+    assert ".operator-side .card-head { margin-bottom: var(--space-3); }" in css
+    assert ".operator-side .card-head .section-label { margin: 0; }" in css
+    for gone in (".workspace-header .card-header", ".operator-side .card-header", ".note-list-all"):
+        assert gone not in css, gone
