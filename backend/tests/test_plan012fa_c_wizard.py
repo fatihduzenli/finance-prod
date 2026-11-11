@@ -243,8 +243,9 @@ def test_the_primary_submits_its_steps_form_from_the_footer(admin: Any) -> None:
 
 
 def tiles_of(html: str) -> list[str]:
+    # Re-pinned (Opus, PLAN-015 Batch 5): the three tiles are kpi2 cards.
     block = html[html.index('id="statement-tiles"') :]
-    return re.findall(r'<div class="kpi">(.*?)</div>', block, re.S)[:3]
+    return block.split('<div class="kpi2">')[1:4]
 
 
 def test_the_tiles_read_a_prorated_month_a_collected_deposit_and_one_deduction(admin: Any) -> None:
@@ -254,7 +255,7 @@ def test_the_tiles_read_a_prorated_month_a_collected_deposit_and_one_deduction(a
     html = page(client, lease_end_paths(end)[2])
     opened, held, deducted = tiles_of(html)
     assert f"${found.open_total:,.2f}" in opened
-    assert '<span class="kpi-note">rent 1–19 Oct, 19 of 31 days</span>' in opened
+    assert '<p class="kpi2-sub">rent 1–19 Oct, 19 of 31 days</p>' in opened
     assert f"${found.deposit_held:,.2f}" in held and found.deposit_held > 0
     collected = (
         Payment.objects.filter(one_off_charge_id=found.deposits[0].charge_id, is_refund=False)
@@ -262,13 +263,13 @@ def test_the_tiles_read_a_prorated_month_a_collected_deposit_and_one_deduction(a
         .settled_on
     )
     assert collected is not None
-    assert f'<span class="kpi-note">collected {day_text(collected)}</span>' in held
+    assert f'<p class="kpi2-sub">collected {day_text(collected)}</p>' in held
     # PLAN-013a C7: the value is also table_total.js's output (it follows the typed rows).
     assert (
-        '<span class="kpi-value tone-unpaid js-total-out" data-total-for="deduction-rows" '
+        '<span class="kpi2-value tone-unpaid js-total-out" data-total-for="deduction-rows" '
         'data-tone-above-zero="tone-unpaid">$150.00</span>'
     ) in deducted
-    assert '<span class="kpi-note">1 line</span>' in deducted
+    assert '<p class="kpi2-sub">1 line</p>' in deducted
 
 
 def test_the_tiles_of_a_full_month_without_a_deposit_or_deduction(admin: Any) -> None:
@@ -278,12 +279,12 @@ def test_the_tiles_of_a_full_month_without_a_deposit_or_deduction(admin: Any) ->
     end = draft(lease, prorate=False)
     html = page(client, lease_end_paths(end)[2])
     opened, held, deducted = tiles_of(html)
-    assert "kpi-note" not in opened and "kpi-note" not in held
-    assert '<span class="kpi-value">$0.00</span>' in held
-    assert '<span class="kpi-value js-total-out" data-total-for="deduction-rows" ' in deducted
+    assert "kpi2-sub" not in opened and "kpi2-sub" not in held
+    assert '<span class="kpi2-value">$0.00</span>' in held
+    assert '<span class="kpi2-value js-total-out" data-total-for="deduction-rows" ' in deducted
     assert 'data-tone-above-zero="tone-unpaid">$0.00</span>' in deducted
-    assert "kpi-value tone-unpaid" not in deducted
-    assert '<span class="kpi-note">0 lines</span>' in deducted
+    assert "kpi2-value tone-unpaid" not in deducted
+    assert '<p class="kpi2-sub">0 lines</p>' in deducted
 
 
 # --- The SETTLEMENT box ------------------------------------------------------------------

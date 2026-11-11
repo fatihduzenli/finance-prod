@@ -19,9 +19,9 @@
   <div class="detail-grid">
   <div class="detail-main">
   <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
-    <div id="tile-rent">{% if rent %}{% kpi "Rent" rent.amount|money %}{% else %}{% kpi "Rent" "—" %}{% endif %}</div>
-    <div id="tile-open-balance">{% if open_balance is None %}{% kpi "Open balance" "—" %}{% elif open_balance > 0 %}{% kpi "Open balance" open_balance|money "" "unpaid" %}{% else %}{% kpi "Open balance" open_balance|money %}{% endif %}</div>
-    <div id="tile-deposit">{% if deposit_text %}{% kpi "Deposit" deposit_text %}{% else %}{% kpi "Deposit" "None" %}{% endif %}</div>
+    <div id="tile-rent">{% if rent %}{% kpi2 "banknote" "Rent" "per month" rent.amount|money value_id="tile-rent-value" %}{% else %}{% kpi2 "banknote" "Rent" "" "—" value_tone="muted" value_id="tile-rent-value" %}{% endif %}</div>
+    <div id="tile-open-balance">{% if open_balance is None %}{% kpi2 "alert" "Open balance" "" "—" value_tone="muted" value_id="tile-open-balance-value" %}{% elif open_balance > 0 %}{% kpi2 "alert" "Open balance" "" open_balance|money value_tone="unpaid" value_id="tile-open-balance-value" %}{% else %}{% kpi2 "alert" "Open balance" "" open_balance|money value_tone="muted" value_id="tile-open-balance-value" %}{% endif %}</div>
+    <div id="tile-deposit">{% if deposit_text %}{% kpi2 "lock" "Deposit" "" deposit_text value_id="tile-deposit-value" %}{% else %}{% kpi2 "lock" "Deposit" "" "None" value_tone="muted" value_id="tile-deposit-value" %}{% endif %}</div>
   </section>
 
   <section class="card" id="rent-history-card">

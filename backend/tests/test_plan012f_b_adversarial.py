@@ -11,6 +11,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from django.template import Context, Template
 from django.urls import reverse
 
 from accounts.roles import Role
@@ -73,9 +74,13 @@ def test_an_unknown_family_is_a_template_error_not_a_rendered_colour() -> None:
 
 
 def test_the_kpi_badge_avatar_and_date_chip_escape_markup() -> None:
-    kpi = str(components.kpi(MARKUP, MARKUP, MARKUP, tone=MARKUP))
+    # Re-pinned (Opus, PLAN-015 Batch 5): the old kpi tag is gone; its successor kpi2 escapes
+    # the same and refuses a hostile tone as a template mistake.
+    kpi = Template("{% load components %}{% kpi2 'alert' m m m %}").render(Context({"m": MARKUP}))
     assert MARKUP not in kpi and "&lt;script&gt;" in kpi
-    assert 'class="kpi-value"' in kpi  # a hostile tone is ignored, never a class
+    assert '<span class="kpi2-value">' in kpi
+    with pytest.raises(ValueError):
+        components.kpi2("alert", "x", value="1", value_tone=MARKUP)
     badge = str(components.status_badge(MARKUP, MARKUP))
     assert MARKUP not in badge and 'class="badge' in badge
     avatar = str(components.avatar(MARKUP))

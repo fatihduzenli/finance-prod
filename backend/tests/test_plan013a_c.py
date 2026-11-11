@@ -525,9 +525,10 @@ def test_c7_the_statement_step_loads_the_total_script_for_its_deductions_tile(
     client = client_for(Role.ADMIN)[0]
     page = body(client, reverse("ledger:lease_ends:statement", kwargs={"pk": end.pk}))
     assert '<script src="/static/ledger/table_total.js" defer></script>' in page
-    tile = between(page, '<span class="kpi-label">Deductions</span>', "</div>")
+    # Re-pinned (Opus, PLAN-015 Batch 5): the tile is a kpi2 card; the figure keeps its hooks.
+    tile = between(page, '<p class="kpi2-title">Deductions</p>', "</span></div>") + "</span>"
     assert (
-        '<span class="kpi-value js-total-out" data-total-for="deduction-rows" '
+        '<span class="kpi2-value js-total-out" data-total-for="deduction-rows" '
         'data-tone-above-zero="tone-unpaid">$0.00</span>'
     ) in tile
     assert 'id="deduction-rows"' in page
@@ -536,34 +537,32 @@ def test_c7_the_statement_step_loads_the_total_script_for_its_deductions_tile(
 
 
 def test_c7_the_kpi_component_is_byte_identical_without_the_new_keywords() -> None:
-    from finance.templatetags.components import kpi
+    # Re-pinned (Opus, PLAN-015 Batch 5): the hooks moved from the old kpi tag to kpi2 with the
+    # statement's tiles; kpi2's output without them is unchanged.
+    from django.template import Context, Template
 
-    # The output every other caller gets, as before PLAN-013a C7.
-    assert str(kpi("Paid", "$5.00")) == (
-        '<div class="kpi"><span class="kpi-label">Paid</span>'
-        '<span class="kpi-value">$5.00</span></div>'
+    def card(source: str) -> str:
+        return Template("{% load components %}" + source).render(Context())
+
+    plain = card('{% kpi2 "banknote" "Paid" "" "$5.00" %}')
+    assert '<span class="kpi2-value">$5.00</span>' in plain
+    assert (
+        card('{% kpi2 "banknote" "Due" "2 lines" "$9.00" value_tone="unpaid" %}').count(
+            '<span class="kpi2-value tone-unpaid">$9.00</span>'
+        )
+        == 1
     )
-    assert str(kpi("Due", "$9.00", "2 lines", "unpaid")) == (
-        '<div class="kpi"><span class="kpi-label">Due</span>'
-        '<span class="kpi-value tone-unpaid">$9.00</span>'
-        '<span class="kpi-note">2 lines</span></div>'
+    live = card(
+        '{% kpi2 "banknote" "Deductions" "0 lines" "$0.00" value_class="js-total-out" '
+        'value_attrs=\'data-total-for="deduction-rows" data-tone-above-zero="tone-unpaid"\' %}'
     )
-    assert str(kpi("x", "1", "", "bogus")) == (
-        '<div class="kpi"><span class="kpi-label">x</span><span class="kpi-value">1</span></div>'
-    )
-    live = kpi(
-        "Deductions",
-        "$0.00",
-        "0 lines",
-        "",
-        value_class="js-total-out",
-        value_attrs='data-total-for="deduction-rows" data-tone-above-zero="tone-unpaid"',
-    )
-    assert str(live) == (
-        '<div class="kpi"><span class="kpi-label">Deductions</span>'
-        '<span class="kpi-value js-total-out" data-total-for="deduction-rows" '
-        'data-tone-above-zero="tone-unpaid">$0.00</span><span class="kpi-note">0 lines</span></div>'
-    )
+    assert (
+        '<span class="kpi2-value js-total-out" data-total-for="deduction-rows" '
+        'data-tone-above-zero="tone-unpaid">$0.00</span>'
+    ) in live
+    assert live.replace(
+        ' js-total-out" data-total-for="deduction-rows" data-tone-above-zero="tone-unpaid"', '"'
+    ) == card('{% kpi2 "banknote" "Deductions" "0 lines" "$0.00" %}')
 
 
 @pytest.mark.parametrize(
@@ -579,7 +578,8 @@ def test_c7_the_kpi_component_is_byte_identical_without_the_new_keywords() -> No
 def test_c7_the_kpi_component_refuses_anything_but_classes_and_plain_data_attributes(
     value_class: str, value_attrs: str
 ) -> None:
-    from finance.templatetags.components import kpi
+    # Re-pinned (Opus, PLAN-015 Batch 5): kpi2 holds the hooks now and refuses the same.
+    from finance.templatetags.components import kpi2
 
     with pytest.raises(ValueError):
-        kpi("x", "1", value_class=value_class, value_attrs=value_attrs)
+        kpi2("banknote", "x", value="1", value_class=value_class, value_attrs=value_attrs)

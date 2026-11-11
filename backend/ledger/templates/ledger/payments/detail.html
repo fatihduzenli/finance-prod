@@ -8,12 +8,12 @@
   <div class="detail-grid">
   <div class="detail-main">
   <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
-    <div id="tile-amount">{% kpi "Amount" payment.amount|money %}</div>
+    <div id="tile-amount">{% kpi2 "banknote" "Amount" "" payment.amount|money value_id="tile-amount-value" %}</div>
     {% if applied_tile %}
-    <div id="tile-applied">{% kpi "Applied to" applied_tile.amount|money applied_tile.label %}</div>
+    <div id="tile-applied">{% if applied_tile.amount > 0 %}{% kpi2 "check" "Applied to" applied_tile.label applied_tile.amount|money value_tone="paid" value_id="tile-applied-value" %}{% else %}{% kpi2 "check" "Applied to" applied_tile.label applied_tile.amount|money value_tone="muted" value_id="tile-applied-value" %}{% endif %}</div>
     {% elif not payment.is_refund %}
-    <div id="tile-refunded">{% kpi "Refunded" facts.refunded|money "pending and settled refunds" %}</div>
-    <div id="tile-remaining">{% if payment.status == "voided" %}{% kpi "Remaining" facts.refundable|money "nothing refundable" %}{% else %}{% kpi "Remaining" facts.refundable|money "refundable" %}{% endif %}</div>
+    <div id="tile-refunded">{% if facts.refunded > 0 %}{% kpi2 "alert" "Refunded" "pending and settled refunds" facts.refunded|money value_id="tile-refunded-value" %}{% else %}{% kpi2 "alert" "Refunded" "pending and settled refunds" facts.refunded|money value_tone="muted" value_id="tile-refunded-value" %}{% endif %}</div>
+    <div id="tile-remaining">{% if payment.status == "voided" %}{% kpi2 "banknote" "Remaining" "nothing refundable" facts.refundable|money value_tone="muted" value_id="tile-remaining-value" %}{% elif facts.refundable > 0 %}{% kpi2 "banknote" "Remaining" "refundable" facts.refundable|money value_id="tile-remaining-value" %}{% else %}{% kpi2 "banknote" "Remaining" "refundable" facts.refundable|money value_tone="muted" value_id="tile-remaining-value" %}{% endif %}</div>
     {% endif %}
   </section>
   {% if applied_tile %}<p class="muted" id="paid-outside">Paid outside {{ company.provider_name }}: void it to undo, it cannot be refunded here.</p>{% endif %}

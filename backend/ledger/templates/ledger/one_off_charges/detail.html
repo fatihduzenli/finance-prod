@@ -44,9 +44,9 @@
   <div class="detail-grid">
   <div class="detail-main">
   <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
-    <div id="tile-amount">{% kpi "Amount" charge.price|money %}</div>
-    <div id="tile-paid">{% kpi "Paid" charge.amount_paid|money %}</div>
-    <div id="tile-balance">{% if balance_open %}{% kpi "Balance" charge.balance|money "" "unpaid" %}{% else %}{% kpi "Balance" charge.balance|money %}{% endif %}</div>
+    <div id="tile-amount">{% kpi2 "banknote" "Amount" "" charge.price|money value_id="tile-amount-value" %}</div>
+    <div id="tile-paid">{% if charge.amount_paid > 0 %}{% kpi2 "check" "Paid" "" charge.amount_paid|money value_tone="paid" value_id="tile-paid-value" %}{% else %}{% kpi2 "check" "Paid" "" charge.amount_paid|money value_tone="muted" value_id="tile-paid-value" %}{% endif %}</div>
+    <div id="tile-balance">{% if balance_open %}{% kpi2 "alert" "Balance" "" charge.balance|money value_tone="unpaid" value_id="tile-balance-value" %}{% elif charge.balance > 0 %}{% kpi2 "alert" "Balance" "" charge.balance|money value_id="tile-balance-value" %}{% else %}{% kpi2 "alert" "Balance" "" charge.balance|money value_tone="muted" value_id="tile-balance-value" %}{% endif %}</div>
   </section>
 
   {% if installment_plan %}

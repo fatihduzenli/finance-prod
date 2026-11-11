@@ -304,9 +304,10 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .table-total { font-weight: 600; text-align: right; margin: var(--space-2) 0 var(--space-4); }
 
 /* --- KPI card ----------------------------------------------------------------------------
-   .kpi ({% kpi label value note tone %}): a card with its label (.kpi-label, 12 px muted),
-   its value (.kpi-value, 28/700; .tone-unpaid red) and a third line (.kpi-note, 12 px
-   muted). .kpi-row: the cards in a row; .kpi-link: a card that is a link. */
+   .kpi: a card with its label (.kpi-label, 12 px muted), its value (.kpi-value, 28/700;
+   .tone-unpaid red) and a third line (.kpi-note, 12 px muted); written as markup by Admin ›
+   Daily charges since the {% kpi %} tag left with PLAN-015 Batch 5 (every other figure row is
+   {% kpi2 %}). .kpi-row: the cards in a row; .kpi-link: a card that is a link. */
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-5); }
 .kpi { display: flex; flex-direction: column; gap: var(--space-1); height: 100%; box-sizing: border-box; padding: 18px 20px; border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface); }
 .kpi-label { color: var(--muted); font-size: var(--fs-sm); }
@@ -1027,7 +1028,8 @@ fieldset.card > legend + * { clear: both; }
    step card: the vertical .steps (a done step's circle green with ✓, the paid pair; the current
    one teal with its number, the primary button's pair, and a bold label; a later one outlined
    with a muted label), the divider and .wizard-context, the red text-link cancel (.wizard-cancel) and its note. The statement step:
-   .wizard-tiles (three .kpi on --surface-2), the section labels, the deduction rows (the amount
+   .wizard-tiles (three {% kpi2 %} cards on --surface-2, PLAN-015 Batch 5; on the phone, as the
+   detail tiles, smaller: the 24 px icon, the 16 px figure), the section labels, the deduction rows (the amount
    right-aligned, the trash .deduction-clear, the dashed .add-deduction; a [hidden] row or control
    is not drawn) and the SETTLEMENT box (.settlement-box, its .settle-row lines, the final row
    green .settle-refund or red .settle-owed). On the phone (the phone block's "Wizard frame"
@@ -1059,8 +1061,8 @@ fieldset.card > legend + * { clear: both; }
 .confirm > .wizard-footer { margin: var(--space-5) 0 0; }
 .wizard-footer .btn-danger { background: var(--btn-danger-bg); border-color: var(--btn-danger-bg); color: var(--text-on-accent); }
 .wizard-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin: 0 0 var(--space-5); }
-.wizard-tiles .kpi { gap: 2px; padding: var(--space-3) 14px; background: var(--surface-2); }
-.wizard-tiles .kpi-value { font-size: 20px; }
+.wizard-tiles .kpi2 { gap: var(--space-2); padding: var(--space-3) 14px; background: var(--surface-2); }
+.wizard-tiles .kpi2-value { font-size: 20px; }
 .wizard-card h2.section-label, .wizard-card #statement-figures h2 { margin: var(--space-5) 0 var(--space-2); color: var(--muted); font-size: var(--fs-base); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 #deduction-rows td { vertical-align: middle; }
 #deduction-rows td.line-number { width: 1%; color: var(--muted); }
@@ -1307,8 +1309,11 @@ fieldset.card > legend + * { clear: both; }
   .wizard-steps-card { margin: var(--space-4) 0 0; }
   .wizard-context { margin: 0; padding: 0; border-top: 0; }
   .wizard-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
-  .wizard-tiles .kpi { padding: 10px; }
-  .wizard-tiles .kpi-value { font-size: var(--fs-lg); }
+  .wizard-tiles .kpi2, .detail-tiles .kpi2 { gap: var(--space-2); padding: 10px; }
+  .wizard-tiles .kpi2-head, .detail-tiles .kpi2-head { gap: 6px; }
+  .wizard-tiles .kpi2-icon, .detail-tiles .kpi2-icon { flex-basis: 24px; width: 24px; height: 24px; }
+  .wizard-tiles .kpi2-title, .detail-tiles .kpi2-title { font-size: var(--fs-base); }
+  .wizard-tiles .kpi2-value, .detail-tiles .kpi2-value { font-size: var(--fs-lg); white-space: normal; overflow-wrap: anywhere; }
   .wizard-card .form-actions { position: static; margin: var(--space-4) 0 0; padding: 0; border-top: 0; }
   .wizard-footer { position: sticky; bottom: calc(90px + env(safe-area-inset-bottom)); z-index: 5; margin: 0 calc(-1 * var(--space-4)); padding: var(--space-3) var(--space-4); background: var(--surface); border-top: 1px solid var(--border-soft); }
   .confirm > .wizard-footer { margin: var(--space-4) calc(-1 * var(--space-4)) 0; }
@@ -1537,7 +1542,8 @@ td.row-open a { text-decoration: none; }
    lease and calendar entry pages follow. The header (.detail-head) holds the breadcrumb, the
    title with its badges (.kind-badge: the record's kind, a plain neutral .badge), the muted line
    (.store-line) and the actions. The body, .detail-grid: the two-thirds .detail-main (the
-   .detail-tiles, then one card per relation and the Activity card) beside the one-third
+   .detail-tiles of {% kpi2 %} cards since PLAN-015 Batch 5, then one card per relation and the
+   Activity card, each opening with its head row) beside the one-third
    .detail-side (DETAILS as a .side-list, the open promise, MORE). .provider-pill: the provider's
    status as copied, a teal pill with its "view" link. .detail-empty: an empty card's round
    icon, sentence and next step. .activity-list: time, the bold action, by whom and the quoted
@@ -1579,8 +1585,6 @@ p.detail-more-notes { padding-left: 0; }
 @media (max-width: 768px) {
   .detail-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   .detail-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
-  .detail-tiles .kpi { padding: 12px; }
-  .detail-tiles .kpi-value { font-size: var(--fs-lg); }
   .activity-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .detail-head .page-actions { flex: 1 0 100%; }
   .detail-head .page-actions > .btn-primary { flex: 1 0 100%; justify-content: center; }

@@ -16,9 +16,9 @@
     <div class="detail-grid">
     <div class="detail-main">
     <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
-      <div id="tile-total">{% kpi "Total" preview.total|money %}</div>
-      <div id="tile-paid">{% kpi "Paid" sent_paid|money %}</div>
-      <div id="tile-balance">{% if sent_balance > 0 %}{% kpi "Balance" sent_balance|money "" "unpaid" %}{% else %}{% kpi "Balance" sent_balance|money %}{% endif %}</div>
+      <div id="tile-total">{% kpi2 "banknote" "Total" "" preview.total|money value_id="tile-total-value" %}</div>
+      <div id="tile-paid">{% if sent_paid > 0 %}{% kpi2 "check" "Paid" "" sent_paid|money value_tone="paid" value_id="tile-paid-value" %}{% else %}{% kpi2 "check" "Paid" "" sent_paid|money value_tone="muted" value_id="tile-paid-value" %}{% endif %}</div>
+      <div id="tile-balance">{% if sent_balance > 0 %}{% kpi2 "alert" "Balance" "" sent_balance|money value_tone="unpaid" value_id="tile-balance-value" %}{% elif sent_balance > 0 %}{% kpi2 "alert" "Balance" "" sent_balance|money value_id="tile-balance-value" %}{% else %}{% kpi2 "alert" "Balance" "" sent_balance|money value_tone="muted" value_id="tile-balance-value" %}{% endif %}</div>
     </section>
 
     {% if preview.lines %}

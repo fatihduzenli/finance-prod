@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -12,17 +13,36 @@ from django.test import Client
 from django.urls import reverse
 
 from accounts.roles import Role
+from ledger.models import (
+    OneOffCharge,
+    Payment,
+    PaymentChannel,
+    PaymentKind,
+    PaymentMethod,
+    PaymentStatus,
+)
 from payments.fake import FakeProvider
-from tests.receivables_helpers import a_lease, a_rent_charge, a_store
+from tests import test_plan012fa_b_detail as detail
+from tests.receivables_helpers import (
+    a_lease,
+    a_one_off_charge,
+    a_payment,
+    a_rent_charge,
+    a_store,
+    an_operator,
+)
 from tests.test_add_payment_page import a_plain_operator, invoiced, page_of
 from tests.test_operator_views import client_for
+from tests.test_plan012f_d_pages import APP_CSS
 from tests.test_plan012fa_c_builder import a_draft, a_world, element, new_store_path, text
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
-from tests.test_split_page import a_one_off, an_operator, billing, fake, fixed_now  # noqa: F401
+from tests.test_split_page import a_one_off, billing, fake, fixed_now  # noqa: F401
+from tests.test_split_page import an_operator as a_banked_operator
 from tests.test_split_page import page as split_page
 
 pytestmark = pytest.mark.django_db
 
+MARKUP = '<script>alert("x")</script>'
 TEMPLATES = Path(__file__).resolve().parents[1] / "ledger" / "templates" / "ledger"
 HOW_CARD = '<fieldset class="card form-card collect-card how-card step-card"'
 
@@ -211,7 +231,7 @@ def test_the_split_page_numbers_plan_and_installments_and_has_the_summary_shape(
     fake: FakeProvider,  # noqa: F811
     billing: Client,  # noqa: F811
 ) -> None:
-    parent = a_one_off(an_operator(fake))
+    parent = a_one_off(a_banked_operator(fake))
     body = split_page(billing, parent, count="3", first_due="2026-11-20", cadence="monthly")
     assert [(number, tag, title) for number, tag, title, _ in steps(body)] == [
         ("1", "h2", "Plan"),
@@ -232,3 +252,114 @@ def test_no_kpi_tag_and_no_summary_tiles_remain_on_the_form_pages() -> None:
     ):
         source = (TEMPLATES / name).read_text(encoding="utf-8")
         assert "{% kpi " not in source and "summary-tiles" not in source, name
+
+
+# --- §3.2: KPI cards v2 on the detail pages and the wizard -----------------------------------
+
+
+def detail_cards(html: str) -> list[tuple[str, str, str, str]]:
+    """(icon, title, the figure's classes, the figure) of each card of #detail-tiles."""
+    tiles = detail.between(html, 'id="detail-tiles"', "</section>")
+    return re.findall(
+        r'<span class="kpi2-icon" aria-hidden="true"><svg class="icon icon-([a-z-]+)".*?'
+        r'<p class="kpi2-title">([^<]*)</p>.*?<span class="(kpi2-value[^"]*)"[^>]*>([^<]*)</span>',
+        tiles,
+        re.S,
+    )
+
+
+def test_the_rent_charge_tiles_take_the_tones_and_name_their_figures() -> None:
+    world = detail.a_world(promise=False)
+    viewer = client_for(Role.VIEWER)[0]
+    html = detail.page(viewer, detail.rent_path(world.rent))
+    assert detail_cards(html) == [
+        ("banknote", "Amount", "kpi2-value", "$2,000.00"),
+        ("check", "Paid", "kpi2-value tone-muted", "$0.00"),
+        ("alert", "Balance", "kpi2-value tone-unpaid", "$2,000.00"),
+    ]
+    for key in ("amount", "paid", "balance"):
+        assert html.count(f'id="tile-{key}-value"') == 1, key
+    # A viewer's tiles carry no action: no link, no button.
+    tiles = detail.between(html, 'id="detail-tiles"', "</section>")
+    assert "<a " not in tiles and "<button" not in tiles and "kpi2-link" not in tiles
+    assert "{% kpi" not in html and 'class="kpi"' not in html
+
+
+def test_a_paid_charge_shows_paid_in_green_and_a_muted_zero_balance() -> None:
+    world = detail.a_world(promise=False)
+    OneOffCharge.objects.filter(pk=world.deposit.pk).update(
+        amount_paid=Decimal("3000.00"), status="paid"
+    )
+    html = detail.page(client_for(Role.VIEWER)[0], detail.one_off_path(world.deposit))
+    assert detail_cards(html) == [
+        ("banknote", "Amount", "kpi2-value", "$3,000.00"),
+        ("check", "Paid", "kpi2-value tone-paid", "$3,000.00"),
+        ("alert", "Balance", "kpi2-value tone-muted", "$0.00"),
+    ]
+
+
+def test_the_sent_invoice_payment_and_lease_tiles() -> None:
+    world = detail.a_world(promise=False)
+    admin = client_for(Role.ADMIN)[0]
+    invoice = detail.page(admin, reverse("ledger:invoices:draft", kwargs={"pk": world.draft.pk}))
+    assert [card[:2] for card in detail_cards(invoice)] == [
+        ("banknote", "Total"),
+        ("check", "Paid"),
+        ("alert", "Balance"),
+    ]
+    payment = a_payment(world.rent, "500.00", date(2026, 10, 2))
+    paid = detail.page(admin, reverse("ledger:payments:detail", kwargs={"pk": payment.pk}))
+    assert detail_cards(paid) == [
+        ("banknote", "Amount", "kpi2-value", "$500.00"),
+        ("alert", "Refunded", "kpi2-value tone-muted", "$0.00"),
+        ("banknote", "Remaining", "kpi2-value", "$500.00"),
+    ]
+    assert '<p class="kpi2-sub">pending and settled refunds</p>' in paid
+    lease = detail.page(admin, reverse("ledger:leases:detail", kwargs={"pk": world.lease.pk}))
+    cards = detail_cards(lease)
+    assert [card[:2] for card in cards] == [
+        ("banknote", "Rent"),
+        ("alert", "Open balance"),
+        ("lock", "Deposit"),
+    ]
+    assert cards[1][2:] == ("kpi2-value tone-unpaid", "$2,000.00")
+
+
+def test_a_lease_without_rent_or_deposit_shows_muted_dashes_and_none() -> None:
+    lease = a_lease(a_store("Bare", 1992), an_operator("bare"), channel=PaymentChannel.WIRE)
+    html = detail.page(
+        client_for(Role.VIEWER)[0], reverse("ledger:leases:detail", kwargs={"pk": lease.pk})
+    )
+    cards = detail_cards(html)
+    assert cards[2] == ("lock", "Deposit", "kpi2-value tone-muted", "None")
+
+
+def test_a_hostile_charge_label_in_a_tile_sub_line_is_escaped() -> None:
+    world = detail.a_world(promise=False)
+    charge = a_one_off_charge(
+        world.operator, "40.00", date(2026, 11, 1), lease=world.lease, description=MARKUP
+    )
+    payment = Payment.objects.create(
+        one_off_charge=charge,
+        kind=PaymentKind.ONE_OFF,
+        method=PaymentMethod.CHECK,
+        note="Check",
+        amount=Decimal("40.00"),
+        status=PaymentStatus.SETTLED,
+        initiated_on=date(2026, 10, 2),
+        settled_on=date(2026, 10, 2),
+    )
+    html = detail.page(
+        client_for(Role.ADMIN)[0], reverse("ledger:payments:detail", kwargs={"pk": payment.pk})
+    )
+    tiles = detail.between(html, 'id="detail-tiles"', "</section>")
+    assert MARKUP not in html and "<script>alert" not in tiles
+
+
+def test_the_wizard_tiles_are_kpi2_cards_with_the_live_deductions_hooks() -> None:
+    source = (TEMPLATES / "lease_ends" / "_tiles.html").read_text(encoding="utf-8")
+    assert "{% kpi " not in source and source.count('{% kpi2 "') == 4
+    assert 'value_class="js-total-out"' in source
+    css = APP_CSS.read_text(encoding="utf-8")
+    assert ".wizard-tiles .kpi2 {" in css and ".wizard-tiles .kpi {" not in css
+    assert ".detail-tiles .kpi {" not in css and ".detail-tiles .kpi-value" not in css

@@ -19,7 +19,8 @@ from tests.receivables_helpers import a_lease, a_store, an_operator
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
 
-TILE = "#statement-tiles .kpi-value.js-total-out"
+# Re-pinned (Opus, PLAN-015 Batch 5): the statement tiles are kpi2 cards.
+TILE = "#statement-tiles .kpi2-value.js-total-out"
 TYPED = "#deductions-typed-total .js-total-out"
 
 

@@ -647,7 +647,7 @@ def test_the_run_and_charge_pages_show_the_carried_balance(billing: Client) -> N
     detail = billing.get(f"/charges/{charge_of(row).pk}/").content.decode()
     assert '<dd id="carried-balance">$500.00' in detail
     # PLAN-012f-a D4: the amount due is the Amount tile.
-    assert (
-        '<div id="tile-amount"><div class="kpi"><span class="kpi-label">Amount</span>'
-        '<span class="kpi-value">$1,500.00</span>'
-    ) in detail
+    # Re-pinned (Opus, PLAN-015 Batch 5): the Amount tile is a kpi2 card.
+    amount = detail[detail.index('<div id="tile-amount">') :]
+    assert '<p class="kpi2-title">Amount</p>' in amount[: amount.index("</div></div>")]
+    assert '<span class="kpi2-value" id="tile-amount-value">$1,500.00</span>' in amount

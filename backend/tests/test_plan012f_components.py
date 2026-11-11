@@ -26,7 +26,6 @@ from finance.templatetags.components import (
     GLYPHS,
     avatar,
     date_chip,
-    kpi,
     progress,
     progress_widths,
     status_badge,
@@ -211,17 +210,26 @@ def test_a_wide_table_sits_in_the_scroll_region() -> None:
 # --- The KPI card ---------------------------------------------------------------------------
 
 
-def test_the_kpi_tag_renders_its_three_lines_and_escapes_them() -> None:
-    assert kpi("Unpaid balances", "$18,420.00", "11 stores · 3 overdue", "unpaid") == (
-        '<div class="kpi"><span class="kpi-label">Unpaid balances</span>'
-        '<span class="kpi-value tone-unpaid">$18,420.00</span>'
-        '<span class="kpi-note">11 stores · 3 overdue</span></div>'
-    )
-    plain = kpi(MARKUP, "37")
-    assert MARKUP not in plain and '<span class="kpi-value">37</span>' in plain
-    assert "kpi-note" not in plain
-    # Only the unpaid tone is red; another word is ignored, never put in the class.
-    assert '<span class="kpi-value">1</span>' in kpi("x", "1", "", f'paid" onclick="{MARKUP}')
+def test_the_old_kpi_tag_is_gone_and_its_rules_stay_for_the_daily_charges_cards() -> None:
+    # Re-pinned (Opus, PLAN-015 Batch 5): the last {% kpi %} users became {% kpi2 %} cards, so
+    # the tag left the library (its escaping and its tone rule are kpi2's, tested in
+    # test_design_components.py); the .kpi rules stay for Admin › Daily charges, whose cards
+    # are written as markup (ledger/run/today.html).
+    from django.template import TemplateSyntaxError
+
+    from finance.templatetags import components
+
+    assert not hasattr(components, "kpi")
+    with pytest.raises(TemplateSyntaxError):
+        Template('{% load components %}{% kpi "x" "1" %}')
+    assert 'class="kpi"' in (
+        Path(__file__).resolve().parents[1]
+        / "ledger"
+        / "templates"
+        / "ledger"
+        / "run"
+        / "today.html"
+    ).read_text(encoding="utf-8")
     assert "font-size: var(--fs-kpi);" in rule(".kpi-value")
     assert "font-weight: 700;" in rule(".kpi-value")
     assert rule(".kpi-value.tone-unpaid").strip() == "color: var(--unpaid-text);"

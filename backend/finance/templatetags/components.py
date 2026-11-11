@@ -13,8 +13,7 @@ that needs review, a missing premium) is *unpaid*. The icon is in the markup, so
 and reads without the style sheet, hidden from screen readers (the label is the text): colour
 is never the only signal. A status this module does not know renders as a plain ``.badge``.
 
-``{% kpi label value note tone %}``: a KPI card (label, value, third line); ``tone="unpaid"``
-sets the value in the unpaid red. ``{% progress segments %}``: a stacked bar of
+``{% progress segments %}``: a stacked bar of
 ``(family, amount)`` segments with its legend; the widths are rounded down to a tenth of a per
 cent, so they sum to at most 100 %, and a zero total draws nothing. ``{% date_chip day %}``:
 the month over the day. ``{% avatar letter family %}``: the Notes & follow-ups' round letter,
@@ -139,8 +138,6 @@ _FAMILY_OF: dict[str, str] = {
     "neutral": NEUTRAL,
 }
 
-#: The families the KPI value may take (DESIGN-SPEC §3: red for unpaid balances).
-KPI_TONES: tuple[str, ...] = (UNPAID,)
 #: The families of the Notes & follow-ups' avatar (DESIGN-SPEC §3: P pending, C neutral).
 AVATAR_FAMILIES: tuple[str, ...] = (PENDING, NEUTRAL)
 #: A tenth of a per cent: the progress bar's widths are rounded down to it.
@@ -173,49 +170,12 @@ def status_badge(label: object, value: object = None) -> SafeString:
     )
 
 
-#: What ``kpi``'s ``value_attrs`` may hold: ``data-*`` attributes with plain values only.
+#: What ``kpi2``'s ``value_attrs`` may hold: ``data-*`` attributes with plain values only.
 _VALUE_ATTRS_RE = re.compile(r'(?: data-[a-z][a-z-]*="[A-Za-z0-9_-]*")*')
 #: What ``kpi2``'s ``link_id`` may hold: one id of lower-case letters, digits and hyphens.
 _ID_RE = re.compile(r"[a-z][a-z0-9-]*")
-#: What ``kpi``'s ``value_class`` may hold: class names separated by spaces.
+#: What ``kpi2``'s ``value_class`` may hold: class names separated by spaces.
 _VALUE_CLASS_RE = re.compile(r"(?:[A-Za-z][A-Za-z0-9_-]*(?: [A-Za-z][A-Za-z0-9_-]*)*)?")
-
-
-@register.simple_tag
-def kpi(
-    label: object,
-    value: object,
-    note: object = "",
-    tone: str = "",
-    *,
-    value_class: str = "",
-    value_attrs: str = "",
-) -> SafeString:
-    """A KPI card: the label, the value (red for ``tone="unpaid"``), the third line.
-
-    ``value_class`` adds class names to the value and ``value_attrs`` gives it ``data-*``
-    attributes (a script's hooks, as the statement step's live Deductions tile, PLAN-013a
-    C7); both are template literals, and anything else is a template mistake
-    (``ValueError``). Without them the output is unchanged."""
-    if not _VALUE_CLASS_RE.fullmatch(value_class):
-        raise ValueError(f"kpi value_class {value_class!r} is not class names")
-    attrs = f" {value_attrs.strip()}" if value_attrs.strip() else ""
-    if not _VALUE_ATTRS_RE.fullmatch(attrs):
-        raise ValueError(f"kpi value_attrs {value_attrs!r} are not plain data- attributes")
-    value_class = " ".join(
-        part
-        for part in ("kpi-value", f"tone-{tone}" if tone in KPI_TONES else "", value_class)
-        if part
-    )
-    third = format_html('<span class="kpi-note">{}</span>', note) if note not in ("", None) else ""
-    return format_html(
-        '<div class="kpi"><span class="kpi-label">{}</span><span class="{}"{}>{}</span>{}</div>',
-        label,
-        value_class,
-        mark_safe(attrs),  # noqa: S308 (checked above: data- attributes with plain values)
-        value,
-        third,
-    )
 
 
 def _positive(value: object) -> Decimal:
@@ -365,13 +325,20 @@ def kpi2(
     value_tone: str = "",
     value_id: str = "",
     link_id: str = "",
+    *,
+    value_class: str = "",
+    value_attrs: str = "",
 ) -> dict[str, Any]:
     """Design v2's KPI card: the icon in a tinted square, the title and its sub-line, the
     figure (``value_tone``: ``unpaid`` red, ``paid`` green, ``muted`` for a zero; ``value_id``
     the figure's id, for a page that names it), an optional pill badge after it (paid, unpaid,
     pending or neutral) and a footer link with an arrow (a path of this site only; anything
     else draws no link; ``link_id`` its id, PLAN-015 Batch 4: the P&L's "Why" keeps
-    ``kpi-unknown``). An unknown tone, or a ``link_id`` that is not an id, is a template
+    ``kpi-unknown``). ``value_class`` adds class names to the figure and ``value_attrs`` gives
+    it ``data-*`` attributes (a script's hooks, as the statement step's live Deductions card,
+    PLAN-013a C7; moved here from the old ``kpi`` tag, PLAN-015 Batch 5); both are template
+    literals. An unknown tone, a ``link_id`` that is not an id, a ``value_class`` that is not
+    class names or ``value_attrs`` that are not plain ``data-`` attributes is a template
     mistake (``ValueError``)."""
     if value_tone and value_tone not in KPI2_VALUE_TONES:
         raise ValueError(f"unknown kpi2 value tone {value_tone!r}")
@@ -379,6 +346,11 @@ def kpi2(
         raise ValueError(f"unknown kpi2 badge tone {badge_tone!r}")
     if link_id and not _ID_RE.fullmatch(link_id):
         raise ValueError(f"kpi2 link_id {link_id!r} is not an id")
+    if not _VALUE_CLASS_RE.fullmatch(value_class):
+        raise ValueError(f"kpi2 value_class {value_class!r} is not class names")
+    attrs = f" {value_attrs.strip()}" if value_attrs.strip() else ""
+    if not _VALUE_ATTRS_RE.fullmatch(attrs):
+        raise ValueError(f"kpi2 value_attrs {value_attrs!r} are not plain data- attributes")
     return {
         "icon": icon,
         "title": title,
@@ -386,6 +358,8 @@ def kpi2(
         "value": value,
         "value_tone": value_tone,
         "value_id": value_id,
+        "value_class": value_class,
+        "value_attrs": mark_safe(attrs),  # noqa: S308 (checked above: data- attributes with plain values)
         "badge": badge,
         "badge_tone": badge_tone,
         "link": _local_path(link),

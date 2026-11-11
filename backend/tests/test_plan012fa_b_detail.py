@@ -255,18 +255,24 @@ def test_the_tiles_show_amount_paid_and_an_open_balance_in_red() -> None:
     world = a_world()
     html = page(client_for(Role.VIEWER)[0], one_off_path(world.deposit))
     tiles = between(html, 'id="detail-tiles"', "</section>")
-    assert '<span class="kpi-label">Amount</span><span class="kpi-value">$3,000.00</span>' in tiles
-    assert '<span class="kpi-label">Paid</span><span class="kpi-value">$0.00</span>' in tiles
-    assert (
-        '<span class="kpi-label">Balance</span><span class="kpi-value tone-unpaid">$3,000.00</span>'
-    ) in tiles
+    # Re-pinned (Opus, PLAN-015 Batch 5): kpi2 cards; Paid muted at zero, Balance red above it.
+    assert titles_and_values(tiles) == [
+        ("Amount", "kpi2-value", "$3,000.00"),
+        ("Paid", "kpi2-value tone-muted", "$0.00"),
+        ("Balance", "kpi2-value tone-unpaid", "$3,000.00"),
+    ]
     OneOffCharge.objects.filter(pk=world.deposit.pk).update(amount_paid=D("3000.00"), status="paid")
     tiles = between(
         page(client_for(Role.VIEWER)[0], one_off_path(world.deposit)),
         'id="detail-tiles"',
         "</section>",
     )
-    assert '<span class="kpi-value">$0.00</span>' in tiles and "tone-unpaid" not in tiles
+    assert titles_and_values(tiles) == [
+        ("Amount", "kpi2-value", "$3,000.00"),
+        ("Paid", "kpi2-value tone-paid", "$3,000.00"),
+        ("Balance", "kpi2-value tone-muted", "$0.00"),
+    ]
+    assert "tone-unpaid" not in tiles
 
 
 def test_the_invoices_card_names_the_memo_lines_and_the_provider_status_as_a_pill() -> None:
@@ -515,7 +521,17 @@ def frame(html: str) -> tuple[str, str]:
 
 def tile_labels(html: str) -> list[str]:
     tiles = between(html, 'id="detail-tiles"', "</section>")
-    return re.findall(r'<span class="kpi-label">(.*?)</span>', tiles)
+    # Re-pinned (Opus, PLAN-015 Batch 5): the tiles are kpi2 cards.
+    return re.findall(r'<p class="kpi2-title">(.*?)</p>', tiles)
+
+
+def titles_and_values(tiles: str) -> list[tuple[str, str, str]]:
+    """(title, the figure's classes, the figure) of each kpi2 card in ``tiles``."""
+    return re.findall(
+        r'<p class="kpi2-title">([^<]*)</p>.*?<span class="(kpi2-value[^"]*)"[^>]*>([^<]*)</span>',
+        tiles,
+        re.S,
+    )
 
 
 def test_the_payment_page_has_the_family_frame() -> None:
@@ -561,7 +577,10 @@ def test_the_lease_page_has_the_family_frame() -> None:
     tiles = between(html, 'id="detail-tiles"', "</section>")
     assert "$3,500.00" in tiles  # the rent in effect
     # The open balance as the receivables read it (the store page's figure): the rent charge.
-    assert '<span class="kpi-value tone-unpaid">$2,000.00</span>' in tiles
+    # Re-pinned (Opus, PLAN-015 Batch 5): the kpi2 figure, red above zero.
+    assert (
+        '<span class="kpi2-value tone-unpaid" id="tile-open-balance-value">$2,000.00</span>'
+    ) in tiles
     assert "$3,000.00 · not collected" in tiles
     for card in ('id="rent-history-card"', 'id="autopay-card"', 'id="activity-card"'):
         assert card in main, card
