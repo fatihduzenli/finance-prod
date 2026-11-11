@@ -440,7 +440,6 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .note-item .note-item-more { font-size: var(--fs-sm); }
 .note-item .note-item-meta { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-sm); }
 .note-item-meta .note-pin-glyph { margin-right: var(--space-1); vertical-align: -2px; }
-.note-list-all { margin: var(--space-3) 0 0; font-size: var(--fs-sm); }
 
 /* --- Grid cell block ---------------------------------------------------------------------
    td.cell (ledger.views.dashboard.cell_html): a month of the grid. .cell-block: a rounded
@@ -542,10 +541,12 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
    body (.workspace-grid): the two-thirds .workspace-main (the open tab as a card, the other
    cards under it) and the one-third .workspace-side (the action bar of the operator page's
    store, then #workspace-header: the LEASE, NEXT, STORE COST (with the cost rows' History
-   under it) and DOCUMENTS cards, each a .section-label over a .side-list of label and value,
+   under it) and DOCUMENTS cards, each opening with its .card-head (PLAN-015 Batch 3: the
+   h2.section-label left, the card's link right) over a .side-list of label and value,
    .doc-list for the documents).
-   .summary-strip: the phone's three cells (Open balance, Rent, Autopay), hidden on wider
-   screens. */
+   The figure row (PLAN-015 Batch 3: .kpi-row.kpi2-row#summary-strip, the {% kpi2 %} cards of
+   ledger/stores/_figures.html and ledger/operators/_figures.html) spans the header's width
+   between the action bar and the tabs, at every width. */
 .page-title-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .breadcrumb { color: var(--muted); font-size: var(--fs-sm); }
 .breadcrumb a { color: var(--link); text-decoration: none; }
@@ -559,15 +560,15 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .tab .count-pill { margin-left: 6px; }
 .store-selector { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; }
 .store-selector label { margin: 0; color: var(--muted); font-size: var(--fs-base); font-weight: 500; }
-.summary-strip { display: none; }
+.page-header-inner > .kpi2-row { flex: 1 0 100%; margin: 0; }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 .workspace-main, .workspace-side { min-width: 0; }
 .workspace-side > .action-bar { margin: 0 0 var(--space-4); }
 .workspace-header { display: flex; flex-direction: column; gap: var(--space-4); }
 .workspace-header .card { margin: 0; }
-.workspace-header .card-header { margin-bottom: var(--space-3); }
+.workspace-header .card-head { margin-bottom: var(--space-3); }
 .workspace-header .section-label { margin: 0 0 var(--space-3); font-size: var(--fs-base); }
-.workspace-header .card-header .section-label { margin: 0; }
+.workspace-header .card-head .section-label { margin: 0; }
 #cost-history summary { color: var(--link); font-size: var(--fs-base); cursor: pointer; }
 #cost-history .table-cards { overflow-x: auto; }
 .side-list { display: grid; grid-template-columns: minmax(6rem, 40%) minmax(0, 1fr); gap: 7px var(--space-3); margin: 0; font-size: var(--fs-base); }
@@ -617,7 +618,8 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
    (about three fifths | two fifths, the cards as tall as each other): the Collections card (the
    head with the Monthly · Yearly .segmented links, the 28/700 total, the muted "collected from"
    line, the {% collection_bars %} SVG in .collections-chart with its .chart-tooltip, the legend)
-   beside the Operators card (.operator-tiles: a 2 × 2 grid of .operator-tile links: the avatar
+   beside the Operators card (.operator-tiles: a 2 × 2 grid of .operator-tile links, each a
+   .tile-v2, the tile shared with the operator page's store tiles (PLAN-015 Batch 3): the avatar
    tile and the name with an ellipsis, the balance 20/700 red above zero, the store count, the
    chip). Row 3, .dashboard-row-activity: the Recent activity card (the head with the search and
    the kind select, the table, the list footer) beside the narrower mini calendar column, which
@@ -649,13 +651,13 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
 .collections-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .chart-key { flex: 0 0 auto; }
 .operator-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
-.operator-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; height: 100%; box-sizing: border-box; padding: var(--space-3); border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface-2); color: var(--text); text-decoration: none; }
-.operator-tile:hover { border-color: var(--link); }
+.tile-v2 { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; height: 100%; box-sizing: border-box; padding: var(--space-3); border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface-2); color: var(--text); text-decoration: none; }
+.tile-v2:hover { border-color: var(--link); }
 .operator-tile-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: 0; }
 .operator-tile-name { overflow: hidden; font-size: var(--fs-base); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.operator-tile-balance { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.operator-tile-balance.tone-unpaid { color: var(--unpaid-text); }
-.operator-tile-stores { color: var(--muted); font-size: var(--fs-sm); }
+.operator-tile-balance, .store-tile-balance { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.operator-tile-balance.tone-unpaid, .store-tile-balance.tone-unpaid { color: var(--unpaid-text); }
+.operator-tile-stores, .store-tile-line { color: var(--muted); font-size: var(--fs-sm); }
 .activity-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; }
 .activity-filters input[type=search] { width: 15rem; max-width: 100%; padding: 7px 10px; font-size: var(--fs-base); }
 .activity-filters select { width: auto; padding: 7px 10px; font-size: var(--fs-base); }
@@ -1243,6 +1245,9 @@ fieldset.card > legend + * { clear: both; }
   .more-list .more-user .user-role { color: var(--muted); }
   /* The dashboard (DESIGN-SPEC §6): KPI cards two per row, the rest stacked. */
   .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+  /* The workspaces' figure row (PLAN-015 Batch 3): a lone last card (the store page's third)
+     spans the row rather than sitting at half width; an even row (the operator's four) is as is. */
+  .page-header-inner > .kpi2-row > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .kpi { padding: var(--space-3) 14px; }
   .kpi-value { font-size: 20px; }
   .dashboard-row-v2, .dashboard-row-activity, .workspace-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
@@ -1253,7 +1258,7 @@ fieldset.card > legend + * { clear: both; }
   html:not(.js) .mini-days-list { display: block; }
   .page-header .page-actions .nav-search { display: none; }
   /* The store page (DESIGN-SPEC §6): the operator and the city in place of the address, the
-     summary strip, a full-width primary action over two half-width secondaries, the tabs
+     figure row two cards a row, a full-width primary action over two half-width secondaries, the tabs
      scrolling sideways under them. */
   .store-line { display: none; }
   .store-line-phone { display: block; }
@@ -1261,11 +1266,6 @@ fieldset.card > legend + * { clear: both; }
   .workspace-head .action-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: var(--space-2) 0 0; }
   .workspace-head .action-bar > .btn-primary { grid-column: 1 / -1; }
   .workspace-head .action-bar > .btn, .workspace-head .action-bar > .menu > .btn { width: 100%; }
-  .summary-strip { display: grid; flex: 1 0 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin: 0; }
-  .summary-cell { padding: var(--space-2) 10px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
-  .summary-cell dt { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
-  .summary-cell dd { margin: 0; color: var(--text); font-size: var(--fs-md); font-weight: 700; overflow-wrap: anywhere; }
-  .summary-cell dd.tone-unpaid { color: var(--unpaid-text); }
   /* Forms (DESIGN-SPEC §6): one field per row, the primary button kept in view at the bottom,
      above the tab bar. */
   .form-card input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .form-card select, .form-card textarea { width: 100%; }
@@ -1323,7 +1323,7 @@ fieldset.card > legend + * { clear: both; }
   #deduction-rows .deduction-amount, #deduction-rows .deduction-clear-cell { width: auto; }
   /* Operator workspace (PLAN-012f-a D7): the avatar beside the name, the muted line shown (the
      store page's address line is the one hidden), the actions on a row of their own, the tab
-     row and the Store select stacked, the store cards one a row (selectors one step more
+     row and the Store select stacked, the store tiles one a row (selectors one step more
      specific than the block's own rules, which come later in the sheet). */
   .operator-head .operator-line { display: block; }
   .operator-head .operator-avatar { width: 44px; height: 44px; font-size: var(--fs-lg); }
@@ -1332,7 +1332,7 @@ fieldset.card > legend + * { clear: both; }
   .page-header-inner > .operator-tabs-row > .tabs { min-width: 0; max-width: 100%; overflow-x: auto; }
   .page-header-inner > .operator-tabs-row > .store-selector { flex-wrap: nowrap; }
   .page-header-inner > .operator-tabs-row > .store-selector select { flex: 1 1 auto; min-width: 0; }
-  .workspace-main > .store-strip { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .workspace-main > .store-tiles { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
 }
 
 /* --- List family (PLAN-012f-a D3) ------------------------------------------------------------
@@ -1598,9 +1598,10 @@ p.detail-more-notes { padding-left: 0; }
    drawing's light teal) at the left of the name with its badges and the muted .operator-line
    (the avatar follows the title in the markup, so the page header's h1 stays the block's first
    heading); .operator-tabs-row puts the
-   tabs and the Store select on one row, the select at the right. .store-strip: the store cards
-   above the open tab (the bold title link, the muted rent and collection line, the open balance
-   in red or green); the selected store's card has a teal border. In the side column, the
+   tabs and the Store select on one row, the select at the right. .store-tiles (PLAN-015 Batch 3
+   §3.4): the store tiles above the open tab, each li's link a .tile-v2 as the dashboard's
+   operator tiles (the bold title and the brand pill, the muted rent and collection line, the
+   balance 20/700 red above zero, the chip); the selected store's tile has a teal border. In the side column, the
    .recent-contacts list (the avatar letter, the bold kind as a link, the muted date and store)
    and .side-store-label, the selected store's name over its bar and cards. */
 .operator-head > .page-title-block { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-4); row-gap: 2px; align-items: center; }
@@ -1613,19 +1614,15 @@ p.detail-more-notes { padding-left: 0; }
 .operator-tabs-row { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-2) var(--space-4); margin: 0 0 calc(-1 * var(--space-3)); }
 .operator-tabs-row > .tabs { flex: 1 1 auto; margin: 0; border-bottom: 0; }
 .operator-tabs-row > .store-selector { flex: 0 0 auto; padding-bottom: var(--space-2); }
-.store-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-4); padding: 0; list-style: none; }
-.store-card { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 14px var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
-.store-card[aria-current="true"] { border-color: var(--teal); }
-.store-card-title { color: var(--text); font-size: var(--fs-md); font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
-.store-card-title:hover { color: var(--link); }
-.store-card-line { color: var(--muted); font-size: var(--fs-sm); }
-.store-card-balance { margin-top: var(--space-1); font-size: var(--fs-md); font-weight: 700; }
-.store-card-balance.tone-unpaid { color: var(--unpaid-text); }
-.store-card-balance.tone-paid { color: var(--paid-text); }
+.store-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-4); padding: 0; list-style: none; }
+.store-tiles > li { min-width: 0; }
+.store-tiles > li[aria-current="true"] > .tile-v2 { border-color: var(--teal); }
+.store-tile-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; }
+.store-tile-title { font-size: var(--fs-md); font-weight: 700; overflow-wrap: anywhere; }
 .operator-side > .card { margin: 0 0 var(--space-4); }
 .operator-side .section-label { margin: 0 0 var(--space-3); font-size: var(--fs-base); }
-.operator-side .card-header { margin-bottom: var(--space-3); }
-.operator-side .card-header .section-label { margin: 0; }
+.operator-side .card-head { margin-bottom: var(--space-3); }
+.operator-side .card-head .section-label { margin: 0; }
 .operator-side .side-strong.tone-unpaid { color: var(--unpaid-text); }
 .operator-side .card-note { margin: var(--space-3) 0 0; }
 #portal-card #statement-links { margin: 0 0 var(--space-3); font-size: var(--fs-base); }
@@ -1796,6 +1793,9 @@ p.detail-more-notes { padding-left: 0; }
   .kpi-row.kpi2-row { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
   .kpi2-row > div { min-width: 0; }
   .kpi2-value { font-size: 22px; white-space: nowrap; overflow-wrap: normal; }
+  /* The workspaces' figure row (PLAN-015 Batch 3): a figure is an amount or a state; a state of
+     several words ("Not set up") may wrap between them, an amount never inside itself. */
+  .page-header-inner > .kpi2-row .kpi2-value { white-space: normal; }
   main, main.wide { margin: 0; padding: var(--space-4); border: 0; border-radius: 0; max-width: none; }
   dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 10px; }
   /* A 16 px field keeps a phone from zooming in on focus. */

@@ -4,9 +4,9 @@ the store and operator workspaces and the monthly rent overview on the approved 
 The dashboard's header (PLAN-015 Batch 1 removed the KPI, Needs attention, collection and
 Recent payments cards these tests pinned; tests/test_dashboard_v2.py covers the new page) and
 the Needs attention rows' store titles; the store page's header line, Charges card and totals
-row, the four side cards and the phone summary strip; the operator page's store selector and
-the same cards; the grid's header, filter card, legend, cell blocks, tinted month and totals
-counts.
+row, the four side cards and the figure row (PLAN-015 Batch 3); the operator page's store
+selector and the same cards; the grid's header, filter card, legend, cell blocks, tinted month
+and totals counts.
 """
 
 from __future__ import annotations
@@ -159,10 +159,24 @@ def test_the_store_header_has_the_crumb_title_line_tabs_and_strip() -> None:
         header,
     )
     assert 'id="tab-link-history"' in header and ">Activity</a>" in header
-    strip = section(header, 'id="summary-strip"', "</dl>")
-    assert re.findall(r"<dt>([^<]+)</dt>", strip) == ["Open balance", "Rent", "Autopay"]
-    assert 'class="summary-value tone-unpaid">$2,000.00</dd>' in strip
-    assert '<dd class="summary-value">$2,000.00</dd>' in strip and ">Not set up</dd>" in strip
+    # PLAN-015 Batch 3 (re-pinned): the phone's strip is the figure row of KPI cards v2, at
+    # every width, between the action bar and the tabs.
+    strip = section(header, 'id="summary-strip"', "</section>")
+    assert header.index('id="action-bar"') < header.index('id="summary-strip"')
+    assert header.index('id="summary-strip"') < header.index('id="store-tabs"')
+    assert re.findall(r'<p class="kpi2-title">([^<]+)</p>', strip) == [
+        "Open balance",
+        "Rent",
+        "Autopay",
+    ]
+    assert (
+        '<span class="kpi2-value tone-unpaid" id="figure-open-balance-value">$2,000.00</span>'
+        in strip
+    )
+    # Re-pinned (Batch 3 findings): the figure is the amount; "per month" is the sub-line.
+    assert '<span class="kpi2-value" id="figure-rent-value">$2,000.00</span>' in strip
+    assert '<p class="kpi2-sub">per month · debit day 1st</p>' in strip
+    assert '<span class="kpi2-value" id="figure-autopay-value">Not set up</span>' in strip
 
 
 def test_the_charges_card_has_its_columns_and_the_open_balance_row() -> None:
@@ -236,15 +250,26 @@ def test_a_closed_store_has_no_insurance_renewal() -> None:
 
 
 def test_the_operator_page_has_its_selector_in_the_header_and_the_same_cards() -> None:
-    # PLAN-012f-a D7: All stores by default; a selected store brings its phone strip and its
-    # side cards, after the operator's own (CONTACT, PAYMENT, RECENT CONTACT, PORTAL).
+    # PLAN-012f-a D7: All stores by default; a selected store brings its side cards (its phone
+    # strip went with PLAN-015 Batch 3), after the operator's own (CONTACT, PAYMENT, RECENT
+    # CONTACT, PORTAL).
     lease = a_store_world()
     html = page(
         client_for(Role.BILLING)[0], f"/operators/{lease.operator_id}/?store={lease.store_id}"
     )
     header = section(html, 'id="page-header"', "</header>")
     assert 'id="store-selector"' in header and 'id="operator-actions"' in header
-    assert 'id="summary-strip"' in header
+    # PLAN-015 Batch 3 (re-pinned): the header's one figure row is the operator's (§3.2), with
+    # a store selected as without; the selected store's figures are in its LEASE card.
+    assert header.count('id="summary-strip"') == 1
+    strip = section(header, 'id="summary-strip"', "</section>")
+    assert re.findall(r'<p class="kpi2-title">([^<]+)</p>', strip) == [
+        "Open balance",
+        "Stores",
+        "Returns this year",
+        "Promise",
+    ]
+    assert 'id="figure-rent"' not in header and 'id="figure-autopay"' not in header
     side = html[html.index('<aside class="workspace-side') :]
     side = side[side.index('id="selected-store-label"') :]
     labels = re.findall(r'<h2 class="section-label"[^>]*>([^<]+)</h2>', side)

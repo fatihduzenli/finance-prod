@@ -327,7 +327,12 @@ def a_store_with_lease(open_date: date = date(2025, 7, 1)) -> tuple[Store, Any, 
 
 def lease_card(store: Store) -> str:
     html = page(client_for(Role.BILLING)[0], f"/stores/{store.pk}/")
-    return section(html, "lease-card", "</div>\n")
+    # PLAN-015 Batch 3 (re-pinned): the card opens with its head (div.card-head), so the cut is
+    # the LEASE card's own closing line, before the NOTES card.
+    card = section(html, "lease-card", "\n  </div>\n")
+    assert card.startswith('id="lease-card">\n    <div class="card-head">')
+    assert html.index(card) + len(card) < html.index('id="notes-card"')
+    return card
 
 
 def sign_fee_type() -> FeeType:

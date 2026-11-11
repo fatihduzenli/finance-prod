@@ -275,12 +275,14 @@ def test_an_operator_without_a_store_has_no_select_and_no_strip() -> None:
     html = page(client_for(Role.VIEWER)[0], operator_page(operator))
     assert 'id="store-selector"' not in html and 'id="store-strip"' not in html
     assert 'id="no-stores"' in html
+    # PLAN-015 Batch 3 (re-pinned): the figure row is there all the same, Stores at 0.
+    assert '<span class="kpi2-value" id="figure-stores-value">0</span>' in header(html)
 
 
-# --- The strip of store cards ------------------------------------------------------------------
+# --- The store tiles (re-pinned for PLAN-015 Batch 3 §3.4; the strip of store cards before) ------
 
 
-def test_the_strip_has_one_card_per_store_with_rent_collection_and_balance() -> None:
+def test_the_strip_has_one_tile_per_store_with_rent_collection_balance_and_chip() -> None:
     operator, (first, second, third) = three_stores()
     for lease in (second, third):
         CollectionSchedule.objects.create(
@@ -298,17 +300,26 @@ def test_the_strip_has_one_card_per_store_with_rent_collection_and_balance() -> 
     a_rent_charge(other, OCTOBER, due="4321.00")
     html = page(client_for(Role.VIEWER)[0], operator_page(operator))
     strip = by_id(html, "store-strip", "ul")
-    assert strip.count('class="store-card"') == 3
-    assert strip.index(">1991</a>") < strip.index(">1999</a>") < strip.index(">2475</a>")
+    assert strip.count('<a class="store-tile tile-v2"') == 3
+    title = '<span class="store-tile-title">{}</span>'
+    assert (
+        strip.index(title.format("1991"))
+        < strip.index(title.format("1999"))
+        < strip.index(title.format("2475"))
+    )
     assert_absent(strip, "9009")
     assert "4,321.00" not in strip
-    one, two, three = re.findall(r'<li class="store-card".*?</li>', strip, re.S)
-    assert reverse("ledger:stores:detail", kwargs={"pk": first.store_id}) in one
-    assert "$2,000.00 / month · autopay not set up" in one
-    assert '<span class="store-card-balance tone-unpaid">$3,000.00 open</span>' in one
-    assert "$1,500.00 / month · bank debit on the 1st" in two
-    assert '<span class="store-card-balance tone-paid">$0.00 open</span>' in two
-    assert '<span class="store-card-balance tone-unpaid">$2,100.00 open · overdue</span>' in three
+    one, two, three = re.findall(r'<li id="store-card-.*?</li>', strip, re.S)
+    url = reverse("ledger:stores:detail", kwargs={"pk": first.store_id})
+    assert f'<a class="store-tile tile-v2" href="{url}">' in one  # the whole tile is the link
+    assert '<span class="store-tile-line">$2,000.00 / month · autopay not set up</span>' in one
+    assert '<span class="store-tile-balance tone-unpaid">$3,000.00</span>' in one
+    assert "<span>Open balance</span>" in one and "status-chip-pending" in one
+    assert '<span class="store-tile-line">$1,500.00 / month · bank debit on the 1st</span>' in two
+    assert '<span class="store-tile-balance">$0.00</span>' in two
+    assert "<span>Paid up</span>" in two and "status-chip-paid" in two
+    assert '<span class="store-tile-balance tone-unpaid">$2,100.00</span>' in three
+    assert "<span>Overdue</span>" in three and "status-chip-unpaid" in three
 
 
 def test_a_paused_or_failed_autopay_and_a_store_leased_to_another_say_so() -> None:
@@ -339,7 +350,7 @@ def test_a_paused_or_failed_autopay_and_a_store_leased_to_another_say_so() -> No
     assert "9,999.00" not in html
 
 
-def test_the_selected_stores_card_is_marked() -> None:
+def test_the_selected_stores_tile_is_marked() -> None:
     operator, leases = three_stores()
     html = page(client_for(Role.VIEWER)[0], operator_page(operator, store=str(leases[2].store_id)))
     strip = by_id(html, "store-strip", "ul")

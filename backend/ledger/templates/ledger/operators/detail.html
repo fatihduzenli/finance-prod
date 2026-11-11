@@ -3,7 +3,7 @@
 {% load static %}
 {% load tz %}
 {% block title %}{{ operator.display_name }}{% endblock %}
-{% comment %}PLAN-012f-a D7 (DESIGN-SPEC §4 "Operator workspace", operator-workspace-laptop.png): the 56 px avatar with the display name's initials, the name with the Active (or Archived) badge and "Connected to <provider>" while a provider customer is linked, one muted line (phone · e-mail · SMS consent · stores); the actions Statement, Edit and More (Connect to <provider>, Archive): the invoice and payment actions live on the store page. The tab row has the Store select at its right: All stores (the default) or one of the operator's stores; it submits on change, its Show button the no-script way.{% endcomment %}
+{% comment %}PLAN-012f-a D7 (DESIGN-SPEC §4 "Operator workspace", operator-workspace-laptop.png): the 56 px avatar with the display name's initials, the name with the Active (or Archived) badge and "Connected to <provider>" while a provider customer is linked, one muted line (phone · e-mail · SMS consent · stores); the actions Statement, Edit and More (Connect to <provider>, Archive): the invoice and payment actions live on the store page. Under them the figure row (PLAN-015 Batch 3 §3.2, ledger/operators/_figures.html: Open balance, Stores, Returns this year, Promise as KPI cards v2), with All stores and a selected store alike. The tab row has the Store select at its right: All stores (the default) or one of the operator's stores; it submits on change, its Show button the no-script way.{% endcomment %}
 {% block head %}{% if copied_link %}{% comment %}"Copy invite link" answers its POST with this page: the page's relative links (?tab=…) resolve against the operator's own URL.{% endcomment %}<base href="{% url 'ledger:operators:detail' pk=operator.pk %}">{% endif %}{% endblock %}
 {% block header %}<div class="page-header workspace-head operator-head">
   <div class="page-title-block">
@@ -24,7 +24,7 @@
     {% endif %}
   </div>
 </div>
-{% if space %}{% include "ledger/stores/_summary_strip.html" %}{% endif %}
+{% include "ledger/operators/_figures.html" %}
 <div class="operator-tabs-row" id="operator-tabs-row">
 <nav aria-label="Operator tabs" class="tabs store-tabs" id="store-tabs">
   {% for name, label in ows.tabs %}{% if name == "contacts" %}<a class="tab" id="tab-link-contacts" href="#contacts">{{ label }}</a>{% else %}<a class="tab" id="tab-link-{{ name }}" href="?{{ keep_store }}tab={{ name }}#tab-{{ name }}"{% if name == ows.tab %} aria-current="page"{% endif %}>{{ label }}{% if name == "charges" and ows.open_count %} <span class="count-pill" id="open-charges-count">{{ ows.open_count }}</span>{% endif %}</a>{% endif %}{% endfor %}
@@ -42,16 +42,17 @@
 {% block content %}
   {% include "ledger/_attention.html" with banners=True %}
 
-  {% comment %}PLAN-012d D14, the approved design's layout (PLAN-012f D8; PLAN-012f-a D7, operator-workspace-laptop.png): in the two-thirds column, the strip of store cards (each store's title, rent and how it is collected, its open balance in red, or green at $0.00, "· overdue" when a charge is past due), the open tab across the operator's stores (the Charges card the selected store's when one is selected), then the operator-level items as cards; in the one-third column, CONTACT, PAYMENT, RECENT CONTACT and the statement link's card, then the selected store's action bar and side cards (on the operator's lease of it).{% endcomment %}
+  {% comment %}PLAN-012d D14, the approved design's layout (PLAN-012f D8; PLAN-012f-a D7, operator-workspace-laptop.png): in the two-thirds column, the store tiles (PLAN-015 Batch 3 §3.4, the dashboard's operator-tile style, each tile a link to its store page: the bold title and the brand pill, the rent and how it is collected, the open balance 20/700 in red above zero, and a chip: Overdue when a charge is past due, Open balance, or Paid up; the selected store's tile marked), the open tab across the operator's stores (the Charges card the selected store's when one is selected), then the operator-level items as cards; in the one-third column, CONTACT, PAYMENT, RECENT CONTACT and the statement link's card, then the selected store's action bar and side cards (on the operator's lease of it).{% endcomment %}
   <div class="workspace-grid">
   <div class="workspace-main">
   <h2 id="workspace" class="visually-hidden">Stores</h2>
-  {% if store_cards %}<ul class="store-strip" id="store-strip" aria-label="Stores of this operator">
-    {% for card in store_cards %}<li class="store-card" id="store-card-{{ card.store.pk }}"{% if card.store == store %} aria-current="true"{% endif %}>
-      <span><a class="store-card-title" href="{% url 'ledger:stores:detail' pk=card.store.pk %}">{{ card.title }}</a>{% include "ledger/stores/_brand_pill.html" with store=card.store %}</span>
-      <span class="store-card-line">{% if card.rent is not None %}{{ card.rent|money }} / month · {% endif %}{{ card.collect_line }}</span>
-      <span class="store-card-balance {% if card.balance > 0 %}tone-unpaid{% else %}tone-paid{% endif %}">{{ card.balance|money }} open{% if card.overdue %} · overdue{% endif %}</span>
-    </li>{% endfor %}
+  {% if store_cards %}<ul class="store-tiles" id="store-strip" aria-label="Stores of this operator">
+    {% for card in store_cards %}<li id="store-card-{{ card.store.pk }}"{% if card.store == store %} aria-current="true"{% endif %}><a class="store-tile tile-v2" href="{% url 'ledger:stores:detail' pk=card.store.pk %}">
+      <span class="store-tile-head"><span class="store-tile-title">{{ card.title }}</span>{% include "ledger/stores/_brand_pill.html" with store=card.store %}</span>
+      <span class="store-tile-line">{% if card.rent is not None %}{{ card.rent|money }} / month · {% endif %}{{ card.collect_line }}</span>
+      <span class="store-tile-balance{% if card.balance > 0 %} tone-unpaid{% endif %}">{{ card.balance|money }}</span>
+      {% if card.balance > 0 and card.overdue %}{% chip "unpaid" "Overdue" %}{% elif card.balance > 0 %}{% chip "pending" "Open balance" %}{% else %}{% chip "paid" "Paid up" %}{% endif %}
+    </a></li>{% endfor %}
   </ul>{% else %}<p class="muted empty" id="no-stores">No store has a lease of this operator.</p>{% endif %}
   <section id="tab-{{ ows.tab }}" class="store-tab card">
     {% if ows.tab == "charges" %}{% include "ledger/stores/_tab_charges.html" %}
@@ -117,7 +118,7 @@
   </div>
   <aside class="workspace-side operator-side" aria-label="The operator">
     <section class="card" id="contact-card" aria-labelledby="contact-card-heading">
-      <h2 class="section-label" id="contact-card-heading">Contact</h2>
+      <div class="card-head"><h2 class="section-label" id="contact-card-heading">Contact</h2></div>
       <dl class="side-list">
         <dt>Phone</dt><dd id="side-phone">{{ operator.phone|phone|default:"—" }}</dd>
         <dt>E-mail</dt><dd id="side-email">{{ operator.email|default:"—" }}</dd>
@@ -125,7 +126,7 @@
       </dl>
     </section>
     <section class="card" id="payment-card" aria-labelledby="payment-card-heading">
-      <h2 class="section-label" id="payment-card-heading">Payment</h2>
+      <div class="card-head"><h2 class="section-label" id="payment-card-heading">Payment</h2></div>
       <dl class="side-list">
         {% for account in lease_accounts %}<dt>{{ account.lease.store.external_label }}</dt><dd class="side-lease-account" id="side-account-{{ account.lease.pk }}">{% if account.company %}{{ account.company }}<br>{% endif %}{{ account.bank }}{% if account.has_bank and account.shares %} <span class="muted">(the account of {{ account.shares.store.external_label }})</span>{% endif %}</dd>{% empty %}<dt>Billing</dt><dd id="side-no-lease">No current lease</dd>{% endfor %}
         <dt>Returns</dt><dd id="side-returns"{% if returns_this_year %} class="side-strong tone-unpaid"{% endif %}>{{ returns_this_year }} this year</dd>
@@ -133,7 +134,7 @@
       </dl>
     </section>
     <section class="card" id="recent-contact-card" aria-labelledby="recent-contact-heading">
-      <div class="card-header"><h2 class="section-label" id="recent-contact-heading">Recent contact</h2>{% if can_add_contact %}<a class="card-link" id="recent-add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Log contact</a>{% endif %}</div>
+      <div class="card-head"><h2 class="section-label" id="recent-contact-heading">Recent contact</h2>{% if can_add_contact %}<a class="card-link" id="recent-add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Log contact</a>{% endif %}</div>
       <ul class="recent-contacts" id="recent-contacts">
         {% for row in recent_contacts %}{% with entry=row.entry %}<li class="recent-contact">{% if entry.kind == "promise" %}{% avatar "P" "pending" %}{% else %}{% avatar entry.get_kind_display "neutral" %}{% endif %}
           <div class="recent-contact-body"><a class="recent-contact-title" href="#contact-{{ entry.pk }}">{{ entry.get_kind_display }}{% if entry.kind == "promise" %} · {{ entry.promised_amount|money }} by {{ entry.promised_date|day }}{% elif entry.body %} · {{ entry.body|truncatechars:40 }}{% endif %}</a>
@@ -143,7 +144,7 @@
       <p class="card-note"><a id="recent-all-contacts" href="{% url 'ledger:operators:contacts' pk=operator.pk %}">All entries</a></p>
     </section>
     <section class="card" id="portal-card" aria-labelledby="portal-card-heading">
-      <h2 class="section-label" id="portal-card-heading">Portal</h2>
+      <div class="card-head"><h2 class="section-label" id="portal-card-heading">Portal</h2></div>
       <dl class="side-list">
         <dt>Account</dt><dd id="portal-state">{{ portal.state }}{% if portal.user %}<br><span class="muted">{{ portal.user.email }}</span>{% endif %}</dd>
         {% if portal.user and portal.user.invited_at %}<dt>Invited</dt><dd id="portal-invited">{{ portal.user.invited_at|moment }}</dd>{% endif %}

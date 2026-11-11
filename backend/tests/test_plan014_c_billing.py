@@ -442,7 +442,9 @@ def test_a_sharer_sees_whose_account_it_uses_and_has_no_link_form() -> None:
 def _lease_card(client: Client, lease: Lease) -> str:
     html = page(client, f"/stores/{lease.store_id}/")
     start = html.index('id="lease-card"')
-    return html[start : html.index("</div>\n", start)]
+    # PLAN-015 Batch 3: the card opens with a card head (its own closing div), so the cut
+    # ends at the card's closing tag, not the first closing div.
+    return html[start : html.index("\n  </div>\n", start)]
 
 
 def test_the_company_row_shows_the_company_and_the_billing_row_the_email_only() -> None:

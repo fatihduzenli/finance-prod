@@ -339,7 +339,7 @@ def test_send_without_a_store_follows_a_local_next_only(monkeypatch: pytest.Monk
 
 def test_the_operator_level_items_follow_the_open_tab_and_the_old_lists_are_gone() -> None:
     # PLAN-012f D8 (the store page's layout; PLAN-012f-a D7): the header (the actions, the
-    # tabs with the store selector at their right), the strip of store cards and the open tab
+    # figure row, the tabs with the store selector at their right), the store tiles and the open tab
     # in the two-thirds column, then the operator-level items as cards in that column, before
     # the side column (the operator's cards, then the selected store's bar and cards).
     operator, first, _ = two_stores()
@@ -347,7 +347,10 @@ def test_the_operator_level_items_follow_the_open_tab_and_the_old_lists_are_gone
     html = page(client_for(Role.BILLING)[0], operator_page(operator, store=str(first.store_id)))
     workspace_at = html.index('<h2 id="workspace"')
     side_at = html.index('<aside class="workspace-side')
-    assert html.index('id="operator-actions"') < html.index('id="store-tabs"')
+    # PLAN-015 Batch 3: the figure row between the actions and the tabs, with a store
+    # selected as without.
+    assert html.index('id="operator-actions"') < html.index('id="summary-strip"')
+    assert html.index('id="summary-strip"') < html.index('id="store-tabs"')
     assert html.index('id="store-tabs"') < html.index('id="store-selector"') < workspace_at
     assert workspace_at < html.index('id="store-strip"') < html.index('id="tab-charges"')
     assert html.index('id="tab-charges"') < html.index('id="sms-phone"')

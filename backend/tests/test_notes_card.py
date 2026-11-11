@@ -131,6 +131,13 @@ def test_the_card_lists_author_day_pin_and_all_notes_with_the_total() -> None:
     assert html.count('class="note-item"') == 3
     link = section(html, "notes-card-all", "</a>")
     assert "All notes (5) ›" in link
+    # PLAN-015 Batch 3 (re-pinned): "All notes (n) ›" is the card head's link, after the label.
+    tab = workspace.tab_url(store.pk, workspace.TAB_CONTACTS).replace("&", "&amp;")
+    assert (
+        '<div class="card-head"><h2 class="section-label" id="notes-card-heading">Notes</h2>'
+        f'<a class="card-link" href="{tab}" id="notes-card-all">All notes (5) ›</a></div>'
+    ) in html
+    assert 'class="note-list-all"' not in html
     assert workspace.tab_url(store.pk, workspace.TAB_CONTACTS).replace("&", "&amp;") in html
 
 
