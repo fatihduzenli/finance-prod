@@ -13,7 +13,7 @@
   }
   var form = summary.closest("form");
   var balance = cents(summary.getAttribute("data-balance"));
-  var tile = document.querySelector("#tile-this-payment .kpi-value");
+  var tile = document.querySelector("#tile-this-payment dd");
   var after = document.getElementById("after-payment-value");
   function cents(text) {
     var value = Number(String(text || "").trim());

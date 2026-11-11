@@ -481,25 +481,30 @@ def test_the_summary_shows_the_balance_the_share_the_last_date_and_one_primary(
     parent = a_one_off(an_operator(fake))
     body = page(billing, parent, count="3", first_due=FIRST.isoformat(), cadence="monthly")
     aside = section(body, '<aside class="form-summary" aria-label="Summary">', "</aside>")
+    # Re-pinned (Opus, PLAN-015 Batch 5): the New lease summary's rows, Installments the bold
+    # total row; the summary's label and its muted last line.
+    assert '<h2 class="summary-label">Summary</h2>' in aside
+    assert '<div id="split-balance"><dt>Balance to split</dt><dd>$1,000.00</dd></div>' in aside
     assert (
-        '<span class="kpi-label">Balance to split</span><span class="kpi-value">$1,000.00</span>'
-        in aside
-    )
-    assert (
-        '<span class="kpi-label">Installments</span><span class="kpi-value">3 × $333.33</span>'
-        in aside
-    )
+        '<div class="lease-summary-total" id="split-installments"><dt>Installments</dt>'
+        "<dd>3 × $333.33</dd></div>"
+    ) in aside
     assert '<strong id="split-last-value">Dec 20, 2026</strong>' in aside
-    assert f'<p class="help" id="split-nsf">{NSF_LINE.replace(chr(39), "&#x27;")}</p>' in aside
+    nsf = NSF_LINE.replace(chr(39), "&#x27;")
+    assert f'<p class="muted summary-after" id="split-nsf">{nsf}</p>' in aside
     actions = re.findall(r'<div class="form-actions">(.*?)</div>', aside, re.S)
     assert actions == [
         '<button class="btn btn-primary" type="submit" form="confirm-form" id="split-confirm">'
         'Create <span class="split-count">3 </span>installments</button>'
     ]
+    # Re-pinned (Opus, PLAN-015 Batch 5): Cancel in the New lease summary's Cancel row, then
+    # the muted line.
     assert (
-        f'<a class="btn summary-discard" href="{installments.parent_url(parent)}" '
-        'id="split-cancel">Cancel</a>'
+        '<p class="summary-cancel"><a class="btn btn-quiet" '
+        f'href="{installments.parent_url(parent)}" id="split-cancel">Cancel</a></p>'
     ) in aside
+    assert aside.index('id="split-confirm"') < aside.index('id="split-cancel"')
+    assert aside.index('id="split-cancel"') < aside.index('id="split-nsf"')
     assert body.count("btn-primary") == 1
     # The confirm form the primary submits holds the plan's values and the lines.
     form = section(body, 'id="confirm-form"', "</form>")
@@ -513,7 +518,8 @@ def test_without_lines_the_summary_shows_dashes_and_the_primary_is_disabled(
     body = page(billing, parent, count="3", first_due="2026-10-01", cadence="monthly")
     assert installments.FIRST_IN_PAST.replace("'", "&#x27;") in body
     aside = section(body, '<aside class="form-summary"', "</aside>")
-    assert '<span class="kpi-label">Installments</span><span class="kpi-value">—</span>' in aside
+    # Re-pinned (Opus, PLAN-015 Batch 5): the total row's dash.
+    assert "<dt>Installments</dt><dd>—</dd>" in aside
     assert '<strong id="split-last-value">—</strong>' in aside
     assert (
         'id="split-confirm" disabled>Create <span class="split-count"></span>installments' in aside
@@ -554,8 +560,9 @@ def test_the_page_keeps_one_short_line_and_the_help_topic_holds_the_rest(
     parent = a_one_off(an_operator(fake))
     body = page(billing, parent)
     topic = reverse("finance:help_topic", kwargs={"slug": "payments"})
+    # Re-pinned (Opus, PLAN-015 Batch 5): the line is the Plan step head's muted note.
     assert (
-        f'<p class="muted" id="page-help">{SPLIT_LINE} Learn more: '
+        f'<p class="muted step-note" id="page-help">{SPLIT_LINE} Learn more: '
         f'<a href="{topic}#help-payments-installments">Payments</a></p>'
     ) in body
     # The three sentences that were SPLIT_HELP are on the help topic only.

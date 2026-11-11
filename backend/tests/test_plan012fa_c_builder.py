@@ -158,8 +158,17 @@ def test_the_operator_builder_names_the_operator_as_its_context() -> None:
 def test_the_lines_card_has_its_columns_the_rent_selects_and_the_add_line_button() -> None:
     lease = a_world()
     body = get(Role.BILLING, new_store_path(lease))
-    card = element(body, '<section class="card lines-card" id="draft-card">', "section")
-    assert "<h2>Lines</h2>" in card
+    # Re-pinned (Opus, PLAN-015 Batch 5): the card opens with the numbered step head, its help
+    # sentence (#lines-help) the muted note under the title.
+    card = element(
+        body,
+        '<section class="card lines-card step-card" id="draft-card" aria-labelledby="lines-title">',
+        "section",
+    )
+    head_of_card = element(card, '<div class="step-head">', "div")
+    assert '<span class="step-number" aria-hidden="true">1</span>' in head_of_card
+    assert '<h2 id="lines-title">Lines</h2>' in head_of_card
+    assert '<p class="muted step-note" id="lines-help">Item: Rent,' in head_of_card
     head = element(card, "<thead>", "thead")
     assert [text(cell) for cell in re.findall(r"<th[^>]*>(.*?)</th>", head, re.S)] == COLUMNS
     row = element(card, '<tr class="draft-line"', "tr")
@@ -171,7 +180,7 @@ def test_the_lines_card_has_its_columns_the_rent_selects_and_the_add_line_button
     trash = element(row, '<button class="btn line-trash', "button")
     assert 'aria-label="Remove line"' in trash and 'class="icon icon-trash"' in trash
     add = element(card, '<div class="add-line-row">', "div")
-    assert 'id="add-line"' in add and "Add line" in text(add) and 'id="lines-help"' in add
+    assert 'id="add-line"' in add and "Add line" in text(add) and 'id="lines-help"' not in add
     assert 'class="icon icon-plus"' in add
     # The memo and the due date left the Lines card for the SUMMARY card.
     assert 'name="memo"' not in card and 'name="due_date"' not in card
@@ -221,20 +230,24 @@ def test_the_summary_holds_one_button_per_choice_and_discard() -> None:
         assert 'class="btn btn-primary"' in attributes
         assert f'name="submit_collect" value="{value}"' in attributes
         assert f'data-shown-when="collect-{value}"' in attributes
-    discard = element(summary, '<a class="btn summary-discard"', "a")
+    # Re-pinned (Opus, PLAN-015 Batch 5): the New lease summary's Cancel row holds Discard and
+    # the help card's sentence is the summary's muted last line; the help card is gone.
+    cancel_row = element(summary, '<p class="summary-cancel">', "p")
+    discard = element(cancel_row, '<a class="btn btn-quiet"', "a")
     back = f"/stores/{lease.store_id}/"
-    assert discard.startswith(f'<a class="btn summary-discard" href="{back}')
+    assert discard.startswith(f'<a class="btn btn-quiet" href="{back}')
     assert text(discard) == "Discard"
-    help_card = element(summary, '<section class="card builder-help"', "section")
-    assert "The primary button changes with the choice" in help_card
+    after = element(summary, '<p class="muted summary-after" id="builder-help">', "p")
+    assert "The primary button changes with the choice" in after
+    assert "builder-help" not in summary.replace('id="builder-help"', "")
+    assert summary.index('id="collect-actions"') < summary.index('<p class="summary-cancel">')
+    assert summary.index('<p class="summary-cancel">') < summary.index('id="builder-help"')
     # A draft's Discard opens its delete page (a confirmation; the delete itself is a POST).
     draft = a_draft(lease)
     body = get(Role.BILLING, reverse("ledger:invoices:draft", kwargs={"pk": draft.pk}))
     cancel = reverse("ledger:invoices:cancel", kwargs={"pk": draft.pk})
     summary = element(body, '<aside class="form-summary builder-side"', "aside")
-    assert f'<a class="btn summary-discard" href="{cancel}" id="draft-cancel">Discard</a>' in (
-        summary
-    )
+    assert f'<a class="btn btn-quiet" href="{cancel}" id="draft-cancel">Discard</a>' in summary
     assert body.count('id="draft-cancel"') == 1
 
 
@@ -245,7 +258,7 @@ TILE = r'<div class="collect-tile(?: is-chosen)?(?: is-unavailable)?" id="tile-[
 
 
 def tiles(body: str) -> list[str]:
-    card = element(body, '<section class="card collect-card"', "section")
+    card = element(body, '<section class="card collect-card step-card"', "section")
     return [element(card, opening, "div") for opening in re.findall(TILE, card)]
 
 
@@ -278,7 +291,8 @@ def test_one_tile_per_choice_each_with_its_radio_name_and_sentence() -> None:
             else:
                 assert len(notes) == 1, (role, tile[:60])
                 assert "reason-more" not in tile
-    assert "<legend>How to collect</legend>" in body
+    # Re-pinned (Opus, PLAN-015 Batch 5): the legend is the numbered step head's title.
+    assert '<legend id="collect-title">How to collect</legend>' in body
     assert body.count('id="collect-help"') == 1
 
 
@@ -401,16 +415,16 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
             ["Payment", "Allocation"],
             "save-payment",
         ),
-        # PLAN-012f-b C-2: Add payment's "How is this being paid?" card (the Note card has
-        # its field's label, no heading).
+        # PLAN-012f-b C-2: Add payment's "How is this being paid?" card. Re-pinned (Opus,
+        # PLAN-015 Batch 5): the Note card opens with its own numbered step head, "Note".
         (
             reverse("ledger:charges:record_payment", kwargs={"pk": charge.pk}),
-            ["How is this being paid?"],
+            ["How is this being paid?", "Note"],
             "save-payment",
         ),
         (
             reverse("ledger:one_off_charges:payment", kwargs={"pk": one_off.pk}),
-            ["How is this being paid?"],
+            ["How is this being paid?", "Note"],
             "save-payment",
         ),
     ]
@@ -477,8 +491,12 @@ def test_the_payment_form_has_the_allocation_in_lines_style_and_the_unallocated_
     lease = a_world()
     a_rent_charge(lease, date(2026, 10, 1), due="2000.00")
     body = get(Role.BILLING, reverse("ledger:stores:record_payment", kwargs={"pk": lease.store_id}))
+    # Re-pinned (Opus, PLAN-015 Batch 5): the step card's class and its heading's name.
     allocation = element(
-        body, '<section class="card form-card lines-card" id="allocation-card">', "section"
+        body,
+        '<section class="card form-card lines-card step-card" id="allocation-card"'
+        ' aria-labelledby="allocation-title">',
+        "section",
     )
     assert 'id="allocation-lines"' in allocation and 'id="keep-credit-field"' in allocation
     summary = summary_of(body)

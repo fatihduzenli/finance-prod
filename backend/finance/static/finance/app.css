@@ -915,7 +915,8 @@ body.auth > #sandbox-banner { grid-column: 2; grid-row: 1; justify-self: end; al
    .save-item, the line's .line-total, .add-line (dashed); How to collect's .collect-tiles two a
    row, each .collect-tile a radio with its .collect-name and .collect-note and its choice's
    .collect-fields, the chosen one on --surface-2 with a teal border; the SUMMARY card's
-   .summary-lines, .summary-total and Discard; the help card. On the phone (the phone block's
+   .summary-lines and .summary-total, then (PLAN-015 Batch 5) the New lease summary's Cancel row
+   (.summary-cancel: Discard) and its muted .summary-after line. On the phone (the phone block's
    "Form and builder family" sub-section) one column in markup order and the primary fixed above
    the tab bar. */
 .builder-head { align-items: flex-end; }
@@ -960,8 +961,6 @@ fieldset.card > legend + * { clear: both; }
 .add-line { border-style: dashed; color: var(--link); font-weight: 500; }
 /* How to collect. */
 .collect-card .collect-choices { display: block; min-width: 0; margin: 0; padding: 0; border: 0; }
-.collect-card .collect-choices legend { margin: 0 0 2px; padding: 0; font-size: var(--fs-lg); font-weight: 600; }
-.collect-card #collect-help { margin: 0 0 var(--space-3); }
 .collect-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
 .collect-tile { box-sizing: border-box; min-width: 0; padding: var(--space-3) 14px; border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); }
 .collect-tile:has(input[type=radio]:checked) { background: var(--surface-2); border-color: var(--teal); }
@@ -989,13 +988,11 @@ fieldset.card > legend + * { clear: both; }
 .summary-amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .summary-total { display: flex; justify-content: space-between; gap: var(--space-3); margin: var(--space-3) 0 0; padding: var(--space-3) 0 0; border-top: 1px solid var(--border-soft); font-size: var(--fs-lg); font-weight: 700; font-variant-numeric: tabular-nums; }
 .summary-card .field > label { margin-top: var(--space-3); }
-.summary-discard { width: 100%; margin: var(--space-2) 0 0; color: var(--text-2); font-weight: 500; }
-.builder-help { background: transparent; }
-.builder-help p.help { margin: 0; }
 /* Add payment (PLAN-012f-b D14; DESIGN-SPEC §4 Add payment): the builder's tiles one a row with
    their fields beside each other; a greyed card (.is-unavailable: its radio disabled) in muted
-   text with its reason; the bank method on file as a read-only line; the SUMMARY's four tiles
-   two a row (This payment in teal), the "After this payment" line; the OPERATOR card's lines. */
+   text with its reason; the bank method on file as a read-only line; the SUMMARY in the New lease
+   summary's shape (PLAN-015 Batch 5: rows, Balance due red above zero, the total row This payment
+   in teal), the muted "After this payment" line; the OPERATOR card's lines. */
 .how-tiles { grid-template-columns: minmax(0, 1fr); }
 .collect-tile.is-unavailable { background: var(--surface-2); border-style: dashed; }
 .collect-tile.is-unavailable .collect-option { cursor: not-allowed; }
@@ -1005,11 +1002,9 @@ fieldset.card > legend + * { clear: both; }
 .collect-link { align-self: flex-start; font-size: var(--fs-sm); }
 .bank-field .bank-select { pointer-events: none; background: var(--surface-2); color: var(--text); }
 .note-card textarea { width: 100%; }
-.summary-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin: 0 0 var(--space-3); }
-.summary-tiles .kpi { gap: 2px; padding: 10px var(--space-3); border: 0; background: var(--surface-2); }
-.summary-tiles .kpi-value { font-size: 20px; }
-#tile-this-payment .kpi-value { color: var(--link); }
-.after-payment { display: flex; justify-content: space-between; gap: var(--space-3); margin: 0; padding: var(--space-3) 0 0; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: var(--fs-base); }
+.lease-summary-rows dd.tone-unpaid { color: var(--unpaid-text); }
+#tile-this-payment dd { color: var(--link); }
+.after-payment { display: flex; justify-content: space-between; gap: var(--space-3); margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-base); }
 .after-payment strong { color: var(--text); }
 .operator-summary-line { margin: 0 0 2px; font-size: var(--fs-base); }
 /* Split into installments (PLAN-012f-c D13): Number of installments as a − / + stepper, the
@@ -1302,7 +1297,6 @@ fieldset.card > legend + * { clear: both; }
   .collect-tiles { grid-template-columns: minmax(0, 1fr); }
   .collect-fields { margin-left: 0; }
   .how-card .collect-fields .field { flex-basis: 100%; }
-  .summary-tiles .kpi-value { font-size: var(--fs-lg); }
   /* Wizard frame (PLAN-012f-a D8; DESIGN-SPEC §6): one column in markup order (the step line and
      its bar, the card, the footer, then the step card with the context and the cancel, its list
      hidden by the .steps rule above); the footer kept in view above the tab bar. */
@@ -1942,10 +1936,10 @@ p.detail-more-notes { padding-left: 0; }
 .step-link { display: inline-flex; align-items: center; min-height: 0; margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: var(--fs-base); font-weight: 500; text-decoration: none; cursor: pointer; }
 .step-link:hover { text-decoration: underline; }
 .step-link[hidden] { display: none; }
-.new-lease-step .step-head, .edit-lease-card .step-head { display: flex; align-items: flex-start; gap: var(--space-3); margin: 0 0 var(--space-4); }
+.step-card .step-head, .new-lease-step .step-head, .edit-lease-card .step-head { display: flex; align-items: flex-start; gap: var(--space-3); margin: 0 0 var(--space-4); }
 .step-number { display: inline-flex; flex: 0 0 22px; align-items: center; justify-content: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: var(--month-current); color: var(--link); font-size: var(--fs-sm); font-weight: 700; }
 .step-title { flex: 1 1 auto; min-width: 0; }
-.step-title h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+.step-title h2, .step-title legend { margin: 0; padding: 0; font-size: var(--fs-lg); font-weight: 600; }
 .step-note { margin: 2px 0 0; font-size: var(--fs-base); }
 .step-action { flex: 0 0 auto; margin-left: auto; }
 .operator-pick { display: flex; align-items: center; gap: var(--space-3); }
@@ -2007,7 +2001,7 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
 .movein-more-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 var(--space-3); }
 .movein-more-fields input { width: 100%; }
 .add-item { margin: var(--space-3) 0 0; }
-.lease-summary-card .summary-label { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.summary-card .summary-label { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 .lease-summary-rows { display: block; margin: 0; font-size: var(--fs-base); }
 .lease-summary-rows > div { display: flex; justify-content: space-between; gap: var(--space-3); padding: 4px 0; }
 .lease-summary-rows dt { color: var(--muted); font-weight: 400; }
@@ -2015,8 +2009,8 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
 .lease-summary-money { margin: var(--space-3) 0 0; padding: var(--space-3) 0 0; border-top: 1px solid var(--border-soft); }
 .lease-summary-total { margin: var(--space-2) 0 0; font-size: var(--fs-lg); font-weight: 700; }
 .lease-summary-total dt, .lease-summary-total dd { color: var(--text); font-weight: 700; }
-.lease-summary-card .summary-cancel { display: flex; justify-content: center; margin: var(--space-2) 0 0; }
-.lease-summary-card .summary-cancel .btn-quiet { width: 100%; border-color: transparent; background: none; color: var(--text-2); font-weight: 500; }
+.summary-card .summary-cancel { display: flex; justify-content: center; margin: var(--space-2) 0 0; }
+.summary-card .summary-cancel .btn-quiet { width: 100%; border-color: transparent; background: none; color: var(--text-2); font-weight: 500; }
 .account-detail { flex-basis: 100%; margin: 0; }
 .account-detail[hidden] { display: none; }
 .summary-after { margin: var(--space-3) 0 0; font-size: var(--fs-sm); text-align: center; }

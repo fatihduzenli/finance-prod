@@ -893,6 +893,10 @@ def test_every_form_card_ends_in_one_primary_button(world: World) -> None:
         body = client.get(path_of(world, name)).content.decode()
         # PLAN-012f-a D5: the form family's primary is in the summary card beside the cards.
         blocks = re.findall(r'<section class="card form-card">(.*?)</section>', body, re.S)
+        # Extended (Opus, PLAN-015 Batch 5): the numbered step cards (.step-card) are read too.
+        blocks += re.findall(
+            r'<section class="card form-card[a-z -]* step-card"[^>]*>(.*?)</section>', body, re.S
+        )
         blocks += re.findall(r'<aside class="form-summary"[^>]*>(.*?)</aside>', body, re.S)
         for card in blocks:
             actions = re.findall(r'<div class="form-actions">(.*?)</div>', card, re.S)

@@ -1,17 +1,19 @@
-{% comment %}Add payment's right column (PLAN-012f-b D14, add-payment-laptop.png): the SUMMARY card (the tiles Charge, Paid, Balance due in red, This payment in teal; the "After this payment" line; the one primary, its words following the card chosen: both texts are in the button, the other card's hidden, and ledger/add_payment.js keeps the amount and the line with what is typed; while no amount is typed, or what is typed is not one, the button reads "Record as paid" / "Charge by ACH" with no figure, its amount hidden, and This payment shows "—" (Fable's C2-4); Cancel), then the OPERATOR card (name · the billing phone of the lease that bills the charge, PLAN-014 C5; connected or not; the bank ···· last four; the returns this year). Context: chosen, how_debit, how_record, amount, paid, balance, this_payment, paid_in_full, still_owed, operator, billing_phone, connected, bank, returns_this_year, cancel_url, company.{% endcomment %}
-{% load money components phones %}
+{% comment %}Add payment's right column (PLAN-012f-b D14, add-payment-laptop.png): the SUMMARY card in the New lease summary's shape (PLAN-015 Batch 5: the label, the rows Charge, Paid, Balance due in red, a rule and the bold total row This payment in teal; the "After this payment" line; the one primary, its words following the card chosen: both texts are in the button, the other card's hidden, and ledger/add_payment.js keeps the amount and the line with what is typed; while no amount is typed, or what is typed is not one, the button reads "Record as paid" / "Charge by ACH" with no figure, its amount hidden, and This payment shows "—" (Fable's C2-4); Cancel), then the OPERATOR card (name · the billing phone of the lease that bills the charge, PLAN-014 C5; connected or not; the bank ···· last four; the returns this year). Context: chosen, how_debit, how_record, amount, paid, balance, this_payment, paid_in_full, still_owed, operator, billing_phone, connected, bank, returns_this_year, cancel_url, company.{% endcomment %}
+{% load money phones %}
 <aside class="form-summary" aria-label="Summary">
 <section class="card summary-card" id="payment-summary" data-balance="{{ balance }}">
-  <h2 class="section-label">Summary</h2>
-  <div class="summary-tiles" id="summary-tiles">
-    <div id="tile-charge">{% kpi "Charge" amount|money %}</div>
-    <div id="tile-paid">{% kpi "Paid" paid|money %}</div>
-    <div id="tile-balance">{% if balance > 0 %}{% kpi "Balance due" balance|money "" "unpaid" %}{% else %}{% kpi "Balance due" balance|money %}{% endif %}</div>
-    <div id="tile-this-payment">{% if this_payment > 0 %}{% kpi "This payment" this_payment|money %}{% else %}{% kpi "This payment" "—" %}{% endif %}</div>
-  </div>
+  <h2 class="summary-label">Summary</h2>
+  <dl class="lease-summary-rows" id="summary-rows">
+    <div id="tile-charge"><dt>Charge</dt><dd>{{ amount|money }}</dd></div>
+    <div id="tile-paid"><dt>Paid</dt><dd>{{ paid|money }}</dd></div>
+    <div id="tile-balance"><dt>Balance due</dt><dd{% if balance > 0 %} class="tone-unpaid"{% endif %}>{{ balance|money }}</dd></div>
+  </dl>
+  <dl class="lease-summary-rows lease-summary-money">
+    <div class="lease-summary-total" id="tile-this-payment"><dt>This payment</dt><dd>{% if this_payment > 0 %}{{ this_payment|money }}{% else %}—{% endif %}</dd></div>
+  </dl>
   <p class="after-payment" id="after-payment"><span>After this payment</span> <strong id="after-payment-value" data-paid="Paid in full" data-owed=" still owed">{% if paid_in_full %}Paid in full{% else %}{{ still_owed|money }} still owed{% endif %}</strong></p>
   <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-payment"><span class="how-words" data-shown-when="how-debit"{% if chosen != how_debit %} hidden{% endif %}>Charge <span class="payment-amount"{% if not this_payment > 0 %} hidden{% endif %}>{% if this_payment > 0 %}{{ this_payment|money }}{% endif %}</span> by ACH</span><span class="how-words" data-shown-when="how-record"{% if chosen != how_record %} hidden{% endif %}>Record <span class="payment-amount"{% if not this_payment > 0 %} hidden{% endif %}>{% if this_payment > 0 %}{{ this_payment|money }}{% endif %}</span> as paid</span></button></div>
-  <a class="btn summary-discard" href="{{ cancel_url }}" id="cancel-payment">Cancel</a>
+  <p class="summary-cancel"><a class="btn btn-quiet" href="{{ cancel_url }}" id="cancel-payment">Cancel</a></p>
 </section>
 {% if operator %}<section class="card operator-summary" id="operator-card" aria-labelledby="operator-card-heading">
   <h2 class="section-label" id="operator-card-heading">Operator</h2>
