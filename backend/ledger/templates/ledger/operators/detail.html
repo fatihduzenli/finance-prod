@@ -3,7 +3,7 @@
 {% load static %}
 {% load tz %}
 {% block title %}{{ operator.display_name }}{% endblock %}
-{% comment %}PLAN-012f-a D7 (DESIGN-SPEC §4 "Operator workspace", operator-workspace-laptop.png): the 56 px avatar with the display name's initials, the name with the Active (or Archived) badge and "Connected to <provider>" while a provider customer is linked, one muted line (phone · e-mail · SMS consent · stores); the actions Statement, Edit and More (Connect to <provider>, Archive): the invoice and payment actions live on the store page. The tab row has the Store select at its right: All stores (the default) or one of the operator's stores; it submits on change, its Show button the no-script way.{% endcomment %}
+{% comment %}PLAN-012f-a D7 (DESIGN-SPEC §4 "Operator workspace", operator-workspace-laptop.png): the 56 px avatar with the display name's initials, the name with the Active (or Archived) badge and "Connected to <provider>" while a provider customer is linked, one muted line (phone · e-mail · SMS consent · stores); the actions Statement, Edit and More (Connect to <provider>, Archive): the invoice and payment actions live on the store page. Under them the figure row (PLAN-015 Batch 3 §3.2, ledger/operators/_figures.html: Open balance, Stores, Returns this year, Promise as KPI cards v2), with All stores and a selected store alike. The tab row has the Store select at its right: All stores (the default) or one of the operator's stores; it submits on change, its Show button the no-script way.{% endcomment %}
 {% block head %}{% if copied_link %}{% comment %}"Copy invite link" answers its POST with this page: the page's relative links (?tab=…) resolve against the operator's own URL.{% endcomment %}<base href="{% url 'ledger:operators:detail' pk=operator.pk %}">{% endif %}{% endblock %}
 {% block header %}<div class="page-header workspace-head operator-head">
   <div class="page-title-block">
@@ -24,7 +24,7 @@
     {% endif %}
   </div>
 </div>
-{% if space %}{% include "ledger/stores/_summary_strip.html" %}{% endif %}
+{% include "ledger/operators/_figures.html" %}
 <div class="operator-tabs-row" id="operator-tabs-row">
 <nav aria-label="Operator tabs" class="tabs store-tabs" id="store-tabs">
   {% for name, label in ows.tabs %}{% if name == "contacts" %}<a class="tab" id="tab-link-contacts" href="#contacts">{{ label }}</a>{% else %}<a class="tab" id="tab-link-{{ name }}" href="?{{ keep_store }}tab={{ name }}#tab-{{ name }}"{% if name == ows.tab %} aria-current="page"{% endif %}>{{ label }}{% if name == "charges" and ows.open_count %} <span class="count-pill" id="open-charges-count">{{ ows.open_count }}</span>{% endif %}</a>{% endif %}{% endfor %}

@@ -544,8 +544,9 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
    store, then #workspace-header: the LEASE, NEXT, STORE COST (with the cost rows' History
    under it) and DOCUMENTS cards, each a .section-label over a .side-list of label and value,
    .doc-list for the documents).
-   .summary-strip: the phone's three cells (Open balance, Rent, Autopay), hidden on wider
-   screens. */
+   The figure row (PLAN-015 Batch 3: .kpi-row.kpi2-row#summary-strip, the {% kpi2 %} cards of
+   ledger/stores/_figures.html and ledger/operators/_figures.html) spans the header's width
+   between the action bar and the tabs, at every width. */
 .page-title-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .breadcrumb { color: var(--muted); font-size: var(--fs-sm); }
 .breadcrumb a { color: var(--link); text-decoration: none; }
@@ -559,7 +560,7 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .tab .count-pill { margin-left: 6px; }
 .store-selector { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; }
 .store-selector label { margin: 0; color: var(--muted); font-size: var(--fs-base); font-weight: 500; }
-.summary-strip { display: none; }
+.page-header-inner > .kpi2-row { flex: 1 0 100%; margin: 0; }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 .workspace-main, .workspace-side { min-width: 0; }
 .workspace-side > .action-bar { margin: 0 0 var(--space-4); }
@@ -1253,7 +1254,7 @@ fieldset.card > legend + * { clear: both; }
   html:not(.js) .mini-days-list { display: block; }
   .page-header .page-actions .nav-search { display: none; }
   /* The store page (DESIGN-SPEC §6): the operator and the city in place of the address, the
-     summary strip, a full-width primary action over two half-width secondaries, the tabs
+     figure row two cards a row, a full-width primary action over two half-width secondaries, the tabs
      scrolling sideways under them. */
   .store-line { display: none; }
   .store-line-phone { display: block; }
@@ -1261,11 +1262,6 @@ fieldset.card > legend + * { clear: both; }
   .workspace-head .action-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: var(--space-2) 0 0; }
   .workspace-head .action-bar > .btn-primary { grid-column: 1 / -1; }
   .workspace-head .action-bar > .btn, .workspace-head .action-bar > .menu > .btn { width: 100%; }
-  .summary-strip { display: grid; flex: 1 0 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin: 0; }
-  .summary-cell { padding: var(--space-2) 10px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
-  .summary-cell dt { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
-  .summary-cell dd { margin: 0; color: var(--text); font-size: var(--fs-md); font-weight: 700; overflow-wrap: anywhere; }
-  .summary-cell dd.tone-unpaid { color: var(--unpaid-text); }
   /* Forms (DESIGN-SPEC §6): one field per row, the primary button kept in view at the bottom,
      above the tab bar. */
   .form-card input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .form-card select, .form-card textarea { width: 100%; }

@@ -3,7 +3,7 @@
 {% load responsive %}
 {% load static %}
 {% block title %}Store {{ store.external_label }}{% endblock %}
-{% comment %}The store workspace (docs/qa/PLAN-012d D1 to D3; the approved design's layout, docs/qa/PLAN-012f-approved-design.md D8 and store-workspace-laptop.png / -phone.png). The header: the breadcrumb, the title with the status badge, one line (the address and the open date), the phone's line (the operator and the city), the action bar, the phone's summary strip (Open balance, Rent, Autopay) and the tabs, Charges with its count of open charges. The body: the open tab in the two-thirds column (the Charges tab with the notes & follow-ups under it), then the store's details, its cost history and its leases; the side cards in the one-third column (ledger/stores/_header.html). On a phone the columns stack.{% endcomment %}
+{% comment %}The store workspace (docs/qa/PLAN-012d D1 to D3; the approved design's layout, docs/qa/PLAN-012f-approved-design.md D8 and store-workspace-laptop.png / -phone.png). The header: the breadcrumb, the title with the status badge, one line (the address and the open date), the phone's line (the operator and the city), the action bar, the figure row (PLAN-015 Batch 3: Open balance, Rent, Autopay as KPI cards v2, ledger/stores/_figures.html) and the tabs, Charges with its count of open charges. The body: the open tab in the two-thirds column (the Charges tab with the notes & follow-ups under it), then the store's details, its cost history and its leases; the side cards in the one-third column (ledger/stores/_header.html). On a phone the columns stack.{% endcomment %}
 {% block header %}<div class="page-header workspace-head">
   <div class="page-title-block">
     <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:stores:list' %}">Stores</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:stores:detail' pk=store.pk %}" aria-current="page">{{ store_crumb }}</a></nav>
@@ -13,7 +13,7 @@
   </div>
   {% if space.actions %}{% include "ledger/stores/_action_bar.html" %}{% endif %}
 </div>
-{% include "ledger/stores/_summary_strip.html" %}
+{% include "ledger/stores/_figures.html" %}
 <nav aria-label="Store tabs" class="tabs store-tabs" id="store-tabs">
   {% for name, label in space.tabs %}<a class="tab" id="tab-link-{{ name }}" href="?tab={{ name }}#tab-{{ name }}"{% if name == space.tab %} aria-current="page"{% endif %}>{{ label }}{% if name == "charges" and header.open_count %} <span class="count-pill" id="open-charges-count">{{ header.open_count }}</span>{% endif %}</a>{% endfor %}
 </nav>{% endblock %}
