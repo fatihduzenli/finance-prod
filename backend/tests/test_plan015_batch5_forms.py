@@ -14,6 +14,7 @@ from django.urls import reverse
 
 from accounts.roles import Role
 from ledger.models import (
+    CollectionSchedule,
     CollectionStatus,
     Lease,
     OneOffCharge,
@@ -22,7 +23,10 @@ from ledger.models import (
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
+    ScheduleKind,
+    ScheduleState,
 )
+from ledger.services import leases
 from payments.fake import FakeProvider
 from tests import test_plan012fa_b_detail as detail
 from tests.receivables_helpers import (
@@ -39,7 +43,9 @@ from tests.test_installments import a_one_off
 from tests.test_one_off_charges import an_operator as a_banked_operator
 from tests.test_operator_views import client_for
 from tests.test_plan012f_d_pages import APP_CSS
+from tests.test_plan012f_pages import a_store_world
 from tests.test_plan012fa_c_builder import a_draft, a_world, element, new_store_path, text
+from tests.test_plan015_batch3_workspaces import figure, figure_row, link_of, sub_of, value_of
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 from tests.test_split_page import billing, fake, fixed_now  # noqa: F401
 from tests.test_split_page import page as split_page
@@ -428,3 +434,110 @@ def test_the_lease_header_carries_the_status_badge_in_its_tone() -> None:
     status = detail.between(head, '<span id="lease-status">', "</h1>")
     assert '<span class="badge badge-pending">' in status and "Paused" in status
     assert head.count('id="lease-status"') == 1
+
+
+# --- §9.1: the LEASE card loses the rows the figure row shows -----------------------------------
+
+MOVED_ROWS = ('id="header-rent"', 'id="header-autopay"', 'id="header-open-balance"')
+
+
+def lease_card_of(html: str) -> str:
+    """The LEASE card, up to the NOTES card that always follows it."""
+    start = html.index('<div class="card" id="lease-card">')
+    return html[start : html.index('id="notes-card"', start)]
+
+
+@pytest.fixture
+def october(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "django.utils.timezone.localdate", lambda *args, **kwargs: date(2026, 10, 6)
+    )
+
+
+@pytest.mark.usefixtures("october")
+def test_the_lease_card_has_no_rent_autopay_or_open_balance_row_on_either_page() -> None:
+    lease = a_store_world()
+    pages = {
+        "store": f"/stores/{lease.store_id}/",
+        "operator": f"/operators/{lease.operator_id}/?store={lease.store_id}",
+    }
+    for name, path in pages.items():
+        card = lease_card_of(get(Role.BILLING, path))
+        for row in MOVED_ROWS:
+            assert row not in card, (name, row)
+        assert 'id="autopay-set-up"' not in card, name
+        dts = re.findall(r"<dt>([^<]+)</dt>", card)
+        assert "Rent" not in dts and "Autopay" not in dts and "Open balance" not in dts, name
+        # The rows that stay, as they were.
+        for kept in ("header-status", "header-lease", "header-debit-day", "header-deposit"):
+            assert f'id="{kept}"' in card, (name, kept)
+    operator = lease_card_of(get(Role.BILLING, pages["operator"]))
+    assert 'id="header-store"' in operator
+    assert 'id="header-operator-balance">$2,000.00<' in operator  # all the operator's stores
+    store = lease_card_of(get(Role.BILLING, pages["store"]))
+    assert 'id="header-operator"' in store and 'id="header-operator-balance"' not in store
+
+
+@pytest.mark.usefixtures("october")
+def test_the_autopay_card_offers_set_up_with_its_id_while_a_lease_has_none() -> None:
+    lease = a_store_world()
+    store_url = f"/stores/{lease.store_id}/"
+    for role in (Role.BILLING, Role.VIEWER):
+        autopay = figure(figure_row(get(role, store_url)), "autopay")
+        assert value_of(autopay) == ("kpi2-value", "Not set up")
+        assert link_of(autopay) == (f"{store_url}?tab=schedules#tab-schedules", "Set up")
+        assert (
+            f'<a class="kpi2-link" href="{store_url}?tab=schedules#tab-schedules" '
+            'id="autopay-set-up"><span>Set up</span>'
+        ) in autopay
+    assert get(Role.BILLING, store_url).count('id="autopay-set-up"') == 1
+
+
+@pytest.mark.usefixtures("october")
+def test_the_autopay_card_offers_manage_once_autopay_is_on() -> None:
+    lease = a_store_world()
+    CollectionSchedule.objects.create(
+        lease=lease,
+        kind=ScheduleKind.RENT,
+        seq=1,
+        debit_day=1,
+        amount=Decimal("2000.00"),
+        state=ScheduleState.ACTIVE,
+    )
+    store_url = f"/stores/{lease.store_id}/"
+    html = get(Role.BILLING, store_url)
+    autopay = figure(figure_row(html), "autopay")
+    assert value_of(autopay) == ("kpi2-value", "On")
+    assert link_of(autopay) == (f"{store_url}?tab=schedules#tab-schedules", "Manage")
+    assert 'id="autopay-set-up"' not in html and ">Set up<" not in autopay
+
+
+@pytest.mark.usefixtures("october")
+def test_the_moved_note_is_on_the_autopay_card_after_the_next_debit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lease = a_store_world()
+    moved = leases.AutopayMove(resumes=date(2026, 11, 20), starts={})
+    monkeypatch.setattr(leases, "autopay_move", lambda *args, **kwargs: moved)
+    html = get(Role.BILLING, f"/stores/{lease.store_id}/")
+    autopay = figure(figure_row(html), "autopay")
+    assert sub_of(autopay) == (
+        "Next debit Nov 1, 2026 · Autopay resumes Nov 20, 2026 "
+        "(this month is collected in installments)"
+    )
+    assert "Autopay resumes" not in lease_card_of(html)
+
+
+def test_the_moved_note_alone_is_the_sub_line_without_a_next_debit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lease = a_lease(a_store("Dayless", 2005), an_operator("Dayless LLC"))
+    Lease.objects.filter(pk=lease.pk).update(
+        collection_status=CollectionStatus.PAUSED, debit_day=None
+    )
+    moved = leases.AutopayMove(resumes=date(2026, 11, 20), starts={})
+    monkeypatch.setattr(leases, "autopay_move", lambda *args, **kwargs: moved)
+    autopay = figure(figure_row(get(Role.BILLING, f"/stores/{lease.store_id}/")), "autopay")
+    assert sub_of(autopay) == (
+        "Autopay resumes Nov 20, 2026 (this month is collected in installments)"
+    )

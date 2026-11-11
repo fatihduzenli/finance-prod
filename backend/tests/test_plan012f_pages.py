@@ -209,15 +209,18 @@ def test_the_four_side_cards_read_the_lease() -> None:
     labels = re.findall(r'<h2 class="section-label"[^>]*>([^<]+)</h2>', side)
     # PLAN-014b item 3 (re-pinned): the NOTES card always follows the LEASE card.
     assert labels == ["Lease", "Notes", "Next", "Store cost", "Documents"]
-    assert '<dd id="header-rent"><strong>$2,000.00</strong> / month</dd>' in side
+    # PLAN-015 Batch 5 §9.1 (re-pinned): the Rent, Autopay and Open balance rows are the figure
+    # row's, not the LEASE card's; the "Set up" link is the Autopay card's.
+    assert 'id="header-rent"' not in side and 'id="header-autopay"' not in side
+    assert 'id="header-open-balance"' not in side and 'id="autopay-set-up"' not in side
     assert 'id="header-since"' not in side  # PLAN-014 B3: the Lease link carries the date
     assert '<dd id="header-debit-day">1st</dd>' in side
     # PLAN-014 I-b: the Deposit row is coloured by its state, as the Sign fee row.
     assert '<dd class="side-unpaid" id="header-deposit">$3,000.00 · not collected</dd>' in side
     assert re.search(
-        r'<dd id="header-autopay"><span class="badge">Not set up</span> '
-        r'<a href="[^"]*tab=schedules',
-        side,
+        r'<a class="kpi2-link" href="[^"]*tab=schedules#tab-schedules" id="autopay-set-up">'
+        r"<span>Set up</span>",
+        section(html, 'id="figure-autopay"', "</section>"),
     )
     assert '<dt>Rent debit</dt><dd id="header-next-rent">Nov 1, 2026</dd>' in side
     assert '<dt>Insurance renewal</dt><dd id="header-insurance">Oct 20, 2026</dd>' in side

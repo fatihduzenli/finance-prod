@@ -179,7 +179,9 @@ def test_the_header_shows_the_lease_balance_credit_next_payment_and_open_promise
     assert header.next_payment == workspace.NextPayment(date(2026, 10, 25), "Broken shelf")
     assert header.open_promise is not None and header.open_promise.promised_amount == D("500")
     html = page(client_for(Role.VIEWER)[0], store_page(lease.store_id))
-    assert 'id="header-open-balance">$1,945.00<' in html
+    # PLAN-015 Batch 5 §9.1 (re-pinned): the open balance is the figure row's.
+    assert 'id="figure-open-balance-value">$1,945.00<' in html
+    assert 'id="header-open-balance"' not in html
     # The credit line shows only when a credit is held (QA-012d finding 5, "if any").
     assert 'id="header-credit"' not in html and "<dt>Credit</dt>" not in html
     # PLAN-012f D8: the NEXT card names the next scheduled payment beside its date.

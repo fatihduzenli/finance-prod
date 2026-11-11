@@ -81,7 +81,10 @@ def value_of(card: str) -> tuple[str, str]:
 
 
 def link_of(card: str) -> tuple[str, str] | None:
-    found = re.search(r'<a class="kpi2-link" href="([^"]+)"><span>([^<]+)</span>', card)
+    # PLAN-015 Batch 5 §9.1: the Autopay card's "Set up" link carries its id.
+    found = re.search(
+        r'<a class="kpi2-link" href="([^"]+)"(?: id="[a-z-]+")?><span>([^<]+)</span>', card
+    )
     return (found.group(1), found.group(2)) if found else None
 
 
@@ -131,7 +134,9 @@ def test_the_store_figures_with_a_lease_read_the_header() -> None:
     assert icon_of(autopay) == "calendar"
     assert sub_of(autopay) == "Next debit Nov 1, 2026"  # the NEXT card's rent debit
     assert value_of(autopay) == ("kpi2-value", "Not set up")
-    assert link_of(autopay) == (f"{store_url}?tab=schedules#tab-schedules", "Autopay")
+    # PLAN-015 Batch 5 §9.1 (re-pinned): the LEASE card's "Set up" link moved here.
+    assert link_of(autopay) == (f"{store_url}?tab=schedules#tab-schedules", "Set up")
+    assert 'id="autopay-set-up"' in autopay
 
 
 def test_two_open_charges_are_counted_in_the_plural() -> None:
@@ -160,7 +165,9 @@ def test_a_store_without_a_lease_has_a_dash_rent_no_lease_link_and_no_autopay() 
     autopay = figure(row, "autopay")
     assert sub_of(autopay) is None
     assert value_of(autopay) == ("kpi2-value", "Not set up")
-    assert link_of(autopay) == (f"{store_url}?tab=schedules#tab-schedules", "Autopay")
+    # PLAN-015 Batch 5 §9.1 (re-pinned): no lease, nothing to set up: "Manage".
+    assert link_of(autopay) == (f"{store_url}?tab=schedules#tab-schedules", "Manage")
+    assert 'id="autopay-set-up"' not in autopay
 
 
 def test_a_paid_up_store_shows_zero_without_the_red_tone() -> None:
