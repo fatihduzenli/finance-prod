@@ -159,13 +159,14 @@ def test_the_dialog_has_its_parts_and_labels(billing: Client) -> None:
 
 
 def test_the_day_panel_has_add_entry_on_its_day(billing: Client) -> None:
-    """Owner, 2026-11-06: "+ Add entry" at the top of the day's panel, a small secondary button
-    opening the dialog on the panel's day; without the script the old URL with ?on=."""
+    """Owner, 2026-11-06: "+ Add entry" at the top of the day's panel, opening the dialog on the
+    panel's day; without the script the old URL with ?on=. PLAN-015 Batch 4 §3.5 re-pin: it is
+    the card head's right-hand .card-link (it was a small secondary button)."""
     for path, on in (("/calendar/", "2026-10-06"), ("/calendar/?on=2026-12-03", "2026-12-03")):
         panel = part(body_of(billing, path), "calendar-day-panel")
         assert re.search(
             r'<div class="card-head day-panel-head"><h2 class="section-label" '
-            r'id="calendar-day-title">[^<]+</h2><a class="btn btn-sm" id="panel-add-entry" '
+            r'id="calendar-day-title">[^<]+</h2><a class="card-link" id="panel-add-entry" '
             rf'href="/calendar/new/\?on={on}" data-dialog-open="calendar-entry" data-day="{on}">'
             r'<svg class="icon icon-plus"[^>]*>.*?</svg> Add entry</a></div>',
             panel,

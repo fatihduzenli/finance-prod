@@ -504,3 +504,66 @@ def test_the_dashboard_chart_names_its_tooltip_fields() -> None:
         'data-tooltip-fields="collected:Collected,due:Due">'
     ) in html
     assert html.index("ledger/charts.js") < html.index("ledger/dashboard.js")
+
+
+# --- §3.5 The Calendar's side cards ---------------------------------------------------------------
+
+
+def side_card(html: str, card_id: str) -> str:
+    start = html.index(f'id="{card_id}"')
+    return html[start : html.index("</section>", start)]
+
+
+def test_the_calendar_side_cards_open_with_the_card_head() -> None:
+    html = page(client_for(Role.BILLING)[0], "/calendar/")
+    day = side_card(html, "calendar-day-panel")
+    assert re.search(
+        r'aria-labelledby="calendar-day-title">\s*<div class="card-head day-panel-head">'
+        r'<h2 class="section-label" id="calendar-day-title">[^<]+</h2>'
+        r'<a class="card-link" id="panel-add-entry" href="/calendar/new/\?on=[0-9-]+" '
+        r'data-dialog-open="calendar-entry"',
+        day,
+    )
+    nxt = side_card(html, "calendar-next-days")
+    assert re.search(
+        r'aria-labelledby="calendar-next-title">\s*<div class="card-head">'
+        r'<h2 class="section-label" id="calendar-next-title">Next 7 days</h2></div>',
+        nxt,
+    )
+    feed = side_card(html, "calendar-feed-card")
+    assert re.search(
+        r'aria-labelledby="calendar-feed-title">\s*<div class="card-head">'
+        r'<h2 class="section-label" id="calendar-feed-title">Feed</h2>'
+        r'<form method="post" action="/settings/calendar-feed/new/">'
+        r'<input type="hidden" name="csrfmiddlewaretoken" value="[^"]+">'
+        r'<button class="link-action card-link" type="submit" id="calendar-feed-create">'
+        r"Get the link</button></form></div>",
+        feed,
+    )
+    actions = feed[feed.index('<div class="feed-actions">') :]
+    assert actions.startswith('<div class="feed-actions"><a id="calendar-feed-settings"')
+    assert feed.count("Get the link") == 1
+
+
+def test_with_a_feed_the_head_has_no_link_and_reset_stays_in_the_actions() -> None:
+    from ledger.services import calendar
+
+    client, user = client_for(Role.VIEWER)
+    calendar.create_feed(user)
+    feed = side_card(page(client, "/calendar/"), "calendar-feed-card")
+    assert '<h2 class="section-label" id="calendar-feed-title">Feed</h2></div>' in feed
+    actions = feed[feed.index('<div class="feed-actions">') :]
+    assert (
+        'id="calendar-feed-reset">Reset token</button></form><span aria-hidden="true">·</span>'
+        in (actions)
+    )
+    assert "Get the link" not in feed
+
+
+def test_a_viewer_has_the_day_panel_head_without_add_entry() -> None:
+    day = side_card(page(client_for(Role.VIEWER)[0], "/calendar/"), "calendar-day-panel")
+    assert re.search(
+        r'<div class="card-head day-panel-head"><h2 class="section-label" '
+        r'id="calendar-day-title">[^<]+</h2></div>',
+        day,
+    )

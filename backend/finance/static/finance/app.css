@@ -1686,6 +1686,8 @@ p.detail-more-notes { padding-left: 0; }
   .calendar-day { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 }
 .day-panel-head .section-label { margin: 0; }
+/* PLAN-015 Batch 4: the side cards' heads hold a form (the Feed card's "Get the link"). */
+.calendar-side .card-head form { margin: 0; }
 .calendar-day ul { list-style: none; margin: var(--space-1) 0 0; padding: 0; }
 .calendar-item, .calendar-more { margin-bottom: 3px; }
 .calendar-item a { display: block; overflow: hidden; padding: 2px 6px; border-radius: 4px; background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-xs); font-weight: 700; line-height: 1.5; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
