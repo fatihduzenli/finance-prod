@@ -20,6 +20,7 @@ from django.urls import reverse
 from django.utils.html import escape
 
 from accounts.roles import Role
+from tests.text_helpers import assert_absent
 from ledger.forms import (
     ADD_PAYMENT_REFERENCE_HELP,
     DEBIT_TODAY_NEEDS_ADMIN,
@@ -561,7 +562,7 @@ def test_no_provider_name_or_account_number_in_the_templates() -> None:
     root = Path(__file__).resolve().parents[1] / "ledger" / "templates" / "ledger" / "payments"
     for name in ("add_payment.html", "_how.html", "_add_payment_summary.html"):
         text = (root / name).read_text(encoding="utf-8")
-        assert "stax" not in text.lower(), name
+        assert_absent(text.lower(), "stax", name)
     assert not (root.parent / "one_off_charges" / "payment_form.html").exists()
     assert not (root.parent / "charges" / "payment_form.html").exists()
 
