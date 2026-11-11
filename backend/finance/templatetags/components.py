@@ -175,6 +175,8 @@ def status_badge(label: object, value: object = None) -> SafeString:
 
 #: What ``kpi``'s ``value_attrs`` may hold: ``data-*`` attributes with plain values only.
 _VALUE_ATTRS_RE = re.compile(r'(?: data-[a-z][a-z-]*="[A-Za-z0-9_-]*")*')
+#: What ``kpi2``'s ``link_id`` may hold: one id of lower-case letters, digits and hyphens.
+_ID_RE = re.compile(r"[a-z][a-z0-9-]*")
 #: What ``kpi``'s ``value_class`` may hold: class names separated by spaces.
 _VALUE_CLASS_RE = re.compile(r"(?:[A-Za-z][A-Za-z0-9_-]*(?: [A-Za-z][A-Za-z0-9_-]*)*)?")
 
@@ -362,16 +364,21 @@ def kpi2(
     link_text: object = "",
     value_tone: str = "",
     value_id: str = "",
+    link_id: str = "",
 ) -> dict[str, Any]:
     """Design v2's KPI card: the icon in a tinted square, the title and its sub-line, the
     figure (``value_tone``: ``unpaid`` red, ``paid`` green, ``muted`` for a zero; ``value_id``
     the figure's id, for a page that names it), an optional pill badge after it (paid, unpaid,
     pending or neutral) and a footer link with an arrow (a path of this site only; anything
-    else draws no link). An unknown tone is a template mistake (``ValueError``)."""
+    else draws no link; ``link_id`` its id, PLAN-015 Batch 4: the P&L's "Why" keeps
+    ``kpi-unknown``). An unknown tone, or a ``link_id`` that is not an id, is a template
+    mistake (``ValueError``)."""
     if value_tone and value_tone not in KPI2_VALUE_TONES:
         raise ValueError(f"unknown kpi2 value tone {value_tone!r}")
     if badge_tone not in KPI2_BADGE_TONES:
         raise ValueError(f"unknown kpi2 badge tone {badge_tone!r}")
+    if link_id and not _ID_RE.fullmatch(link_id):
+        raise ValueError(f"kpi2 link_id {link_id!r} is not an id")
     return {
         "icon": icon,
         "title": title,
@@ -383,6 +390,7 @@ def kpi2(
         "badge_tone": badge_tone,
         "link": _local_path(link),
         "link_text": link_text,
+        "link_id": link_id,
     }
 
 

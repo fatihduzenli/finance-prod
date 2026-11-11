@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
-{% load money responsive dates filters static %}
-{% comment %}The Aging report (docs/qa/PLAN-014 G1, G3): ledger.views.reports.aging_report. The filters (A5's component), then one row per store (a one-off charge without a lease under "No store" with its operator): the store's name opens its Charges tab of open charges, each bucket's amount the same tab with that bucket highlighted. As of today only: no range, so that the total without a filter is the dashboard's Unpaid balances figure.{% endcomment %}
+{% load money responsive dates filters static components %}
+{% comment %}The Aging report (docs/qa/PLAN-014 G1, G3): ledger.views.reports.aging_report. The filters (A5's component), then one row per store (a one-off charge without a lease under "No store" with its operator): the store's name opens its Charges tab of open charges, each bucket's amount the same tab with that bucket highlighted. As of today only: no range, so that the total without a filter is the dashboard's Unpaid balances figure. PLAN-015 Batch 4 §3.4: the figure row over the table, one {% kpi2 %} card (Unpaid: the grand total, red above zero, muted at zero; "n store(s)"); the report has no oldest day (its buckets are ranges), so there is no Oldest card.{% endcomment %}
 {% block title %}Aging{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Aging</span></nav><h1>Aging</h1>{% if report %}<span class="list-counts" id="aging-as-of">As of {{ report.as_of|day }}</span>{% endif %}</div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Aging</span></nav><h1>Aging</h1>{% if report %}<p class="page-sub" id="aging-as-of">As of {{ report.as_of|day }}</p>{% endif %}</div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
   <div class="card filter-card">{% filters active=active_filters %}
       <span class="filter-field"><label for="state">State</label>
@@ -35,6 +35,9 @@
   {% if too_slow %}
     <p class="warning" id="aging-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
+  <section class="kpi-row kpi2-row" id="aging-kpis" aria-label="Figures">
+    {% with stores=store_count|stringformat:"d" word=store_count|pluralize:"store,stores" %}{% if report.totals.total > 0 %}{% kpi2 "alert" "Unpaid" stores|add:" "|add:word report.totals.total|money value_tone="unpaid" value_id="aging-kpi-unpaid" %}{% else %}{% kpi2 "alert" "Unpaid" stores|add:" "|add:word report.totals.total|money value_tone="muted" value_id="aging-kpi-unpaid" %}{% endif %}{% endwith %}
+  </section>
   <div class="card table-card">
   {% responsive_table "scroll" %}
   <table id="aging">

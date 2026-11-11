@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
-{% load money responsive dates filters static %}
+{% load money responsive dates filters static components charts %}
 {% block title %}Profit and loss{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Profit and loss</span></nav><h1>Profit and loss</h1></div><div class="page-actions no-print"><button class="btn" type="button" id="pnl-print" onclick="window.print()">Print</button><a class="btn" id="export-csv" href="{% url 'ledger:reports:pnl_export' %}?{{ export_query }}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
-  {% comment %}The report family (DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png; PLAN-012f-b E-1): the filter card, the four figures, the table card. No State filter or grouping (the owner's exclusion, plan D17). print.css (base.html, PLAN-012c D6): with the rows shown (.pnl-detail), each store group starts a new page.{% endcomment %}
+  {% comment %}The report family (DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png; PLAN-012f-b E-1): the filter card, the four figures ({% kpi2 %} cards, PLAN-015 Batch 4 §3.2: the ids on the figures; Costs and Margin "unknown" muted when a cost is; the Margin's "Why" link #kpi-unknown to #pnl-explained when a store is unknown; the sub-lines from the view's kpis); for a range of two or more months with something billed or collected, the By month card (PLAN-015 Batch 4 §3.3: {% pnl_bars %} over the view's chart_months, the Collections chart's frame, the hover tooltip of ledger/charts.js from data-tooltip-fields, the legend); the table card. No State filter or grouping (the owner's exclusion, plan D17). print.css (base.html, PLAN-012c D6): with the rows shown (.pnl-detail), each store group starts a new page.{% endcomment %}
   <div class="card filter-card pnl-filters">{% filters active=active_filters %}
     <span class="filter-field"><label for="from">From</label>
     {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}</span>
@@ -23,12 +23,19 @@
   {% if too_slow %}
     <p class="warning" id="pnl-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <section class="kpi-row pnl-kpis" id="pnl-kpis" aria-label="Figures">
-    <div class="kpi" id="kpi-billed"><span class="kpi-label">Billed</span><span class="kpi-value">{{ kpis.billed|money }}</span><span class="kpi-note">rent {{ total.net_rent|money }} · fees {{ total.fees_billed|money }}</span></div>
-    <div class="kpi" id="kpi-collected"><span class="kpi-label">Collected</span><span class="kpi-value tone-paid">{{ kpis.collected|money }}</span>{% if total.withheld_deposits %}<span class="kpi-note">incl. {{ total.withheld_deposits|money }} withheld deposit</span>{% endif %}</div>
-    <div class="kpi" id="kpi-costs"><span class="kpi-label">Costs</span><span class="kpi-value">{% if total.costs is None %}<span class="unknown">unknown</span>{% else %}{{ total.costs|money }}{% endif %}</span><span class="kpi-note">landlord {% if total.landlord_rent is None %}unknown{% else %}{{ total.landlord_rent|money }}{% endif %}{% if total.other_costs is None or total.other_costs %} · other {% if total.other_costs is None %}unknown{% else %}{{ total.other_costs|money }}{% endif %}{% endif %} · fee costs {% if total.fee_costs is None %}unknown{% else %}{{ total.fee_costs|money }}{% endif %}</span></div>
-    <div class="kpi" id="kpi-margin"><span class="kpi-label">Margin (collected)</span><span class="kpi-value{% if total.margin_collected is None %}{% elif total.margin_collected < 0 %} tone-unpaid{% else %} tone-paid{% endif %}">{% if total.margin_collected is None %}<span class="unknown">unknown</span>{% else %}{{ total.margin_collected|money }}{% endif %}</span>{% if kpis.unknown_stores %}<span class="kpi-note" id="kpi-unknown">{{ kpis.unknown_stores }} store{{ kpis.unknown_stores|pluralize }} unknown · <a href="#pnl-explained">why</a></span>{% endif %}</div>
+  <section class="kpi-row kpi2-row" id="pnl-kpis" aria-label="Figures">
+    {% kpi2 "banknote" "Billed" kpis.billed_sub kpis.billed|money value_id="kpi-billed" %}
+    {% kpi2 "check" "Collected" kpis.collected_sub kpis.collected|money value_tone="paid" value_id="kpi-collected" %}
+    {% if total.costs is None %}{% kpi2 "dash" "Costs" kpis.costs_sub "unknown" value_tone="muted" value_id="kpi-costs" %}{% else %}{% kpi2 "dash" "Costs" kpis.costs_sub total.costs|money value_id="kpi-costs" %}{% endif %}
+    {% url 'ledger:reports:pnl' as pnl_url %}{% with why_url=pnl_url|add:"?"|add:export_query|add:"#pnl-explained" %}{% if total.margin_collected is None %}{% kpi2 "circle-half" "Margin (collected)" kpis.margin_sub "unknown" link=why_url link_text="Why" value_tone="muted" value_id="kpi-margin" link_id="kpi-unknown" %}{% elif total.margin_collected < 0 %}{% kpi2 "circle-half" "Margin (collected)" kpis.margin_sub total.margin_collected|money value_tone="unpaid" value_id="kpi-margin" %}{% else %}{% kpi2 "circle-half" "Margin (collected)" kpis.margin_sub total.margin_collected|money value_tone="paid" value_id="kpi-margin" %}{% endif %}{% endwith %}
   </section>
+  {% if chart_months %}
+  <section class="card pnl-chart-card" id="pnl-chart-card" aria-labelledby="pnl-chart-title">
+    <div class="card-head"><h2 class="section-label" id="pnl-chart-title">By month</h2></div>
+    <div class="collections-chart pnl-chart" id="pnl-chart" data-tooltip-fields="collected:Collected,costs:Costs,margin:Margin">{% pnl_bars chart_months %}<div class="chart-tooltip" id="pnl-tooltip" hidden></div></div>
+    <ul class="collections-legend" id="pnl-chart-legend" aria-hidden="true"><li>{% chart_key "collected" %}Collected</li><li>{% chart_key "costs" %}Costs</li></ul>
+  </section>
+  {% endif %}
 
   <section class="card table-card pnl-card" id="pnl-card" aria-labelledby="pnl-title">
     <div class="card-header pnl-card-header">
@@ -79,4 +86,4 @@
   {% endif %}
   </div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script>{% endblock %}
+{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script><script src="{% static 'ledger/charts.js' %}" defer></script>{% endblock %}

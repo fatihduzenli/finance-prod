@@ -51,6 +51,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_safe
 
+from finance.dates import month_short_text, month_text
 from finance.us_states import US_STATES
 from ledger.models import Brand, Operator
 from ledger.services import (
@@ -66,6 +67,7 @@ from ledger.services import (
 )
 from ledger.services import report_index as index_figures
 from ledger.views.operators import csv_response, role_required
+from ledger.wording import format_amount
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +170,7 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
             "group_lines": _group_lines(groups, query.group),
             "total": total,
             "kpis": _kpis(total, rows),
+            "chart_months": _chart_months(query, rows, total),
             "row_count": len(rows),
             "cost_only_count": sum(1 for row in rows if row.cost_only),
             "deposits_held": held,
@@ -181,15 +184,81 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
 
 
 def _kpis(total: pnl.Figures, rows: list[pnl.PnlRow]) -> dict[str, Any]:
-    """The four cards over the table (DESIGN-SPEC §4 Profit and loss), from the total: Billed
-    and Collected are its rent and fees summed (Costs and Margin are the total's own, unknown
-    when any input is); ``unknown_stores`` counts the stores with an unknown input, for the
-    Margin card's "why" line."""
+    """The four cards over the table (DESIGN-SPEC §4 Profit and loss; PLAN-015 Batch 4 §3.2,
+    the {% kpi2 %} cards), from the total: Billed and Collected are its rent and fees summed
+    (Costs and Margin are the total's own, unknown when any input is); ``unknown_stores``
+    counts the stores with an unknown input, for the Margin card's sub-line. Each card's
+    sub-line is written here: Billed "rent $X · fees $Y", Collected "incl. $Z withheld
+    deposit" when there is one, Costs "landlord $X · other $Y · fee costs $Z" (other only
+    when not zero, "unknown" for an unknown part), Margin "n store(s) unknown"."""
+    unknown_stores = len({row.store_id for row in rows if row.unknown})
+
+    def known(amount: Decimal | None) -> str:
+        return "unknown" if amount is None else format_amount(amount)
+
+    costs = [f"landlord {known(total.landlord_rent)}"]
+    if total.other_costs is None or total.other_costs:
+        costs.append(f"other {known(total.other_costs)}")
+    costs.append(f"fee costs {known(total.fee_costs)}")
     return {
         "billed": total.net_rent + total.fees_billed,
         "collected": total.rent_collected + total.fees_collected,
-        "unknown_stores": len({row.store_id for row in rows if row.unknown}),
+        "unknown_stores": unknown_stores,
+        "billed_sub": (
+            f"rent {format_amount(total.net_rent)} · fees {format_amount(total.fees_billed)}"
+        ),
+        "collected_sub": (
+            f"incl. {format_amount(total.withheld_deposits)} withheld deposit"
+            if total.withheld_deposits
+            else ""
+        ),
+        "costs_sub": " · ".join(costs),
+        "margin_sub": (
+            f"{unknown_stores} store{'s' if unknown_stores != 1 else ''} unknown"
+            if unknown_stores
+            else ""
+        ),
     }
+
+
+@dataclass(frozen=True, slots=True)
+class ChartMonth:
+    """A month of the P&L chart (``{% pnl_bars %}``): the label under its bars ("Oct"), its
+    title ("Oct 2026"), the money collected (rent and fees, as the Collected card) and the
+    costs and collected margin (``None``: a cost is unknown)."""
+
+    label: str
+    title: str
+    collected: Decimal
+    costs: Decimal | None
+    margin: Decimal | None
+
+
+def _chart_months(
+    query: pnl.PnlQuery, rows: list[pnl.PnlRow], total: pnl.Figures
+) -> list[ChartMonth]:
+    """PLAN-015 Batch 4 §3.3: every month of the range in order, from the rows already read
+    (grouped by month here, no query; a month without rows is zero); none for a range of one
+    month (the figures say it all) or with nothing billed or collected."""
+    billed = total.rent_billed + total.fees_billed
+    collected = total.rent_collected + total.fees_collected
+    if len(query.months) < 2 or not (billed or collected):
+        return []
+    by_month = {group.rows[0].month: group for group in pnl.grouped(rows, pnl.GROUP_MONTH)}
+    empty = pnl.Figures()
+    months = []
+    for month in query.months:
+        figures = by_month.get(month, empty)
+        months.append(
+            ChartMonth(
+                label=month_short_text(month),
+                title=month_text(month),
+                collected=figures.rent_collected + figures.fees_collected,
+                costs=figures.costs,
+                margin=figures.margin_collected,
+            )
+        )
+    return months
 
 
 def _group_lines(groups: list[pnl.PnlGroup], group: str) -> list[tuple[pnl.PnlGroup, str, str]]:
@@ -334,6 +403,13 @@ def _aging_page(
             "active_filters": active_filters,
             "report": report,
             "lines": _aging_lines(report) if report is not None else [],
+            # PLAN-015 Batch 4 §3.4: the Unpaid card's "n store(s)" (the rows of a store; the
+            # "No store" rows of one-off charges are not one).
+            "store_count": (
+                sum(1 for row in report.rows if row.store_id is not None)
+                if report is not None
+                else 0
+            ),
             "too_slow": TOO_SLOW if report is None else "",
             "buckets": receivables.AGING_BUCKETS,
             "today": timezone.localdate(),

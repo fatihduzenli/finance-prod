@@ -101,7 +101,13 @@ def test_the_filter_card_has_the_months_the_grouping_the_rows_box_and_a_navy_app
 
 
 def kpi(page: str, element_id: str) -> str:
-    return between(page, f'<div class="kpi" id="{element_id}">', "</div>")
+    """The {% kpi2 %} card whose figure has ``element_id`` (PLAN-015 Batch 4 re-pin: the ids
+    moved from the old .kpi card to the v2 card's figure)."""
+    at = page.index(f'id="{element_id}"')
+    start = page.rindex('<div class="kpi2">', 0, at)
+    end = page.index("</section>", at)
+    following = page.find('<div class="kpi2">', at, end)
+    return page[start : end if following == -1 else following]
 
 
 def test_the_four_figures_equal_the_totals() -> None:
@@ -114,11 +120,13 @@ def test_the_four_figures_equal_the_totals() -> None:
     assert kpis["unknown_stores"] == 0
     page = response.content.decode()
     billed = text_of(kpi(page, "kpi-billed"))
-    assert billed == "Billed $4,500.00 rent $3,500.00 · fees $1,000.00"
-    assert '<span class="kpi-value tone-paid">$2,000.00</span>' in kpi(page, "kpi-collected")
+    assert billed == "Billed rent $3,500.00 · fees $1,000.00 $4,500.00"
+    assert '<span class="kpi2-value tone-paid" id="kpi-collected">$2,000.00</span>' in kpi(
+        page, "kpi-collected"
+    )
     costs = text_of(kpi(page, "kpi-costs"))
-    assert costs.startswith(f"Costs {format_dollars(total.costs)} landlord $2,500.00")
-    assert costs.endswith("fee costs $500.00")
+    assert costs.startswith("Costs landlord $2,500.00")
+    assert costs.endswith(f"fee costs $500.00 {format_dollars(total.costs)}")
     margin = kpi(page, "kpi-margin")
     assert total.margin_collected == D("2000.00") - total.costs
     assert format_dollars(total.margin_collected) in margin
@@ -132,10 +140,10 @@ def format_dollars(amount: Decimal | None) -> str:
 
 def test_a_negative_margin_is_red_and_a_positive_one_green() -> None:
     _, _, charge, sign = known_store()
-    assert '<span class="kpi-value tone-unpaid">-$' in kpi(page_of(), "kpi-margin")
+    assert '<span class="kpi2-value tone-unpaid" id="kpi-margin">-$' in kpi(page_of(), "kpi-margin")
     paid(charge, "3500.00", date(2026, 7, 5))
     paid(sign, "1000.00", date(2026, 7, 12))
-    assert '<span class="kpi-value tone-paid">$' in kpi(page_of(), "kpi-margin")
+    assert '<span class="kpi2-value tone-paid" id="kpi-margin">$' in kpi(page_of(), "kpi-margin")
 
 
 def test_the_collected_card_names_a_withheld_deposit_only_when_there_is_one() -> None:
@@ -150,15 +158,19 @@ def test_an_unknown_cost_makes_costs_and_margin_unknown_and_counts_the_stores() 
     response = get(PAGE, JULY_ONLY)
     assert response.context["kpis"]["unknown_stores"] == 2
     page = response.content.decode()
-    assert '<span class="kpi-value"><span class="unknown">unknown</span></span>' in kpi(
+    # PLAN-015 Batch 4 re-pin: "unknown" is the v2 card's muted figure; the count is its
+    # sub-line and "why" its footer link (to this page's #pnl-explained, the id kept).
+    assert '<span class="kpi2-value tone-muted" id="kpi-costs">unknown</span>' in kpi(
         page, "kpi-costs"
     )
     margin = kpi(page, "kpi-margin")
-    assert '<span class="kpi-value"><span class="unknown">unknown</span></span>' in margin
-    assert (
-        '<span class="kpi-note" id="kpi-unknown">2 stores unknown · '
-        '<a href="#pnl-explained">why</a></span>'
-    ) in margin
+    assert '<span class="kpi2-value tone-muted" id="kpi-margin">unknown</span>' in margin
+    assert '<p class="kpi2-sub">2 stores unknown</p>' in margin
+    assert re.search(
+        r'<a class="kpi2-link" href="/reports/pnl/\?[^"#]*#pnl-explained" id="kpi-unknown">'
+        r"<span>Why</span>",
+        margin,
+    )
     assert 'id="pnl-explained"' in page
     assert "never counted as zero" in between(page, 'id="pnl-explained">', "</p>")
 

@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% load responsive money dates icons %}
 {% block title %}Returned payments{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Returned payments</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} not resolved</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Download spreadsheet</a></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Returned payments</h1><p class="page-sub" id="list-counts">{{ page.paginator.count }} not resolved</p></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">{% icon "file" 16 %}Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
   <p class="muted">ACH debits {{ company.provider_name }} reported returned, not yet resolved. The charge was reopened when the return arrived. The NSF fee ({{ nsf_first }}) is added when the return arrives. R01 and R09 are debited again automatically on the third business day unless staff stop it or log a contact within two business days. Every other code gets no retry and the lease is marked Needs review. <strong>Debit again</strong> sets a date staff agreed; a return without a fee yet gets one ({{ nsf_first }} on a first return, {{ nsf_later }} afterwards). Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
   <div class="card table-card list-card">

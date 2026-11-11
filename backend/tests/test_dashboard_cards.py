@@ -159,13 +159,18 @@ def test_the_mini_calendar_steps_months_keeps_the_page_state_and_lists_items(tod
 
 
 def test_the_dashboard_script_toggles_and_submits_without_markup() -> None:
-    script = (
-        Path(__file__).resolve().parents[1] / "ledger" / "static" / "ledger" / "dashboard.js"
-    ).read_text()
+    static = Path(__file__).resolve().parents[1] / "ledger" / "static" / "ledger"
+    script = (static / "dashboard.js").read_text()
     assert "innerHTML" not in script and "fetch(" not in script
     assert 'classList.add("is-open")' in script and "form.submit()" in script
     # PLAN-015 Batch 1: the Collections tooltip is built with textContent from data-* only.
-    assert "textContent" in script and 'getAttribute("data-collected")' in script
+    # PLAN-015 Batch 4 re-pin: the tooltip moved to charts.js (shared with the P&L chart); it
+    # reads the data-* attributes its chart's data-tooltip-fields name, lower-case keys only.
+    tooltip = (static / "charts.js").read_text()
+    assert "innerHTML" not in tooltip and "fetch(" not in tooltip
+    assert "textContent" in tooltip and 'getAttribute("data-" + field.key)' in tooltip
+    assert "/^[a-z]+$/.test(key)" in tooltip
+    assert 'getElementById("collections-tooltip")' not in script  # no second copy
 
 
 def test_the_dashboard_query_count_is_pinned(

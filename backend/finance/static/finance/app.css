@@ -1415,7 +1415,8 @@ td.cell-chevron a:hover { color: var(--text); }
 
 /* --- Report family (PLAN-012f-b E-1) ---------------------------------------------------------
    DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png. The filter card (the shared
-   search and filters form since PLAN-014 A5; .pnl-detail-check its rows box); the four .kpi cards (.tone-paid: a green figure);
+   search and filters form since PLAN-014 A5; .pnl-detail-check its rows box); the four figures
+   ({% kpi2 %} cards since PLAN-015 Batch 4; .kpi-value.tone-paid stays for the other .kpi pages);
    the table card: its header (the title, the muted count line, the held pills at the right,
    .pnl-held), the two-row header with its group heads centred (.grp-head) and a hairline at
    the left of each column group (.grp-start), the margins bold, a negative in the unpaid text
@@ -1685,6 +1686,10 @@ p.detail-more-notes { padding-left: 0; }
   .calendar-day { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 }
 .day-panel-head .section-label { margin: 0; }
+/* PLAN-015 Batch 4: every side card's head as the day panel's (.detail-side's label margin would
+   lift the label off its right-hand link); the Feed head holds a form ("Get the link"). */
+.calendar-side .card-head .section-label { margin: 0; }
+.calendar-side .card-head form { display: flex; align-items: center; margin: 0; }
 .calendar-day ul { list-style: none; margin: var(--space-1) 0 0; padding: 0; }
 .calendar-item, .calendar-more { margin-bottom: 3px; }
 .calendar-item a { display: block; overflow: hidden; padding: 2px 6px; border-radius: 4px; background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-xs); font-weight: 700; line-height: 1.5; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
