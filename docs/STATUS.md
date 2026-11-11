@@ -1950,3 +1950,34 @@ with net totals) need one sandbox invoice each; the company address and the invo
 delegation before the sender is switched to the company; Design v2 Batches 2–6 wait for the dashboard review.
 
 **Queue:** empty after this round.
+
+## Round of 2026-11-09 to 2026-11-11 — the sandbox key, PLAN-015e–g, Design v2 Batches 2–6
+
+**Live on staging (main `76f1760`, verified 2026-11-11):**
+- PR #61 docs: the stored Stax key is the sandbox account's (docs/CLAUDE.md §4); TODO-VERIFY-074 and 075 run on the
+  sandbox from staging's own process; PLAN-011b's DNS section corrected to `globalretailgroup.com`.
+- PR #62 PLAN-015e: a returned bank debit that was kept as a credit reverses the credit; the lease is flagged, the
+  managers and the operator are told; migration 0077.
+- PR #63 PLAN-015f: the Notes & follow-ups entries carry at most two menus (Outcome ▾, ⋯); the Lease ▾ menu holds
+  Pause / Resume, Activate now and Change start date; insurance "Bill now" whenever the year is not billed; "Switch
+  to own account" only for another store's account; the visual world has a lease in the previous insurance year.
+- PR #64 PLAN-015g: the rent line goes to the processor net with the concession named in its details (TODO-VERIFY-075
+  closed); the invoice e-mail links the portal only (the hosted page offered card payment, TODO-VERIFY-076; migration
+  0078); the company address in the Django admin; the phone meta line.
+- PR #65–#69 Design v2 Batches 2–6 (`docs/qa/15/PLAN-015-batch-{2..6}-*.md`): the list pages, the store and
+  operator workspaces, the reports and the calendar (with a By month chart on the P&L), the forms, builders, wizards
+  and detail pages, and the admin, help and states pages, all in the dashboard's language; the owner's addendum of
+  2026-11-11 (the LEASE card without its Rent, Autopay and Open balance rows).
+
+**Gates:** PLAN-015e–g through the full class; the six batches through the small class with the full visual
+comparison and Fable's by-eye check in both themes and widths, the full suites on each PR's CI. Two CI runs went red
+on stale test cuts outside the targeted lists (Batches 3 and 5), both test-only; the lesson (grep the tests for every
+touched id and slicing helper; include `test_assertion_hygiene`) is in the later briefs and in memory.
+
+**For the owner:** untick "Show in setup" on the "Trash removal" fee type (Django admin › Fee types) and set the
+support e-mail on staging; say if the P&L chart should change or go, whether the operator page should show the
+selected store's rent and autopay again, and whether the plain single-card forms (store cost, contact edit, enrol,
+link invoice, reschedule, resolve a deposit) should take the step head; the visual world's dashboard attention count
+drifts with the clock (pin it when the dashboard baselines are next regenerated).
+
+**Queue:** empty after this round. Design v2 is complete.
