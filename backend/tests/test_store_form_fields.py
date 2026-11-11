@@ -126,7 +126,8 @@ def test_the_pill_shows_on_the_four_surfaces_when_set() -> None:
     grid = html("/grid/")
     assert f'#1991 Typed</a> {PILL}<span class="cell-subline">Acme</span>' in grid
     cards = html(f"/operators/{operator.pk}/")
-    assert f">#1991 Typed</a> {PILL}</span>" in cards
+    # PLAN-015 Batch 3: the operator's stores are tiles; the title and the pill share the head.
+    assert f'<span class="store-tile-title">#1991 Typed</span> {PILL}</span>' in cards
 
 
 def test_no_pill_anywhere_when_empty() -> None:

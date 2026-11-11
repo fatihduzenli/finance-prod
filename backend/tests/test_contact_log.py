@@ -1252,7 +1252,10 @@ def test_broken_from_the_attention_list_comes_back_to_the_dashboard(today: date)
     # with next=/ still comes back to the dashboard.
     assert outcome_buttons(page_of(client, "/"), old) == []
     banners = page_of(client, f"/operators/{operator.pk}/")
-    banners = banners[banners.index('id="attention"') : banners.index("</section>")]
+    start = banners.index('id="attention"')
+    # PLAN-015 Batch 3: the figure row is a section above the banners, so the slice ends at
+    # the first closing section after the banners' start.
+    banners = banners[start : banners.index("</section>", start)]
     assert outcome_buttons(banners, old) == ["kept", "rescheduled", "broken"]
     response = client.post(
         outcome_url(old, "broken", "/"), outcome_form(kind="visit", body="Nothing paid.")
