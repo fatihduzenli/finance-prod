@@ -58,7 +58,7 @@ from ledger.models import (
     OutboundMessage,
     RentCharge,
 )
-from ledger.services import collections, leases, messaging, statement_links
+from ledger.services import calendar, collections, leases, messaging, statement_links
 from mail import gmail
 from mail.memory import MemoryMailSender
 from payments.models import Job, JobKind
@@ -774,8 +774,12 @@ def test_the_morning_email_goes_to_the_author(clock: Any, memory: MemoryMailSend
             author=author,
         )
     )
+    # PLAN-015h: the worker's reminder check queues it at its time (09:00 by default); the
+    # daily tick queues no entry.
     clock(at(today, 9, 0))
-    assert "Morning e-mails queued: 1." in tick()
+    assert "Morning e-mails queued" not in tick()
+    assert not Job.objects.filter(kind=JobKind.CALENDAR_EMAIL).exists()
+    assert calendar.queue_due_reminders(at(today, 9, 0)) == 1
     [job] = Job.objects.filter(kind=JobKind.CALENDAR_EMAIL)
     assert (job.entity_type, job.entity_id, job.params) == (
         "calendar_entry",
@@ -788,7 +792,8 @@ def test_the_morning_email_goes_to_the_author(clock: Any, memory: MemoryMailSend
     assert sent.to == "morning-author@example.com"
     assert sent.subject == "Reminder: Call the landlord"
     assert "About the roof." in sent.text and f"/calendar/{asked.pk}/" in sent.text
-    assert "Morning e-mails queued: 0." in tick()
+    assert calendar.queue_due_reminders(at(today, 9, 15)) == 0
+    tick()
     assert run_queued_jobs() == []
 
 
@@ -830,7 +835,7 @@ def test_on_the_sandbox_a_morning_email_off_the_allowlist_is_held(
     author, _ = make_user("sandbox-author", Role.BILLING)
     saved(CalendarEntry(kind="note", on=today, title="Held", email_morning=True, author=author))
     clock(at(today, 9, 0))
-    tick()
+    assert calendar.queue_due_reminders(at(today, 9, 0)) == 1  # PLAN-015h: the worker's check
     [done] = run_queued_jobs()
     assert done.status == "done" and done.result == calendar_held()
     assert memory.sent == []
@@ -851,7 +856,7 @@ def test_a_morning_email_for_an_entry_moved_or_unflagged_sends_nothing(
         CalendarEntry(kind="note", on=today, title="Moved", email_morning=True, author=author)
     )
     clock(at(today, 9, 0))
-    tick()
+    assert calendar.queue_due_reminders(at(today, 9, 0)) == 1  # PLAN-015h: the worker's check
     CalendarEntry.objects.filter(pk=entry.pk).update(on=today + timedelta(days=2))
     [done] = run_queued_jobs()
     assert done.status == "done" and "no longer asks" in done.result

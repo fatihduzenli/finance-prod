@@ -1,7 +1,8 @@
 """The New calendar entry dialog (owner, 2026-11-06; ledger/calendar/_entry_dialog.html).
 
 The dialog is the Log contact frame over the Calendar page for billing: Kind as icon cards,
-the Date with the day in words, Title, Text, "E-mail me that morning" as a switch, one link
+the Date with the day in words, Title, Text, "E-mail me a reminder" as a switch with its time
+(PLAN-015h; tested in ``test_plan015h_reminder_time.py``), one link
 search over stores, operators and leases (``ledger:calendar:search``) shown as a removable
 chip, the help line, Cancel and Save. The old URL ``ledger:calendar:add`` opens the page with
 the dialog open; a save goes to the entry's month at ``#entry-<pk>``; a refusal shows the
@@ -110,20 +111,27 @@ def test_the_dialog_has_its_parts_and_labels(billing: Client) -> None:
     assert re.search(r'<label for="entry-title">Title <span class="required">\*', dialog)
     assert re.search(r'<input type="text" name="title"[^>]*required', dialog)
     assert re.search(r'<label for="entry-body">Text</label>\s*<textarea[^>]*rows="3"', dialog)
-    # The switch and its time.
+    # The switch and its time (PLAN-015h: a select, hidden while the switch is off).
     assert re.search(
         r'<label class="inline" for="entry-email_morning"><input type="checkbox" '
         r'name="email_morning" class="switch" role="switch" id="entry-email_morning"> '
-        r"E-mail me that morning</label>",
+        r"E-mail me a reminder</label>",
         dialog,
     )
-    assert '<span class="muted" id="entry-morning-time">09:00 New York</span>' in dialog
+    assert re.search(
+        r'<span class="entry-time" id="entry-time-wrap" hidden><label class="visually-hidden" '
+        r'for="entry-email_at">Reminder time</label><select name="email_at" id="entry-email_at">',
+        dialog,
+    )
+    assert '<option value="09:00" selected>9:00 AM</option>' in dialog
+    assert "entry-morning-time" not in dialog
     # One link field over the search route; no Store, Operator or Lease select in the dialog.
     assert '<label for="entry-link">Link to a store, operator or lease (optional)</label>' in dialog
     link = re.search(r'<input type="search" id="entry-link"[^>]*>', dialog)
     assert link is not None and 'data-url="/calendar/search/"' in link.group(0)
     assert "name=" not in link.group(0) and " hidden" not in link.group(0)
-    assert "<select" not in dialog
+    # The only select is the reminder's time.
+    assert dialog.count("<select") == 1
     # The chip waits hidden; the hidden fields are empty.
     assert re.search(r'id="entry-link-chip" hidden>', dialog)
     assert '<input type="hidden" name="link_kind" id="entry-link_kind" value="">' in dialog
