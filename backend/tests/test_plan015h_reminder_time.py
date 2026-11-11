@@ -11,7 +11,11 @@ daily tick queues promises only.
 from __future__ import annotations
 
 import importlib
+import logging
+import os
 import re
+import signal
+from collections.abc import Iterator
 from datetime import UTC, date, datetime, time, timedelta
 from io import StringIO
 from typing import Any
@@ -21,7 +25,7 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import Client
+from django.test import Client, override_settings
 from django.utils import timezone
 
 import mail
@@ -30,6 +34,7 @@ from finance.dates import NEW_YORK, clock_text
 from ledger.models import AuditLog, CalendarEntry
 from ledger.services import calendar
 from mail.memory import MemoryMailSender
+from payments.management.commands import worker
 from payments.models import Job, JobKind
 from tests.auth_helpers import make_user
 from tests.job_helpers import run_queued_jobs
@@ -619,3 +624,115 @@ def test_the_edit_page_shares_the_row_after_the_text(
     CalendarEntry.objects.filter(pk=entry.pk).update(email_morning=False)
     card = part(page_of(client, f"/calendar/{entry.pk}/edit/"), "calendar-entry-card")
     assert '<span class="entry-time" id="id_time-wrap" hidden>' in card
+
+
+# --- (c) and (g) The worker's reminder check -----------------------------------------------------
+
+
+@pytest.fixture
+def fresh_worker() -> Iterator[None]:
+    """A worker process that has not checked yet, as the worker (``--once`` needs it)."""
+    worker.reset_reminder_check()
+    with override_settings(STAX_CALLER="worker"):
+        yield
+    worker.reset_reminder_check()
+
+
+@pytest.mark.usefixtures("fresh_worker")
+def test_the_worker_sends_a_reminder_at_its_time_once(
+    author: User, memory: MemoryMailSender, clock: Any
+) -> None:
+    reminder(author)
+    clock(at(TODAY, 14, 15))
+    assert worker.check_reminders(at(TODAY, 14, 15)) is True
+    assert calendar_jobs() == []
+    # Within 15 minutes of the last check: no check, even though the time has come.
+    assert worker.check_reminders(at(TODAY, 14, 29)) is False
+    assert worker.check_reminders(at(TODAY, 14, 30)) is True
+    assert len(calendar_jobs()) == 1
+    clock(at(TODAY, 14, 31))
+    assert worker.tick() is True  # the queued job, sent
+    assert len(memory.sent) == 1
+    assert worker.check_reminders(at(TODAY, 14, 45)) is True
+    clock(at(TODAY, 16))
+    tick()
+    assert len(calendar_jobs()) == 1 and run_queued_jobs() == [] and len(memory.sent) == 1
+
+
+@pytest.mark.usefixtures("fresh_worker")
+def test_the_first_tick_of_a_late_worker_sends_the_days_missed_reminder(
+    author: User, memory: MemoryMailSender, clock: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    reminder(author)
+    reminder(author, on=TODAY - timedelta(days=1), title="Yesterday")
+    clock(at(TODAY, 17, 50))
+    with caplog.at_level(logging.INFO, logger="payments.management.commands.worker"):
+        call_command("worker", "--once")
+    assert "Reminder check: queued=1" in caplog.text
+    [job] = calendar_jobs()
+    assert job.status == "done" and job.result == "Sent."
+    [sent] = memory.sent
+    assert sent.subject == "Reminder: Call the landlord"
+
+
+@pytest.mark.usefixtures("fresh_worker")
+def test_the_check_runs_first_then_every_15_minutes(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    seen: list[datetime] = []
+
+    def queue(now: datetime) -> int:
+        seen.append(now)
+        return 0
+
+    monkeypatch.setattr(calendar, "queue_due_reminders", queue)
+    start = at(TODAY, 8)
+    with caplog.at_level(logging.INFO, logger="payments.management.commands.worker"):
+        moments = [start + timedelta(seconds=n) for n in (0, 1, 899, 900, 901, 1799, 1800)]
+        ran = [worker.check_reminders(moment) for moment in moments]
+    assert ran == [True, False, False, True, False, False, True]
+    assert seen == [moments[0], moments[3], moments[6]]
+    assert "Reminder check" not in caplog.text  # nothing queued: no line
+    # A clock that went back runs the check again.
+    assert worker.check_reminders(start) is True
+
+
+@pytest.mark.usefixtures("fresh_worker")
+def test_a_failing_check_is_logged_as_the_ticks_and_waits_its_turn(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, clock: Any
+) -> None:
+    calls: list[datetime] = []
+
+    def broken(now: datetime) -> int:
+        calls.append(now)
+        raise RuntimeError(f"detail {CARD}")
+
+    monkeypatch.setattr(calendar, "queue_due_reminders", broken)
+    monkeypatch.setattr(worker, "IDLE_SECONDS", 0)
+    clock(at(TODAY, 8))
+    ticks: list[bool] = []
+    original = worker.tick
+
+    def counted() -> bool:
+        if len(ticks) == 2:
+            os.kill(os.getpid(), signal.SIGTERM)
+        ticks.append(True)
+        return original()
+
+    monkeypatch.setattr(worker, "tick", counted)
+    with caplog.at_level(logging.ERROR):
+        call_command("worker")
+    # The first tick failed in the check and was logged; the loop went on, and the next ticks
+    # within 15 minutes did not run the check again.
+    assert len(ticks) == 3 and len(calls) == 1
+    assert caplog.text.count("Worker tick failed: RuntimeError") == 1
+    assert CARD not in caplog.text
+
+
+@pytest.mark.usefixtures("fresh_worker")
+def test_two_checks_at_once_queue_one_job(author: User) -> None:
+    reminder(author)
+    assert calendar.queue_due_reminders(at(TODAY, 14, 30)) == 1
+    worker.reset_reminder_check()
+    assert worker.check_reminders(at(TODAY, 14, 31)) is True
+    assert len(calendar_jobs()) == 1

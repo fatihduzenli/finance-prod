@@ -1,9 +1,11 @@
 """``worker``: the single process that calls the payment provider (PLAN-010 D2, D4).
 
-Each tick takes one queued job (:func:`payments.jobs.claim_next`) and runs it, or else
-one stored webhook event that has never been attempted
-(:func:`payments.webhooks.processor.process_event`), or else sleeps one second. Jobs
-come first. One process, one thread: the rate limiter, the breaker and the failure
+Each tick first runs the calendar's reminder check when it is due (:func:`check_reminders`,
+PLAN-015h: on the process's first tick, then every 15 minutes, it queues the day's reminder
+e-mails whose New York time has come; a failure is logged as the tick's). Then it takes one
+queued job (:func:`payments.jobs.claim_next`) and runs it, or else one stored webhook event that
+has never been attempted (:func:`payments.webhooks.processor.process_event`), or else sleeps one
+second. Jobs come first. One process, one thread: the rate limiter, the breaker and the failure
 budget have one owner. A failed webhook event is not taken again here; it waits for a
 replay or ``process_webhooks``, as before (PLAN-008 D1).
 
@@ -18,13 +20,16 @@ from __future__ import annotations
 import logging
 import signal
 import threading
+from datetime import datetime, timedelta
 from types import FrameType
 from typing import Any
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import close_old_connections, connection
+from django.utils import timezone
 
+from ledger.services import calendar
 from payments import jobs
 from payments.models import WebhookEvent, WebhookOutcome
 from payments.provider import mask_identifier
@@ -35,8 +40,36 @@ from payments.webhooks.processor import process_event
 IDLE_SECONDS = 1
 #: The ``kind`` logged for a webhook event.
 EVENT_KIND = "webhook_event"
+#: Seconds between two reminder checks (PLAN-015h: a reminder goes at most this late).
+REMINDER_CHECK_SECONDS = 900
 
 logger = logging.getLogger(__name__)
+
+#: When this process last started a reminder check; ``None`` before its first.
+_last_reminder_check: datetime | None = None
+
+
+def reset_reminder_check() -> None:
+    """Forget the last check, as a new process would (tests)."""
+    global _last_reminder_check
+    _last_reminder_check = None
+
+
+def check_reminders(now: datetime) -> bool:
+    """Queue the calendar reminders due at ``now`` (:func:`ledger.services.calendar.
+    queue_due_reminders`) on the process's first call and whenever
+    :data:`REMINDER_CHECK_SECONDS` have passed since the last (or the clock went back); whether
+    it ran. The time is taken before the check runs, so a check that fails waits its turn
+    instead of stopping every tick."""
+    global _last_reminder_check
+    last = _last_reminder_check
+    if last is not None and timedelta(0) <= now - last < timedelta(seconds=REMINDER_CHECK_SECONDS):
+        return False
+    _last_reminder_check = now
+    queued = calendar.queue_due_reminders(now)
+    if queued > 0:
+        logger.info("Reminder check: queued=%d", queued)
+    return True
 
 
 def next_event_id() -> Any:
@@ -55,6 +88,8 @@ def tick() -> bool:
     if not connection.in_atomic_block:
         # As between two requests: drop a connection that is broken or past its age.
         close_old_connections()
+    # PLAN-015h: before the jobs, so a reminder it queues is sent on this tick.
+    check_reminders(timezone.now())
     job = jobs.claim_next()
     if job is not None:
         job = jobs.run(job)
