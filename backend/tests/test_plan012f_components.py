@@ -210,11 +210,12 @@ def test_a_wide_table_sits_in_the_scroll_region() -> None:
 # --- The KPI card ---------------------------------------------------------------------------
 
 
-def test_the_old_kpi_tag_is_gone_and_its_rules_stay_for_the_daily_charges_cards() -> None:
+def test_the_old_kpi_tag_and_its_rules_are_gone() -> None:
     # Re-pinned (Opus, PLAN-015 Batch 5): the last {% kpi %} users became {% kpi2 %} cards, so
     # the tag left the library (its escaping and its tone rule are kpi2's, tested in
-    # test_design_components.py); the .kpi rules stay for Admin › Daily charges, whose cards
-    # are written as markup (ledger/run/today.html).
+    # test_design_components.py). Re-pinned again (Opus, PLAN-015 Batch 6): Admin › Daily
+    # charges, the last page whose cards were written as .kpi markup, took the {% kpi2 %} cards,
+    # so the .kpi rules left the style sheet too (.kpi-row stays: the kpi2 rows use it).
     from django.template import TemplateSyntaxError
 
     from finance.templatetags import components
@@ -222,7 +223,7 @@ def test_the_old_kpi_tag_is_gone_and_its_rules_stay_for_the_daily_charges_cards(
     assert not hasattr(components, "kpi")
     with pytest.raises(TemplateSyntaxError):
         Template('{% load components %}{% kpi "x" "1" %}')
-    assert 'class="kpi"' in (
+    assert 'class="kpi"' not in (
         Path(__file__).resolve().parents[1]
         / "ledger"
         / "templates"
@@ -230,11 +231,10 @@ def test_the_old_kpi_tag_is_gone_and_its_rules_stay_for_the_daily_charges_cards(
         / "run"
         / "today.html"
     ).read_text(encoding="utf-8")
-    assert "font-size: var(--fs-kpi);" in rule(".kpi-value")
-    assert "font-weight: 700;" in rule(".kpi-value")
-    assert rule(".kpi-value.tone-unpaid").strip() == "color: var(--unpaid-text);"
-    label = rule(".kpi-label")
-    assert "color: var(--muted);" in label and "font-size: var(--fs-sm);" in label
+    css = (Path(__file__).resolve().parents[1] / "finance/static/finance/app.css").read_text()
+    for gone in (".kpi {", ".kpi-label", ".kpi-value", ".kpi-note", ".kpi-link", ".kpi .unknown"):
+        assert gone not in css, gone
+    assert "display: grid;" in rule(".kpi-row")
 
 
 def test_the_dashboard_figures_are_kpi_cards() -> None:

@@ -1,21 +1,21 @@
 {% extends "finance/base.html" %}
-{% load responsive dates %}
+{% load components responsive dates %}
 {% block title %}Messages from {{ company.provider_name }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Messages from {{ company.provider_name }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Messages from {{ company.provider_name }}</h1></div></div>{% endblock %}
 {% block content %}
   <div class="card filter-card"><form method="get" action="{% url 'ledger:webhooks:list' %}" class="actions" role="search">
-    <label for="outcome" style="margin:0;">Outcome</label>
+    <span class="filter-field"><label for="outcome">Outcome</label>
     <select name="outcome" id="outcome">
       <option value="">Any</option>
       {% for value, label in outcomes %}<option value="{{ value }}"{% if value == outcome %} selected{% endif %}>{{ label }}</option>{% endfor %}
-    </select>
-    <label for="type" style="margin:0;">Type</label>
+    </select></span>
+    <span class="filter-field"><label for="type">Type</label>
     <select name="type" id="type">
       <option value="">Any</option>
       {% for name in event_types %}<option value="{{ name }}"{% if name == event_type %} selected{% endif %}>{{ name }}</option>{% endfor %}
-    </select>
-    <button class="btn" type="submit">Filter</button>
-    <a class="btn" id="export-csv" href="{% url 'ledger:webhooks:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>
+    </select></span>
+    <span class="filter-actions"><button class="btn" type="submit">Filter</button>
+    <a class="btn" id="export-csv" href="{% url 'ledger:webhooks:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a></span>
   </form></div>
   <div class="card table-card">
   {% responsive_table %}
@@ -30,7 +30,7 @@
           <td>{{ event.event_type }}</td>
           <td>{{ event.get_event_source_display }}</td>
           <td>{{ object_id|default:"—" }}</td>
-          <td>{{ event.outcome_words|default:"—" }}</td>
+          <td data-role="status">{% with stored=event.outcome words=event.outcome_words %}{% if not stored %}—{% elif stored == "processed" or stored|slice:":10" == "processed:" %}{% chip "paid" words %}{% elif stored == "ignored" or stored|slice:":8" == "ignored:" %}{% chip "neutral" words %}{% elif stored == "failed" or stored == "dead_letter" %}{% chip "unpaid" words %}{% elif stored == "received" %}{% chip "pending" words %}{% else %}{% chip "neutral" words %}{% endif %}{% endwith %}</td>
           <td>{{ event.attempts }}</td>
           <td>{{ event.duplicate_count }}</td>
         </tr>
@@ -40,12 +40,11 @@
     </tbody>
   </table>
   {% endresponsive_table %}
-  </div>
   {% if page.paginator.num_pages > 1 %}
-    <div class="pager" role="navigation" aria-label="Pages">
-      {% if page.has_previous %}<a class="btn" href="?{% if outcome %}outcome={{ outcome|urlencode:'' }}&amp;{% endif %}{% if event_type %}type={{ event_type|urlencode:'' }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
+    <div class="pager list-footer" role="navigation" aria-label="Pages">
       <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} messages)</span>
-      {% if page.has_next %}<a class="btn" href="?{% if outcome %}outcome={{ outcome|urlencode:'' }}&amp;{% endif %}{% if event_type %}type={{ event_type|urlencode:'' }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
+      <span class="pager-pages">{% if page.has_previous %}<a class="btn btn-sm" rel="prev" href="?{% if outcome %}outcome={{ outcome|urlencode:'' }}&amp;{% endif %}{% if event_type %}type={{ event_type|urlencode:'' }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% else %}<span class="btn btn-sm pager-off" aria-disabled="true">Previous</span>{% endif %}{% if page.has_next %}<a class="btn btn-sm" rel="next" href="?{% if outcome %}outcome={{ outcome|urlencode:'' }}&amp;{% endif %}{% if event_type %}type={{ event_type|urlencode:'' }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% else %}<span class="btn btn-sm pager-off" aria-disabled="true">Next</span>{% endif %}</span>
     </div>
   {% endif %}
+  </div>
 {% endblock %}

@@ -265,9 +265,10 @@ def avatar(letter: object, family: str = NEUTRAL) -> SafeString:
 
 #: Design v2's components (docs/qa/PLAN-015-design-v2.md §4.1; DESIGN-SPEC §3).
 #: ``{% kpi2 %}``'s figure tones and its badge's tones. PLAN-015 Batch 2: ``paid`` (green, the
-#: Payments list's Settled) and ``muted`` (a zero figure) join ``unpaid``.
+#: Payments list's Settled) and ``muted`` (a zero figure) join ``unpaid``; PLAN-015 Batch 6:
+#: ``pending`` (Daily charges' Skipped).
 MUTED = "muted"
-KPI2_VALUE_TONES: tuple[str, ...] = (UNPAID, PAID, MUTED)
+KPI2_VALUE_TONES: tuple[str, ...] = (UNPAID, PAID, MUTED, PENDING)
 KPI2_BADGE_TONES: tuple[str, ...] = (PAID, UNPAID, PENDING, NEUTRAL)
 #: ``{% period_control %}``'s periods, in order, with their labels; the first is the default.
 PERIODS: tuple[tuple[str, str], ...] = (
@@ -330,7 +331,8 @@ def kpi2(
     value_attrs: str = "",
 ) -> dict[str, Any]:
     """Design v2's KPI card: the icon in a tinted square, the title and its sub-line, the
-    figure (``value_tone``: ``unpaid`` red, ``paid`` green, ``muted`` for a zero; ``value_id``
+    figure (``value_tone``: ``unpaid`` red, ``paid`` green, ``muted`` for a zero, ``pending``
+    the pending text colour; ``value_id``
     the figure's id, for a page that names it), an optional pill badge after it (paid, unpaid,
     pending or neutral) and a footer link with an arrow (a path of this site only; anything
     else draws no link; ``link_id`` its id, PLAN-015 Batch 4: the P&L's "Why" keeps

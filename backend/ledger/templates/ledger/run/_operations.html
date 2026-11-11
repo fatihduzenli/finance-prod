@@ -1,6 +1,6 @@
 {% load components money responsive dates %}{% comment %}The operational cards moved from the dashboard (PLAN-015 Batch 1, the owner's decision 1), under the Daily charges page's own content: Today's run (the run line, the debits due today, the pending ones and the returns not resolved), the failed payment attempts, the waived charges whose invoice is still live (only when there are any), the invoices created but not sent and the last nightly check, each a card as on the dashboard before (same ids). Context: ops (ledger.services.receivables.dashboard), run_line, failed_attempts, not_sent, waived_live_heading, company.{% endcomment %}
   <section class="card" id="today-run" aria-label="Today's run">
-  <h2>Today's run</h2>
+  <div class="card-head"><h2>Today's run</h2></div>
   <p id="run-line"><a href="{% url 'ledger:run:today' %}">Daily charges today: {% if run_line %}{{ run_line.created }} created, {{ run_line.skipped }} skipped{% else %}not created yet{% endif %}</a></p>
   <ul id="run-summary">
     <li><a href="{% url 'ledger:run:today' %}">Debits due today: <strong id="run-due">{{ ops.run.due }}</strong></a></li>
@@ -9,7 +9,7 @@
   </ul>
   </section>
   <section aria-labelledby="failed-heading" class="card" id="failed-attempts">
-    <h2 id="failed-heading">Failed payment attempts: {{ ops.failed_attempts_count }}</h2>
+    <div class="card-head"><h2 id="failed-heading">Failed payment attempts: {{ ops.failed_attempts_count }}</h2></div>
     {% if failed_attempts %}
       {% responsive_table %}
       <table>
@@ -34,7 +34,7 @@
   </section>
   {% if ops.waived_live %}
     <section class="card" id="waived-live">
-      <h2>{{ waived_live_heading }}: {{ ops.waived_live|length }}</h2>
+      <div class="card-head"><h2>{{ waived_live_heading }}: {{ ops.waived_live|length }}</h2></div>
       <p class="muted">An admin clears each with "Cancel in {{ company.provider_name }}" on the charge page.</p>
       <ul>
         {% for charge in ops.waived_live %}
@@ -44,7 +44,7 @@
     </section>
   {% endif %}
   <section class="card" id="not-sent-card" aria-labelledby="not-sent">
-  <h2 id="not-sent">Invoices created but not sent: {{ ops.not_sent_count }}</h2>
+  <div class="card-head"><h2 id="not-sent">Invoices created but not sent: {{ ops.not_sent_count }}</h2></div>
   {% if not_sent %}
     {% responsive_table %}
     <table>
@@ -68,7 +68,7 @@
   {% endif %}
   </section>
   <section class="card" id="last-reconciliation-card" aria-label="Last nightly check">
-  <h2>Last nightly check</h2>
+  <div class="card-head"><h2>Last nightly check</h2></div>
   {% if ops.last_reconciliation %}
     <p id="last-reconciliation"><a href="{% url 'ledger:reconciliation:page' %}">{{ ops.last_reconciliation.get_status_display }}, started {{ ops.last_reconciliation.started_at|moment }}</a></p>
   {% else %}

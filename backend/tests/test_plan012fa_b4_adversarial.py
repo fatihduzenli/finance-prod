@@ -88,7 +88,11 @@ def test_no_iso_date_renders_as_text_on_any_main_page_for_any_role(
 ) -> None:
     site: Any = _Site(built)
     pages: list[tuple[str, bool]] = [
-        (path_of(site), name in AS_ADMIN) for name, path_of in PAGES.items()
+        (path_of(site), name in AS_ADMIN)
+        for name, path_of in PAGES.items()
+        # PLAN-015 Batch 6 added the Activity log to the visual pages; its Before and After
+        # cells show the recorded values verbatim (dates as stored), by its own rule.
+        if name != "activity-log"
     ]
     pages += list(MORE_PAGES)
     for charge in built.lease.rent_charges.all()[:2]:

@@ -17,7 +17,7 @@
   {% url 'ledger:operators:statement' pk=operator.pk as action %}{% url 'ledger:operators:statement_export' pk=operator.pk as export %}
   <div class="no-print">{% include "ledger/reports/_range.html" with action=action export=export %}</div>
   {% if too_slow %}
-    <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
+    <p class="side-note warning" id="report-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
   <p class="muted">As of {{ report.today|day }}; payment history {{ selected.from_month|month }} to {{ selected.to_month|month }}. Every store of this operator. Amounts in US dollars.</p>
 

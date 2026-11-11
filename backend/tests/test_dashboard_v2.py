@@ -904,7 +904,10 @@ def test_the_statement_timeout_wraps_the_figures(monkeypatch: pytest.MonkeyPatch
     client = client_for(Role.BILLING)[0]
     html = page(client)
     assert seen == ["bounded"]
-    assert f'<p class="warning" id="dashboard-too-slow" role="status">{TOO_SLOW}</p>' in html
+    # Re-pinned (Opus, PLAN-015 Batch 6 §3.6): the styled notice, its id and words unchanged.
+    assert (
+        f'<p class="side-note warning" id="dashboard-too-slow" role="status">{TOO_SLOW}</p>' in html
+    )
     assert 'id="figures-card"' not in html and 'id="mini-calendar"' in html
     response = client.get("/dashboard.csv")  # the spreadsheet answers with the page
     assert response.status_code == 200 and TOO_SLOW in response.content.decode()

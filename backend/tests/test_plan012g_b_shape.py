@@ -88,7 +88,8 @@ def test_the_small_button_keeps_its_height_and_gains_width(css: str) -> None:
         (".pager-page", CTL),
         (".menu li a, .menu li button", None),
         (".card", CARD),
-        (".kpi", CARD),
+        # PLAN-015 Batch 6: the old .kpi rules are gone; the v2 card keeps the card corner.
+        (".kpi2", CARD),
         (".dialog", "border-radius: 14px;"),
         (".toast", "border-radius: 10px;"),
     ],

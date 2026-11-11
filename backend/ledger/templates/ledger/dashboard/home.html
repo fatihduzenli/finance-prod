@@ -29,7 +29,7 @@ two per row, then one column in that order (app.css).{% endcomment %}
       {% include "ledger/dashboard/_operators.html" with tiles=figures.tiles %}
     </div>
   {% else %}
-    <p class="warning" id="dashboard-too-slow" role="status">{{ too_slow }}</p>
+    <p class="side-note warning" id="dashboard-too-slow" role="status">{{ too_slow }}</p>
   {% endif %}
   <div class="dashboard-row-activity" id="dashboard-row-activity">
     <div class="dashboard-main">{% if figures %}{% include "ledger/dashboard/_activity.html" with activity=figures.activity %}{% endif %}</div>

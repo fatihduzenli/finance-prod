@@ -7,7 +7,7 @@
   {% url 'ledger:reports:deposits' as action %}{% url 'ledger:reports:deposits_export' as export %}
   {% include "ledger/reports/_range.html" with action=action export=export %}
   {% if too_slow %}
-    <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
+    <p class="side-note warning" id="report-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
   <p class="muted">Bank deposits {{ company.provider_name }} reported, by deposit date, against the ACH payments and refunds settled in the same months. Security deposits paid by ACH are included: they reach the bank like rent. The difference is gross deposits less net settled ACH; a payment settled at the end of a month may be deposited in the next. Amounts in US dollars.</p>
 

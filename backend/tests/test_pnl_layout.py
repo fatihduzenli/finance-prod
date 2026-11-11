@@ -397,6 +397,8 @@ def test_the_style_sheet_carries_the_report_family_rules() -> None:
         css = sheet.read()
     assert ".pnl-table .grp-start { border-left: 1px solid var(--border-soft); }" in css
     assert ".pnl-table .negative { color: var(--unpaid-text); }" in css
-    assert ".kpi-value.tone-paid { color: var(--paid-text); }" in css
+    # Re-pinned (Opus, PLAN-015 Batch 6): the P&L figures are {% kpi2 %} cards (Batch 4) and the
+    # old .kpi rules left with Daily charges' cards; the paid figure is the kpi2 rule.
+    assert ".kpi2-value.tone-paid { color: var(--paid-text); }" in css
     phone = css[css.index("@media (max-width: 719.98px)") :]
     assert ".table-cards > table.pnl-table.role-cards tr.totals { flex-wrap: wrap;" in phone
