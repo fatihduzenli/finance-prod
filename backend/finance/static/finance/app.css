@@ -618,7 +618,8 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
    (about three fifths | two fifths, the cards as tall as each other): the Collections card (the
    head with the Monthly · Yearly .segmented links, the 28/700 total, the muted "collected from"
    line, the {% collection_bars %} SVG in .collections-chart with its .chart-tooltip, the legend)
-   beside the Operators card (.operator-tiles: a 2 × 2 grid of .operator-tile links: the avatar
+   beside the Operators card (.operator-tiles: a 2 × 2 grid of .operator-tile links, each a
+   .tile-v2, the tile shared with the operator page's store tiles (PLAN-015 Batch 3): the avatar
    tile and the name with an ellipsis, the balance 20/700 red above zero, the store count, the
    chip). Row 3, .dashboard-row-activity: the Recent activity card (the head with the search and
    the kind select, the table, the list footer) beside the narrower mini calendar column, which
@@ -650,13 +651,13 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
 .collections-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .chart-key { flex: 0 0 auto; }
 .operator-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
-.operator-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; height: 100%; box-sizing: border-box; padding: var(--space-3); border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface-2); color: var(--text); text-decoration: none; }
-.operator-tile:hover { border-color: var(--link); }
+.tile-v2 { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; height: 100%; box-sizing: border-box; padding: var(--space-3); border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface-2); color: var(--text); text-decoration: none; }
+.tile-v2:hover { border-color: var(--link); }
 .operator-tile-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: 0; }
 .operator-tile-name { overflow: hidden; font-size: var(--fs-base); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.operator-tile-balance { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.operator-tile-balance.tone-unpaid { color: var(--unpaid-text); }
-.operator-tile-stores { color: var(--muted); font-size: var(--fs-sm); }
+.operator-tile-balance, .store-tile-balance { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.operator-tile-balance.tone-unpaid, .store-tile-balance.tone-unpaid { color: var(--unpaid-text); }
+.operator-tile-stores, .store-tile-line { color: var(--muted); font-size: var(--fs-sm); }
 .activity-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; }
 .activity-filters input[type=search] { width: 15rem; max-width: 100%; padding: 7px 10px; font-size: var(--fs-base); }
 .activity-filters select { width: auto; padding: 7px 10px; font-size: var(--fs-base); }
@@ -1319,7 +1320,7 @@ fieldset.card > legend + * { clear: both; }
   #deduction-rows .deduction-amount, #deduction-rows .deduction-clear-cell { width: auto; }
   /* Operator workspace (PLAN-012f-a D7): the avatar beside the name, the muted line shown (the
      store page's address line is the one hidden), the actions on a row of their own, the tab
-     row and the Store select stacked, the store cards one a row (selectors one step more
+     row and the Store select stacked, the store tiles one a row (selectors one step more
      specific than the block's own rules, which come later in the sheet). */
   .operator-head .operator-line { display: block; }
   .operator-head .operator-avatar { width: 44px; height: 44px; font-size: var(--fs-lg); }
@@ -1328,7 +1329,7 @@ fieldset.card > legend + * { clear: both; }
   .page-header-inner > .operator-tabs-row > .tabs { min-width: 0; max-width: 100%; overflow-x: auto; }
   .page-header-inner > .operator-tabs-row > .store-selector { flex-wrap: nowrap; }
   .page-header-inner > .operator-tabs-row > .store-selector select { flex: 1 1 auto; min-width: 0; }
-  .workspace-main > .store-strip { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .workspace-main > .store-tiles { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
 }
 
 /* --- List family (PLAN-012f-a D3) ------------------------------------------------------------
@@ -1594,9 +1595,10 @@ p.detail-more-notes { padding-left: 0; }
    drawing's light teal) at the left of the name with its badges and the muted .operator-line
    (the avatar follows the title in the markup, so the page header's h1 stays the block's first
    heading); .operator-tabs-row puts the
-   tabs and the Store select on one row, the select at the right. .store-strip: the store cards
-   above the open tab (the bold title link, the muted rent and collection line, the open balance
-   in red or green); the selected store's card has a teal border. In the side column, the
+   tabs and the Store select on one row, the select at the right. .store-tiles (PLAN-015 Batch 3
+   §3.4): the store tiles above the open tab, each li's link a .tile-v2 as the dashboard's
+   operator tiles (the bold title and the brand pill, the muted rent and collection line, the
+   balance 20/700 red above zero, the chip); the selected store's tile has a teal border. In the side column, the
    .recent-contacts list (the avatar letter, the bold kind as a link, the muted date and store)
    and .side-store-label, the selected store's name over its bar and cards. */
 .operator-head > .page-title-block { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-4); row-gap: 2px; align-items: center; }
@@ -1609,15 +1611,11 @@ p.detail-more-notes { padding-left: 0; }
 .operator-tabs-row { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-2) var(--space-4); margin: 0 0 calc(-1 * var(--space-3)); }
 .operator-tabs-row > .tabs { flex: 1 1 auto; margin: 0; border-bottom: 0; }
 .operator-tabs-row > .store-selector { flex: 0 0 auto; padding-bottom: var(--space-2); }
-.store-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-4); padding: 0; list-style: none; }
-.store-card { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 14px var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
-.store-card[aria-current="true"] { border-color: var(--teal); }
-.store-card-title { color: var(--text); font-size: var(--fs-md); font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
-.store-card-title:hover { color: var(--link); }
-.store-card-line { color: var(--muted); font-size: var(--fs-sm); }
-.store-card-balance { margin-top: var(--space-1); font-size: var(--fs-md); font-weight: 700; }
-.store-card-balance.tone-unpaid { color: var(--unpaid-text); }
-.store-card-balance.tone-paid { color: var(--paid-text); }
+.store-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-4); padding: 0; list-style: none; }
+.store-tiles > li { min-width: 0; }
+.store-tiles > li[aria-current="true"] > .tile-v2 { border-color: var(--teal); }
+.store-tile-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; }
+.store-tile-title { font-size: var(--fs-md); font-weight: 700; overflow-wrap: anywhere; }
 .operator-side > .card { margin: 0 0 var(--space-4); }
 .operator-side .section-label { margin: 0 0 var(--space-3); font-size: var(--fs-base); }
 .operator-side .card-header { margin-bottom: var(--space-3); }

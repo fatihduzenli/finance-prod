@@ -42,16 +42,17 @@
 {% block content %}
   {% include "ledger/_attention.html" with banners=True %}
 
-  {% comment %}PLAN-012d D14, the approved design's layout (PLAN-012f D8; PLAN-012f-a D7, operator-workspace-laptop.png): in the two-thirds column, the strip of store cards (each store's title, rent and how it is collected, its open balance in red, or green at $0.00, "· overdue" when a charge is past due), the open tab across the operator's stores (the Charges card the selected store's when one is selected), then the operator-level items as cards; in the one-third column, CONTACT, PAYMENT, RECENT CONTACT and the statement link's card, then the selected store's action bar and side cards (on the operator's lease of it).{% endcomment %}
+  {% comment %}PLAN-012d D14, the approved design's layout (PLAN-012f D8; PLAN-012f-a D7, operator-workspace-laptop.png): in the two-thirds column, the store tiles (PLAN-015 Batch 3 §3.4, the dashboard's operator-tile style, each tile a link to its store page: the bold title and the brand pill, the rent and how it is collected, the open balance 20/700 in red above zero, and a chip: Overdue when a charge is past due, Open balance, or Paid up; the selected store's tile marked), the open tab across the operator's stores (the Charges card the selected store's when one is selected), then the operator-level items as cards; in the one-third column, CONTACT, PAYMENT, RECENT CONTACT and the statement link's card, then the selected store's action bar and side cards (on the operator's lease of it).{% endcomment %}
   <div class="workspace-grid">
   <div class="workspace-main">
   <h2 id="workspace" class="visually-hidden">Stores</h2>
-  {% if store_cards %}<ul class="store-strip" id="store-strip" aria-label="Stores of this operator">
-    {% for card in store_cards %}<li class="store-card" id="store-card-{{ card.store.pk }}"{% if card.store == store %} aria-current="true"{% endif %}>
-      <span><a class="store-card-title" href="{% url 'ledger:stores:detail' pk=card.store.pk %}">{{ card.title }}</a>{% include "ledger/stores/_brand_pill.html" with store=card.store %}</span>
-      <span class="store-card-line">{% if card.rent is not None %}{{ card.rent|money }} / month · {% endif %}{{ card.collect_line }}</span>
-      <span class="store-card-balance {% if card.balance > 0 %}tone-unpaid{% else %}tone-paid{% endif %}">{{ card.balance|money }} open{% if card.overdue %} · overdue{% endif %}</span>
-    </li>{% endfor %}
+  {% if store_cards %}<ul class="store-tiles" id="store-strip" aria-label="Stores of this operator">
+    {% for card in store_cards %}<li id="store-card-{{ card.store.pk }}"{% if card.store == store %} aria-current="true"{% endif %}><a class="store-tile tile-v2" href="{% url 'ledger:stores:detail' pk=card.store.pk %}">
+      <span class="store-tile-head"><span class="store-tile-title">{{ card.title }}</span>{% include "ledger/stores/_brand_pill.html" with store=card.store %}</span>
+      <span class="store-tile-line">{% if card.rent is not None %}{{ card.rent|money }} / month · {% endif %}{{ card.collect_line }}</span>
+      <span class="store-tile-balance{% if card.balance > 0 %} tone-unpaid{% endif %}">{{ card.balance|money }}</span>
+      {% if card.balance > 0 and card.overdue %}{% chip "unpaid" "Overdue" %}{% elif card.balance > 0 %}{% chip "pending" "Open balance" %}{% else %}{% chip "paid" "Paid up" %}{% endif %}
+    </a></li>{% endfor %}
   </ul>{% else %}<p class="muted empty" id="no-stores">No store has a lease of this operator.</p>{% endif %}
   <section id="tab-{{ ows.tab }}" class="store-tab card">
     {% if ows.tab == "charges" %}{% include "ledger/stores/_tab_charges.html" %}
