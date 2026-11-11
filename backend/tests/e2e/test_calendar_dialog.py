@@ -200,6 +200,25 @@ def test_new_entry_on_the_laptop(live_server: LiveServer, laptop: BrowserContext
         lease.operator_id,
     )
     shot(page, "calendar-entry-saved-laptop")
+    # The edit page shares the row: the switch on, 2:30 PM beside it; off hides it (PLAN-015h).
+    page.goto(f"{live_server.url}/calendar/{entry.pk}/edit/")
+    toggle = page.locator("#id_email_morning")
+    expect(toggle).to_be_checked()
+    expect(toggle).to_have_class("switch")
+    edit_when = page.locator("#id_time-wrap")
+    expect(edit_when).to_be_visible()
+    edit_select = page.locator("#id_email_at")
+    expect(edit_select).to_have_value("14:30")
+    edit_switch = page.locator("label.inline", has_text="E-mail me a reminder")
+    label_box, select_box = edit_switch.bounding_box(), edit_select.bounding_box()
+    assert label_box is not None and select_box is not None
+    assert select_box["x"] >= label_box["x"] + label_box["width"]
+    assert select_box["y"] < label_box["y"] + label_box["height"]
+    themed_shots(page, "calendar-entry-edit-laptop")
+    edit_switch.click()
+    expect(edit_when).to_be_hidden()
+    edit_switch.click()
+    expect(edit_when).to_be_visible()
 
 
 def test_a_tap_selects_a_day_and_a_hold_shows_its_plus_on_the_phone(

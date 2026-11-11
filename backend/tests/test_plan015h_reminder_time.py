@@ -613,7 +613,8 @@ def test_the_edit_page_shares_the_row_after_the_text(
     assert card.count('name="email_morning"') == 1 and card.count('name="email_at"') == 1
     assert re.search(
         r'<label class="inline" for="id_email_morning"><input type="checkbox" '
-        r'name="email_morning" id="id_email_morning" checked> E-mail me a reminder</label>',
+        r'name="email_morning" class="switch" role="switch" id="id_email_morning" checked> '
+        r"E-mail me a reminder</label>",
         card,
     )
     wrap = part(card, "id_time-wrap")
@@ -730,7 +731,7 @@ def test_a_failing_check_is_logged_as_the_ticks_and_waits_its_turn(
 
 
 @pytest.mark.usefixtures("fresh_worker")
-def test_two_checks_at_once_queue_one_job(author: User) -> None:
+def test_a_check_after_another_queued_it_adds_no_job(author: User) -> None:
     reminder(author)
     assert calendar.queue_due_reminders(at(TODAY, 14, 30)) == 1
     worker.reset_reminder_check()

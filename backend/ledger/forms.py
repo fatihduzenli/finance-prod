@@ -3672,7 +3672,11 @@ class _CalendarEntryFields(forms.Form):
         max_length=2000,
         validators=[validate_no_payment_data],
     )
-    email_morning = forms.BooleanField(required=False, label="E-mail me a reminder")
+    email_morning = forms.BooleanField(
+        required=False,
+        label="E-mail me a reminder",
+        widget=forms.CheckboxInput(attrs={"class": "switch", "role": "switch"}),
+    )
     # PLAN-015h: the reminder's New York time, a half hour from 6:00 AM to 9:00 PM.
     email_at = _QuietChoiceField(
         choices=calendar.REMINDER_TIME_CHOICES,
@@ -3763,10 +3767,6 @@ class CalendarEntryDialogForm(_CalendarEntryFields):
     # Checked together in clean(): a hidden field's own error would show nowhere.
     link_kind = forms.CharField(required=False, widget=forms.HiddenInput)
     link_id = forms.CharField(required=False, widget=forms.HiddenInput)
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.fields["email_morning"].widget.attrs.update({"class": "switch", "role": "switch"})
 
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean() or {}
