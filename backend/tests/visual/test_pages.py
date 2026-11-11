@@ -118,6 +118,12 @@ PAGES: dict[str, Callable[[Site], str]] = {
     "reports": lambda site: reverse("ledger:reports:index"),
     # PLAN-014 D4, D5: the message templates and the Outbox (one held message), admins only.
     "message-templates": lambda site: "/admin-settings/templates/",
+    # PLAN-015 Batch 6: the other Admin pages and Preferences in the dashboard's language (the
+    # Activity log admins only; Messages and the Nightly check as billing).
+    "activity-log": lambda site: "/audit/",
+    "webhooks": lambda site: "/webhooks/",
+    "nightly-check": lambda site: "/reconciliation/",
+    "preferences": lambda site: "/settings/",
     "outbox": lambda site: "/admin-settings/outbox/",
     # PLAN-014 I4: the Bank deposits page (billing): one deposit with a suggestion, one without.
     "bank-deposits": lambda site: "/admin-settings/bank-deposits/",
@@ -163,6 +169,7 @@ AS_ADMIN = {
     "settings",
     "message-templates",
     "outbox",
+    "activity-log",
 }
 #: Seen signed out, in a context of its own (the sign-in page, PLAN-012f-a D9; the 401 page).
 SIGNED_OUT = {"login", "sign-in-required"}
