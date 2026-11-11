@@ -1161,7 +1161,6 @@ fieldset.card > legend + * { clear: both; }
 .entry-time .muted { font-size: var(--fs-sm); }
 .entry-time > .errorlist { flex-basis: 100%; margin: 0; }
 @media (min-width: 720px) { .entry-time select { padding: 7px 10px; font-size: var(--fs-base); } }
-@media (max-width: 719.98px) { .entry-time { flex-basis: 100%; } }
 .entry-link-field [hidden] { display: none; }
 .entry-link-results li button { display: block; width: 100%; min-height: 0; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-ctl); background: none; color: var(--text); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .entry-link-results li button:hover, .entry-link-results li.is-active button { background: var(--month-current); }
@@ -1791,6 +1790,8 @@ p.detail-more-notes { padding-left: 0; }
   /* A form dialog (.dialog-lg) takes the whole screen; the confirmation keeps the sheet. */
   .dialog-lg { height: 100dvh; max-height: none; margin: 0; border-width: 0; border-radius: 0; }
   .dialog-form-grid { grid-template-columns: minmax(0, 1fr); }
+  /* PLAN-015h: the reminder's time takes its own line under the switch. */
+  .entry-time { flex-basis: 100%; }
   /* The dashboard (PLAN-015 Batch 1): the operator tiles one column; the Collections bars
      scroll sideways inside their card; the header's controls wrap under the title. */
   .operator-tiles { grid-template-columns: minmax(0, 1fr); }
