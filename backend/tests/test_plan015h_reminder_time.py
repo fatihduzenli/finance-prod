@@ -11,6 +11,7 @@ daily tick queues promises only.
 from __future__ import annotations
 
 import importlib
+import re
 from datetime import UTC, date, datetime, time, timedelta
 from io import StringIO
 from typing import Any
@@ -34,6 +35,7 @@ from tests.auth_helpers import make_user
 from tests.job_helpers import run_queued_jobs
 from tests.test_collections import mail_set_up
 from tests.test_operator_views import client_for
+from tests.test_plan012fa_d_calendar import part
 
 pytestmark = pytest.mark.django_db
 
@@ -477,3 +479,143 @@ def test_the_dialog_and_the_edit_page_store_the_chosen_time(
     assert edit_post(client, entry, email_at="20:30")[0] == 302
     entry.refresh_from_db()
     assert entry.email_at == time(20, 30)
+
+
+# --- (b) Shown, and (f) the markup ---------------------------------------------------------------
+
+
+def page_of(client: Client, path: str) -> str:
+    response = client.get(path)
+    assert response.status_code == 200, path
+    return response.content.decode()
+
+
+def options_of(select: str) -> list[tuple[str, str, bool]]:
+    return [
+        (value, words, bool(selected))
+        for value, selected, words in re.findall(
+            r'<option value="([^"]*)"( selected)?>([^<]*)</option>', select
+        )
+    ]
+
+
+def test_the_detail_page_and_the_day_panel_show_the_time(
+    billing_user: tuple[Client, User], clock: Any
+) -> None:
+    client, user = billing_user
+    clock(at(TODAY, 10))
+    entry = reminder(user, at_time=time(14, 30))
+    body = page_of(client, f"/calendar/{entry.pk}/")
+    assert (
+        '<p class="store-line" id="detail-line">Friday, Oct 23, 2026 · Reminder e-mail at '
+        "2:30 PM</p>"
+    ) in body
+    assert "<dt>Reminder e-mail</dt><dd>At 2:30 PM New York time, to the author</dd>" in body
+    assert "Morning e-mail" not in body
+    panel = part(page_of(client, f"/calendar/?month=2026-10&on={TODAY}"), "calendar-day-panel")
+    assert '<span class="day-entry-meta">Reminder · e-mail at 2:30 PM</span>' in panel
+    # Off: "No", the plain line, the kind alone in the panel.
+    CalendarEntry.objects.filter(pk=entry.pk).update(email_morning=False)
+    body = page_of(client, f"/calendar/{entry.pk}/")
+    assert '<p class="store-line" id="detail-line">Friday, Oct 23, 2026</p>' in body
+    assert "<dt>Reminder e-mail</dt><dd>No</dd>" in body
+    panel = part(page_of(client, f"/calendar/?month=2026-10&on={TODAY}"), "calendar-day-panel")
+    assert '<span class="day-entry-meta">Reminder</span>' in panel
+    assert "e-mail at" not in panel
+
+
+def test_a_note_with_the_switch_on_shows_its_kind_and_time(
+    billing_user: tuple[Client, User], clock: Any
+) -> None:
+    client, user = billing_user
+    clock(at(TODAY, 10))
+    reminder(user, kind="note", at_time=time(6, 0))
+    panel = part(page_of(client, f"/calendar/?month=2026-10&on={TODAY}"), "calendar-day-panel")
+    assert '<span class="day-entry-meta">Note · e-mail at 6:00 AM</span>' in panel
+
+
+def test_the_dialogs_row_has_the_switch_and_the_hidden_time(
+    billing_user: tuple[Client, User], clock: Any
+) -> None:
+    client, _ = billing_user
+    clock(at(TODAY, 10))
+    dialog = part(page_of(client, "/calendar/"), "calendar-entry")
+    row = dialog[dialog.index('<div class="field switch-field entry-morning">') :]
+    row = row[: row.index("</select>")]
+    assert re.search(
+        r'<label class="inline" for="entry-email_morning"><input type="checkbox" '
+        r'name="email_morning" class="switch" role="switch" id="entry-email_morning"> '
+        r"E-mail me a reminder</label>",
+        row,
+    )
+    assert '<span class="entry-time" id="entry-time-wrap" hidden>' in row
+    assert '<label class="visually-hidden" for="entry-email_at">Reminder time</label>' in row
+    assert '<select name="email_at" id="entry-email_at">' in row
+    options = options_of(row)
+    assert [value for value, _, _ in options] == [v for v, _ in calendar.REMINDER_TIME_CHOICES]
+    assert len(options) == 31 and [o for o in options if o[2]] == [("09:00", "9:00 AM", True)]
+    assert '</select><span class="muted">New York time</span></span>' in dialog
+    assert "entry-morning-time" not in dialog and "09:00 New York" not in dialog
+    assert "that morning" not in dialog
+    page = page_of(client, "/calendar/")
+    assert page.index("ledger/calendar_dialog") < page.index("ledger/reminder_time")
+
+
+def test_a_refused_time_shows_under_the_select_with_the_row_open(
+    billing_user: tuple[Client, User], clock: Any
+) -> None:
+    client, _ = billing_user
+    clock(at(TODAY, 15))
+    status, body, _ = dialog_post(client, email_at="14:30")
+    assert status == 200
+    dialog = part(body, "calendar-entry")
+    assert '<div class="field switch-field entry-morning has-error">' in dialog
+    assert re.search(
+        r'id="entry-email_morning" checked>|checked[^>]*id="entry-email_morning"', dialog
+    )
+    wrap = part(dialog, "entry-time-wrap")
+    assert wrap.startswith('<span class="entry-time" id="entry-time-wrap">')
+    assert re.search(
+        r'</select><span class="muted">New York time</span><ul class="errorlist"[^>]*><li>'
+        + re.escape(calendar.TIME_PASSED)
+        + "</li></ul></span>",
+        wrap,
+    )
+    assert ("14:30", "2:30 PM", True) in options_of(wrap)
+
+
+def test_a_time_off_the_list_shows_its_words_even_with_the_switch_off(
+    billing_user: tuple[Client, User], clock: Any
+) -> None:
+    client, _ = billing_user
+    clock(at(TODAY, 10))
+    status, body, _ = dialog_post(client, email_morning="", email_at="06:15")
+    assert status == 200
+    wrap = part(part(body, "calendar-entry"), "entry-time-wrap")
+    assert wrap.startswith('<span class="entry-time" id="entry-time-wrap">')
+    assert "Pick a time from the list." in wrap
+
+
+def test_the_edit_page_shares_the_row_after_the_text(
+    billing_user: tuple[Client, User], clock: Any
+) -> None:
+    client, user = billing_user
+    clock(at(TODAY, 10))
+    entry = reminder(user, at_time=time(14, 30))
+    body = page_of(client, f"/calendar/{entry.pk}/edit/")
+    card = part(body, "calendar-entry-card")
+    assert card.index('name="body"') < card.index("entry-morning") < card.index('name="store"')
+    assert card.count('name="email_morning"') == 1 and card.count('name="email_at"') == 1
+    assert re.search(
+        r'<label class="inline" for="id_email_morning"><input type="checkbox" '
+        r'name="email_morning" id="id_email_morning" checked> E-mail me a reminder</label>',
+        card,
+    )
+    wrap = part(card, "id_time-wrap")
+    assert wrap.startswith('<span class="entry-time" id="id_time-wrap">')
+    assert [o for o in options_of(wrap) if o[2]] == [("14:30", "2:30 PM", True)]
+    assert "ledger/reminder_time.js" in body
+    # The switch off: the time waits hidden, the stored time selected.
+    CalendarEntry.objects.filter(pk=entry.pk).update(email_morning=False)
+    card = part(page_of(client, f"/calendar/{entry.pk}/edit/"), "calendar-entry-card")
+    assert '<span class="entry-time" id="id_time-wrap" hidden>' in card

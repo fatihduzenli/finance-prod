@@ -1,4 +1,4 @@
-{% extends "finance/base.html" %}
+{% extends "finance/base.html" %}{% load static %}
 {% block title %}{% if entry %}Edit {{ entry.title }}{% else %}New calendar entry{% endif %}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:calendar:page' %}">Calendar</a> <span aria-hidden="true">›</span> {% if entry %}<a href="{% url 'ledger:calendar:detail' pk=entry.pk %}">{{ entry.title }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if entry %}Edit calendar entry{% else %}New calendar entry{% endif %}</span></nav><h1>{% if entry %}Edit calendar entry{% else %}New calendar entry{% endif %}</h1></div></div>{% endblock %}
 {% block content %}
@@ -12,7 +12,8 @@
     <p class="muted">Calendar entries are shared with all staff and appear in every staff member's calendar feed. Never write card or account numbers.</p>
     {{ form.non_field_errors }}
     {% for field in form.visible_fields %}
-      {% include "ledger/stores/_form_field.html" %}
+      {% if field.name != "email_morning" and field.name != "email_at" %}{% include "ledger/stores/_form_field.html" %}{% endif %}
+      {% if field.name == "body" %}{% include "ledger/calendar/_reminder_row.html" with ids="id_" %}{% endif %}
     {% endfor %}
     </section>
     </div>
@@ -22,4 +23,4 @@
     </div>
   </form>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/reminder_time.js' %}" defer></script>{% endblock %}

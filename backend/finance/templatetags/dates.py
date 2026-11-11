@@ -2,7 +2,8 @@
 "Dates on screen"; docs/qa/PLAN-012f-a-design-follow-up.md B4 and §4).
 
 ``|day`` ``Nov 1, 2026``; ``|day_short`` ``Nov 1``; ``|day_long`` ``Tuesday, Oct 20, 2026``;
-``|month`` ``Oct 2026``; ``|moment`` ``Nov 1, 2026 · 14:02``. Each filter is the matching
+``|month`` ``Oct 2026``; ``|moment`` ``Nov 1, 2026 · 14:02``; ``|clock`` ``2:30 PM`` (a
+``time``, PLAN-015h). Each filter is the matching
 helper of :mod:`finance.dates` (a ``datetime`` is read in New York, a naive one as UTC); ``None``
 or anything that is not a ``date``/``datetime`` renders as ``""`` (never raises on a page), so
 ``|day|default:"—"`` shows a dash. ISO stays where the value is a machine value (a field's
@@ -12,7 +13,7 @@ or anything that is not a ``date``/``datetime`` renders as ``""`` (never raises 
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from django import template
 
@@ -59,3 +60,9 @@ def month(value: object) -> str:
 def moment(value: object) -> str:
     """``Nov 1, 2026 · 14:02`` (New York), or ``""``."""
     return _safe(dates.moment_text, value)
+
+
+@register.filter(name="clock")
+def clock(value: object) -> str:
+    """``2:30 PM``, or ``""`` for anything but a ``time``."""
+    return dates.clock_text(value) if isinstance(value, time) else ""
