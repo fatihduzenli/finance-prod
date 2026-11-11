@@ -1393,18 +1393,9 @@ td.cell-chevron a:hover { color: var(--text); }
   .filters-fields { flex-direction: column; align-items: stretch; }
   .filters .filters-row .btn, .filters .filters-row button { width: auto; }
 }
-/* --- Totals tiles (PLAN-014 A6; the Payments list's totals) ----------------------------------
-   .tile-row: five tiles across (two per row at 768 px and under), each a label over its figure,
-   the figure right-aligned in its tile; .tone-paid green, .tone-unpaid red, .is-zero muted.
-   .info: the round ⓘ beside the card's title; its .tooltip (role=tooltip) opens on hover, focus
+/* --- The Payments list's totals (PLAN-014 A6) -------------------------------------------------
+   .info: the round ⓘ beside the totals' label; its .tooltip (role=tooltip) opens on hover, focus
    and a tap (.is-open), on the popover's surface, edge and shadow (--popover-*). */
-.tile-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-3); }
-.tile { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); }
-.tile-label { color: var(--muted); font-size: var(--fs-sm); }
-.tile-value { color: var(--text); font-size: var(--fs-lg); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.tile.tone-paid .tile-value { color: var(--paid-text); }
-.tile.tone-unpaid .tile-value { color: var(--unpaid-text); }
-.tile.is-zero .tile-value { color: var(--muted); font-weight: 600; }
 /* PLAN-015 Batch 2: the Payments totals as {% kpi2 %} cards. The ⓘ stays beside its label (its
    tooltip opens to the right of it); the five cards fit one row on a laptop (10rem each, as on the
    phone), their figures 22 px so a five-figure sum keeps one line. */
@@ -1417,7 +1408,6 @@ td.cell-chevron a:hover { color: var(--text); }
 .tooltip { display: none; position: absolute; top: calc(100% + var(--space-1)); left: 0; z-index: 20; width: min(22rem, 80vw); padding: var(--space-3); border: 1px solid var(--popover-border); border-radius: var(--radius-ctl); background: var(--surface-2); box-shadow: var(--popover-shadow); color: var(--text-2); font-size: var(--fs-sm); font-weight: 400; }
 .info-wrap:hover .tooltip, .info-wrap:focus-within .tooltip, .info-wrap.is-open .tooltip { display: block; }
 @media (max-width: 768px) {
-  .tile-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tooltip { left: auto; right: 0; }
 }
 /* PLAN-014 A4: a vacant store's "+ Add lease" link after its Status badge (admins). */
