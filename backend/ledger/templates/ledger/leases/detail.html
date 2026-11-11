@@ -3,8 +3,8 @@
 {% load responsive %}
 {% load static %}
 {% block title %}Lease {{ lease.store.external_label }}{% endblock %}
-{% comment %}The lease page, in the detail family (PLAN-012f-a D4): the header (breadcrumb, title, the muted line, Edit and More ▾ with autopay's controls and End lease; admin), the tiles Rent / Open balance / Deposit, the Rent history, Autopay, Charges, Notes, Documents and Activity cards beside DETAILS and MORE.{% endcomment %}
-{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> <span aria-current="page">Lease {{ lease.store.external_label }}</span></nav><h1 class="store-title">Lease {{ lease.store.external_label }} <span class="badge" id="lease-status">{{ lease.get_collection_status_display }}</span>{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>
+{% comment %}The lease page, in the detail family (PLAN-012f-a D4): the header (breadcrumb, title, the muted line, Edit and More ▾ with autopay's controls and End lease; admin), the tiles Rent / Open balance / Deposit, the Rent history, Autopay, Charges, Notes, Documents and Activity cards beside DETAILS and MORE. PLAN-015 Batch 5: the tiles are {% kpi2 %} cards, each card opens with its .card-head, and the header's status is a status badge in the Leases list's tones (active paid, paused pending, otherwise neutral).{% endcomment %}
+{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> <span aria-current="page">Lease {{ lease.store.external_label }}</span></nav><h1 class="store-title">Lease {{ lease.store.external_label }} <span id="lease-status">{% if lease.collection_status == "active" %}{% status_badge lease.get_collection_status_display "paid" %}{% elif lease.collection_status == "paused" %}{% status_badge lease.get_collection_status_display "pending" %}{% else %}{% status_badge lease.get_collection_status_display "neutral" %}{% endif %}</span>{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>
   {% if can_edit or can_enrol or can_end or can_pause or can_resume or can_stop %}<div class="page-actions" id="lease-actions">
     {% if can_edit %}<a class="btn" href="{% url 'ledger:leases:edit' pk=lease.pk %}">Edit</a>{% endif %}
     {% if can_enrol or can_end or can_pause or can_resume or can_stop %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
@@ -25,7 +25,7 @@
   </section>
 
   <section class="card" id="rent-history-card">
-  <h2>Rent history</h2>
+  <div class="card-head"><h2>Rent history</h2></div>
   {% responsive_table %}
   <table id="rent-history">
     <thead><tr><th class="money">Amount</th><th>From</th><th>To</th><th>Source</th></tr></thead>
@@ -41,7 +41,7 @@
   </section>
 
   <section class="card" id="autopay-card">
-  <h2>Autopay</h2>
+  <div class="card-head"><h2>Autopay</h2></div>
   {% include "ledger/_job_status.html" %}
   {% if autopay_moved %}<p id="autopay-moved"><strong>{{ autopay_moved }}</strong></p>{% endif %}
   {% comment %}PLAN-012c D8: what blocks or notes enrolment only on a provider-ACH lease, where autopay can be set up.{% endcomment %}
@@ -75,7 +75,7 @@
   </section>
 
   <section class="card" id="lease-charges-card">
-  <h2 id="lease-charges">Charges, invoices and payments</h2>
+  <div class="card-head"><h2 id="lease-charges">Charges, invoices and payments</h2></div>
   <p id="charges-moved">Charges, invoices and payments are on the store page: <a href="{% url 'ledger:stores:detail' pk=lease.store.pk %}?tab=charges#tab-charges" id="store-charges-link">Store {{ lease.store.external_label }}, Charges</a>.</p>
   <p class="muted" id="exports-moved">Exports: the rent and one-off charges CSV files are on the store page's Charges tab.</p>
   </section>
@@ -85,7 +85,7 @@
   {% include "ledger/_detail_activity.html" %}
 
   <section class="card" id="lease-notes">
-  <h2>Notes</h2>
+  <div class="card-head"><h2>Notes</h2></div>
   {% for note in notes %}
     <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{% if note.author_label %}{{ note.author_label }}{% else %}{{ note.author|staff }}{% endif %} {{ note.created_at|day }}</span></p>
   {% empty %}
@@ -96,7 +96,7 @@
 
   <aside class="detail-side" aria-label="Details">
   <section class="card" id="lease-summary" aria-label="Lease">
-  <h2 class="section-label">Details</h2>
+  <div class="card-head"><h2 class="section-label">Details</h2></div>
   <dl class="detail-list side-list">
     <dt>Store</dt><dd><a href="{% url 'ledger:stores:detail' pk=lease.store.pk %}">{{ lease.store.external_label }}</a></dd>
     <dt>Operator</dt><dd>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</dd>
@@ -114,7 +114,7 @@
 
   {% if can_enrol or can_end or can_pause or can_resume or can_stop %}
   <section class="card" id="more-card">
-    <h2 class="section-label">More</h2>
+    <div class="card-head"><h2 class="section-label">More</h2></div>
     <ul class="detail-more">
       {% if can_enrol %}<li><a href="{% url 'ledger:leases:enrol' pk=lease.pk %}" id="more-enrol">Set up autopay</a></li>{% endif %}
       {% if can_pause %}<li><form method="post" action="{% url 'ledger:leases:pause' pk=lease.pk %}" class="js-single-submit">{% csrf_token %}<button class="link-action" type="submit" id="more-pause-autopay">Pause autopay</button></form></li>{% endif %}

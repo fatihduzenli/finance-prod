@@ -14,6 +14,8 @@ from django.urls import reverse
 
 from accounts.roles import Role
 from ledger.models import (
+    CollectionStatus,
+    Lease,
     OneOffCharge,
     Payment,
     PaymentChannel,
@@ -363,3 +365,64 @@ def test_the_wizard_tiles_are_kpi2_cards_with_the_live_deductions_hooks() -> Non
     css = APP_CSS.read_text(encoding="utf-8")
     assert ".wizard-tiles .kpi2 {" in css and ".wizard-tiles .kpi {" not in css
     assert ".detail-tiles .kpi {" not in css and ".detail-tiles .kpi-value" not in css
+
+
+# --- §3.3: card heads on the detail pages, the lease's status badge --------------------------
+
+#: The cards whose title comes from a shared include (Activity: its own head row; the
+#: installment plan and the collection e-mails: the includes' h2), out of this batch's scope.
+INCLUDED_HEADS = ("activity-card", "plan-card", "collections-card", "promise-card")
+
+
+def own_cards(html: str) -> list[tuple[str, str]]:
+    """(id, the markup after its opening tag) of each section.card of the detail grid whose
+    markup is the page's own."""
+    grid = html[html.index('<div class="detail-grid">') :]
+    found = []
+    for match in re.finditer(r'<section class="card"(?: id="([a-z-]+)")?[^>]*>\s*', grid):
+        card_id = match.group(1) or ""
+        if card_id in INCLUDED_HEADS:
+            continue
+        found.append((card_id, grid[match.end() : match.end() + 200]))
+    return found
+
+
+def test_each_detail_page_s_cards_open_with_a_card_head() -> None:
+    world = detail.a_world()
+    payment = a_payment(world.rent, "500.00", date(2026, 10, 2))
+    admin = client_for(Role.ADMIN)[0]
+    paths = {
+        "rent": detail.rent_path(world.rent),
+        "one-off": detail.one_off_path(world.deposit),
+        "payment": reverse("ledger:payments:detail", kwargs={"pk": payment.pk}),
+        "invoice": reverse("ledger:invoices:draft", kwargs={"pk": world.draft.pk}),
+        "lease": reverse("ledger:leases:detail", kwargs={"pk": world.lease.pk}),
+    }
+    for name, path in paths.items():
+        html = detail.page(admin, path)
+        cards = own_cards(html)
+        assert len(cards) >= 3, (name, [card_id for card_id, _ in cards])
+        for card_id, opening in cards:
+            assert opening.startswith('<div class="card-head"><h2'), (name, card_id, opening)
+        side = detail.between(html, '<aside class="detail-side"', "</aside>")
+        assert '<div class="card-head"><h2 class="section-label">Details</h2></div>' in side
+        assert "card-header" not in html.split('id="activity-card"')[0], name
+    # The Invoices card's link sits at the right of its head.
+    rent = detail.page(client_for(Role.BILLING)[0], paths["rent"])
+    head = detail.between(rent, 'id="invoices-card"', "</div>")
+    assert '<div class="card-head"><h2>Invoices</h2><a class="card-link"' in head
+    assert 'id="attach-invoice-link"' in head
+
+
+def test_the_lease_header_carries_the_status_badge_in_its_tone() -> None:
+    world = detail.a_world(promise=False)
+    viewer = client_for(Role.VIEWER)[0]
+    path = reverse("ledger:leases:detail", kwargs={"pk": world.lease.pk})
+    head = detail.header_of(detail.page(viewer, path))
+    status = detail.between(head, '<span id="lease-status">', "</h1>")
+    assert '<span class="badge badge-paid">' in status and "Active" in status
+    Lease.objects.filter(pk=world.lease.pk).update(collection_status=CollectionStatus.PAUSED)
+    head = detail.header_of(detail.page(viewer, path))
+    status = detail.between(head, '<span id="lease-status">', "</h1>")
+    assert '<span class="badge badge-pending">' in status and "Paused" in status
+    assert head.count('id="lease-status"') == 1

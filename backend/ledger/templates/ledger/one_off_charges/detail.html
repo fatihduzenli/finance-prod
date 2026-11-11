@@ -2,7 +2,7 @@
 {% load components money dates people %}
 {% load responsive charge_kinds %}
 {% block title %}{{ charge.label }}{% if lease %} {{ lease.store.external_label }}{% endif %}{% endblock %}
-{% comment %}The one-off charge page (PLAN-012f-a D4; DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png): the header (breadcrumb, title with the status and kind badges, the muted line, Add payment / Charge now, Split into installments, More ▾), then the two-thirds column (the Amount, Paid and Balance tiles, Invoices, Payments, Activity and the charge's other cards) beside the one-third column (DETAILS, the open promise, MORE). The More menu and the MORE card hold the same actions by role.{% endcomment %}
+{% comment %}The one-off charge page (PLAN-012f-a D4; DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png): the header (breadcrumb, title with the status and kind badges, the muted line, Add payment / Charge now, Split into installments, More ▾), then the two-thirds column (the Amount, Paid and Balance tiles, Invoices, Payments, Activity and the charge's other cards) beside the one-third column (DETAILS, the open promise, MORE). The More menu and the MORE card hold the same actions by role. PLAN-015 Batch 5: the tiles are {% kpi2 %} cards (Amount, Paid green above zero, Balance red above zero and muted at zero) and each card opens with its .card-head.{% endcomment %}
 {% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=charges#tab-charges" id="charges-crumb">Charges</a> <span aria-hidden="true">›</span> {% elif operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{{ charge.label }}</span></nav><h1 class="store-title">{{ charge.label }} <span id="charge-status">{% status_badge charge.get_status_display charge.status %}</span> <span class="badge kind-badge" id="charge-kind">{{ kind_badge }}</span>{% if charge.legacy %} <span class="badge">From the spreadsheet</span>{% endif %}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if can_record or can_charge_now or can_split or can_link_invoice or can_edit or can_waive or can_cancel or can_delete_invoice %}<div class="page-actions" id="charge-actions">{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:one_off_charges:payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}{% if can_charge_now %}<a class="btn{% if not can_record %} btn-primary{% endif %}" href="{% url 'ledger:one_off_charges:charge_now' pk=charge.pk %}" id="charge-now">Charge now</a>{% endif %}{% if can_split %}<a class="btn" href="{{ split_url }}" id="split-installments">Split into installments</a>{% endif %}{% if can_link_invoice or can_edit or can_waive or can_cancel or can_delete_invoice %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
   {% if can_link_invoice %}<li><a href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a></li>{% endif %}
   {% if can_edit %}<li><a href="{% url 'ledger:one_off_charges:edit' pk=charge.pk %}" id="edit-charge">Edit charge</a></li>{% endif %}
@@ -54,13 +54,13 @@
   {% endif %}
 
   <section class="card" id="invoices-card">
-  <div class="card-header"><h2>Invoices</h2>{% if can_link_invoice %}<a class="card-link" href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="attach-invoice-link">Attach {{ company.provider_name }} invoice</a>{% endif %}</div>
+  <div class="card-head"><h2>Invoices</h2>{% if can_link_invoice %}<a class="card-link" href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="attach-invoice-link">Attach {{ company.provider_name }} invoice</a>{% endif %}</div>
   {% include "ledger/_detail_invoices.html" %}
   {% for released in released_invoices %}<p class="invoice-released"{% if forloop.first %} id="invoice-released"{% endif %}>{{ released }}</p>{% endfor %}
   </section>
 
   <section class="card" id="payments-card">
-  <h2>Payments</h2>
+  <div class="card-head"><h2>Payments</h2></div>
   {% if payments %}
   {% responsive_table %}
   <table id="payments">
@@ -92,7 +92,7 @@
 
   {% if resolution %}
     <section class="card" id="deposit-resolution-card">
-    <h2>Deposit resolution</h2>
+    <div class="card-head"><h2>Deposit resolution</h2></div>
     <dl id="deposit-resolution" class="detail-list">
       <dt>Resolved</dt><dd id="resolution-kind">{{ resolution.get_kind_display }} on {{ resolution.resolved_on|day }}{% if resolution.created_by %} by {{ resolution.created_by|staff }}{% endif %}</dd>
       <dt>Amount</dt><dd id="resolution-amount">{{ resolution.amount|money }}</dd>
@@ -109,7 +109,7 @@
 
   <aside class="detail-side" aria-label="Details">
   <section class="card" id="charge-summary" aria-label="Charge">
-  <h2 class="section-label">Details</h2>
+  <div class="card-head"><h2 class="section-label">Details</h2></div>
   <dl class="detail-list side-list">
     <dt>Category</dt><dd id="category">{{ charge|kind_label }}</dd>
     {% if charge.category != "setup" %}<dt>Description</dt><dd id="description">{{ charge.description }}</dd>
@@ -130,7 +130,7 @@
 
   {% if can_link_invoice or can_edit or can_waive or can_cancel or can_delete_invoice %}
   <section class="card" id="more-card">
-    <h2 class="section-label">More</h2>
+    <div class="card-head"><h2 class="section-label">More</h2></div>
     <ul class="detail-more">
       {% if can_link_invoice %}<li><a href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="more-link-invoice">Attach {{ company.provider_name }} invoice</a></li>{% endif %}
       {% if can_edit %}<li><a href="{% url 'ledger:one_off_charges:edit' pk=charge.pk %}" id="more-edit-charge">Edit charge</a></li>{% endif %}
