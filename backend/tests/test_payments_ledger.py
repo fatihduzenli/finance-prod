@@ -219,7 +219,7 @@ def test_every_role_reads_the_ledger_and_the_totals(book: dict[str, Any], role: 
     client, _ = client_for(role)
     page = client.get(LIST).content.decode()
     # PLAN-014 A6, restyled by PLAN-015 Batch 2: the totals are five KPI cards v2; the figures
-    # keep their ids on the card's value, with the tone of the figure (settled paid, returned unpaid).
+    # keep their ids on the card's value with the figure's tone (settled paid, returned unpaid).
     assert '<span class="kpi2-value tone-paid" id="total-settled">$1,900.00</span>' in page
     assert '<span class="kpi2-value" id="total-pending">$700.00</span>' in page
     assert '<span class="kpi2-value tone-unpaid" id="total-returned">$300.00</span>' in page
