@@ -51,6 +51,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_safe
 
+from finance.dates import month_short_text, month_text
 from finance.us_states import US_STATES
 from ledger.models import Brand, Operator
 from ledger.services import (
@@ -169,6 +170,7 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
             "group_lines": _group_lines(groups, query.group),
             "total": total,
             "kpis": _kpis(total, rows),
+            "chart_months": _chart_months(query, rows, total),
             "row_count": len(rows),
             "cost_only_count": sum(1 for row in rows if row.cost_only),
             "deposits_held": held,
@@ -217,6 +219,46 @@ def _kpis(total: pnl.Figures, rows: list[pnl.PnlRow]) -> dict[str, Any]:
             else ""
         ),
     }
+
+
+@dataclass(frozen=True, slots=True)
+class ChartMonth:
+    """A month of the P&L chart (``{% pnl_bars %}``): the label under its bars ("Oct"), its
+    title ("Oct 2026"), the money collected (rent and fees, as the Collected card) and the
+    costs and collected margin (``None``: a cost is unknown)."""
+
+    label: str
+    title: str
+    collected: Decimal
+    costs: Decimal | None
+    margin: Decimal | None
+
+
+def _chart_months(
+    query: pnl.PnlQuery, rows: list[pnl.PnlRow], total: pnl.Figures
+) -> list[ChartMonth]:
+    """PLAN-015 Batch 4 §3.3: every month of the range in order, from the rows already read
+    (grouped by month here, no query; a month without rows is zero); none for a range of one
+    month (the figures say it all) or with nothing billed or collected."""
+    billed = total.rent_billed + total.fees_billed
+    collected = total.rent_collected + total.fees_collected
+    if len(query.months) < 2 or not (billed or collected):
+        return []
+    by_month = {group.rows[0].month: group for group in pnl.grouped(rows, pnl.GROUP_MONTH)}
+    empty = pnl.Figures()
+    months = []
+    for month in query.months:
+        figures = by_month.get(month, empty)
+        months.append(
+            ChartMonth(
+                label=month_short_text(month),
+                title=month_text(month),
+                collected=figures.rent_collected + figures.fees_collected,
+                costs=figures.costs,
+                margin=figures.margin_collected,
+            )
+        )
+    return months
 
 
 def _group_lines(groups: list[pnl.PnlGroup], group: str) -> list[tuple[pnl.PnlGroup, str, str]]:

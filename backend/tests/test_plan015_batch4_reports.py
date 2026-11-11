@@ -266,3 +266,241 @@ def test_aging_counts_one_store_once() -> None:
     a_rent_charge(lease, date(2026, 10, 1), RentChargeStatus.UNPAID, "400.00", day=1, seq=1)
     figures = aging_figures(page(client_for(Role.VIEWER)[0], "/reports/aging/"))
     assert '<p class="kpi2-sub">1 store</p>' in figures
+
+
+# --- §3.3 The P&L chart ---------------------------------------------------------------------------
+
+THREE_MONTHS = {"from": "2026-07", "to": "2026-09"}
+
+
+def three_months() -> None:
+    """One store with its landlord rent (2,500) and rent of 3,500 a month: July paid in full,
+    August 2,000, September nothing."""
+    store = pnl_world.a_store()
+    lease = pnl_world.a_lease(store)
+    pnl_world.a_cost(store)
+    july = pnl_world.rent(lease, pnl_world.JULY)
+    august = pnl_world.rent(lease, pnl_world.AUGUST)
+    pnl_world.rent(lease, pnl_world.SEPTEMBER)
+    pnl_world.paid(july, "3500.00", date(2026, 7, 5))
+    pnl_world.paid(august, "2000.00", date(2026, 8, 5))
+
+
+def chart_card(html: str) -> str:
+    start = html.index('<section class="card pnl-chart-card" id="pnl-chart-card"')
+    return html[start : html.index("</section>", start)]
+
+
+def months_of(card: str) -> list[str]:
+    return re.findall(r'<g class="collection-bar pnl-month"[^>]*>.*?</g>', card, re.S)
+
+
+def test_a_three_month_range_draws_three_months_of_two_bars() -> None:
+    three_months()
+    html = pnl_page(THREE_MONTHS)
+    card = chart_card(html)
+    assert (
+        html.index('id="pnl-kpis"')
+        < html.index('id="pnl-chart-card"')
+        < html.index('id="pnl-card"')
+    )
+    assert (
+        '<div class="card-head"><h2 class="section-label" id="pnl-chart-title">By month</h2></div>'
+    ) in card
+    assert 'aria-labelledby="pnl-chart-title"' in html
+    assert (
+        '<div class="collections-chart pnl-chart" id="pnl-chart" '
+        'data-tooltip-fields="collected:Collected,costs:Costs,margin:Margin">'
+    ) in card
+    assert '<div class="chart-tooltip" id="pnl-tooltip" hidden></div>' in card
+    months = months_of(card)
+    assert len(months) == 3
+    assert [month.count("<rect ") for month in months] == [2, 2, 2]
+    assert (
+        'data-label="Jul 2026" data-collected="$3,500.00" data-costs="$2,500.00" '
+        'data-margin="$1,000.00"'
+    ) in months[0]
+    assert 'data-collected="$2,000.00" data-costs="$2,500.00" data-margin="-$500.00"' in months[1]
+    assert 'data-collected="$0.00" data-costs="$2,500.00" data-margin="-$2,500.00"' in months[2]
+    assert (
+        "<title>Aug 2026 · Collected $2,000.00 · Costs $2,500.00 · Margin -$500.00</title>"
+    ) in months[1]
+    assert [re.findall(r'class="bar-label"[^>]*>([^<]+)<', month) for month in months] == [
+        ["Jul"],
+        ["Aug"],
+        ["Sep"],
+    ]
+    for month in months:
+        collected, costs = re.findall(r'fill="(var\(--[a-z-]+\))"', month)[:2]
+        assert (collected, costs) == ("var(--chart-income)", "var(--chart-expenses)")
+    # September collected nothing: a bar of height 0 on the zero line, the axis still drawn.
+    assert (
+        '<rect x="' in months[2]
+        and 'height="0.0" rx="0.0" fill="var(--chart-income)"' in (months[2])
+    )
+    assert card.count('class="axis-label"') == 5
+    svg = re.search(
+        r'<svg class="collections-svg" viewBox="0 0 720.0 232.0" role="img" '
+        r'aria-label="([^"]+)">',
+        card,
+    )
+    assert svg is not None
+    assert svg[1] == "Collected and costs by month from Jul 2026 to Sep 2026."
+    legend = card[card.index('<ul class="collections-legend" id="pnl-chart-legend"') :]
+    assert re.findall(r"</svg>([A-Za-z]+)</li>", legend) == ["Collected", "Costs"]
+    assert 'fill="var(--chart-expenses)"' in legend
+    assert "ledger/charts.js" in html
+
+
+def test_the_largest_figure_sets_the_scale_and_the_ticks_read_in_thousands() -> None:
+    three_months()
+    card = chart_card(pnl_page(THREE_MONTHS))
+    ticks = re.findall(r'class="axis-label"[^>]*>([^<]+)<', card)
+    assert ticks == ["$0k", "$1k", "$2k", "$3k", "$4k"]  # 3,500 in four steps of 1,000
+    july = months_of(card)[0]
+    # 3,500 of 4,000 on a plot of 190: 166.25 high, from y = 200 - 166.25.
+    assert 'y="33.8" width="' in july and 'height="166.3"' in july
+
+
+def test_costs_above_collected_and_twelve_months_fit_without_overlapping_labels() -> None:
+    store = pnl_world.a_store()
+    lease = pnl_world.a_lease(store, started_on=date(2025, 1, 1))
+    pnl_world.a_cost(store, starts=date(2025, 1, 1))
+    for month in range(1, 13):
+        pnl_world.rent(lease, date(2025, month, 1), "1000.00")
+    card = chart_card(pnl_page({"from": "2025-01", "to": "2025-12"}))
+    months = months_of(card)
+    assert len(months) == 12
+    assert all('data-margin="-$2,500.00"' in month for month in months)  # nothing collected
+    centres = [float(x) for x in re.findall(r'class="bar-label" x="([0-9.]+)"', card)]
+    assert len(centres) == 12 and centres == sorted(centres)
+    assert min(b - a for a, b in zip(centres, centres[1:], strict=False)) >= 28
+    assert max(centres) < 720
+
+
+def test_a_long_range_labels_every_other_month() -> None:
+    store = pnl_world.a_store()
+    lease = pnl_world.a_lease(store, started_on=date(2024, 1, 1))
+    pnl_world.a_cost(store, starts=date(2024, 1, 1))
+    pnl_world.rent(lease, date(2024, 1, 1), "1000.00")
+    card = chart_card(pnl_page({"from": "2024-01", "to": "2026-12"}))
+    assert len(months_of(card)) == 36
+    labels = re.findall(r'class="bar-label" x="([0-9.]+)"[^>]*>([^<]+)<', card)
+    assert len(labels) == 18 and labels[0][1] == "Jan" and labels[1][1] == "Mar"
+    assert card.count("<title>") == 36  # every month keeps its title
+
+
+def test_an_unknown_cost_month_draws_no_cost_bar() -> None:
+    three_months()
+    # A store without a landlord rent, leased in August only: August's costs are unknown.
+    unknown = pnl_world.a_lease(
+        pnl_world.a_store("Store 2476"),
+        pnl_world.an_operator("Halid"),
+        started_on=pnl_world.AUGUST,
+        ended_on=date(2026, 8, 31),
+    )
+    pnl_world.rent(unknown, pnl_world.AUGUST)
+    months = months_of(chart_card(pnl_page(THREE_MONTHS)))
+    assert months[1].count("<rect ") == 1
+    assert 'data-costs="unknown" data-margin="unknown"' in months[1]
+    assert "· Costs unknown · Margin unknown</title>" in months[1]
+    assert months[0].count("<rect ") == months[2].count("<rect ") == 2
+
+
+def test_one_month_or_nothing_billed_or_collected_shows_no_chart() -> None:
+    assert 'id="pnl-chart-card"' not in pnl_page(THREE_MONTHS)  # nothing at all
+    three_months()
+    assert 'id="pnl-chart-card"' not in pnl_page(JULY_ONLY)
+    assert 'id="pnl-chart-card"' not in pnl_page({"from": "2025-01", "to": "2025-03"})
+    assert 'id="pnl-chart-card"' in pnl_page(THREE_MONTHS)
+
+
+def test_the_chart_stays_with_the_rows_shown_and_any_grouping() -> None:
+    three_months()
+    for params in ({"detail": "1"}, {"group": "operator"}, {"group": "month"}):
+        assert len(months_of(chart_card(pnl_page({**THREE_MONTHS, **params})))) == 3, params
+
+
+def test_the_chart_rows_are_grouped_from_the_rows_already_read() -> None:
+    three_months()
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    client = client_for(Role.VIEWER)[0]
+    client.get(pnl_world.PAGE, JULY_ONLY)  # the session's first reads
+    counts = []
+    for params in (JULY_ONLY, THREE_MONTHS):
+        with CaptureQueriesContext(connection) as captured:
+            response = client.get(pnl_world.PAGE, params)
+        assert response.status_code == 200
+        counts.append(len(captured))
+    assert counts[0] == counts[1], counts
+    months = response.context["chart_months"]
+    assert [(m.label, m.title, m.collected, m.costs, m.margin) for m in months] == [
+        ("Jul", "Jul 2026", Decimal("3500.00"), Decimal("2500.00"), Decimal("1000.00")),
+        ("Aug", "Aug 2026", Decimal("2000.00"), Decimal("2500.00"), Decimal("-500.00")),
+        ("Sep", "Sep 2026", Decimal("0.00"), Decimal("2500.00"), Decimal("-2500.00")),
+    ]
+
+
+def test_a_month_without_rows_is_zero_in_the_range_order() -> None:
+    store = pnl_world.a_store()
+    lease = pnl_world.a_lease(store, started_on=pnl_world.JULY, ended_on=date(2026, 7, 31))
+    pnl_world.paid(pnl_world.rent(lease, pnl_world.JULY), "100.00", date(2026, 7, 5))
+    response = client_for(Role.VIEWER)[0].get(pnl_world.PAGE, {"from": "2026-06", "to": "2026-08"})
+    months = response.context["chart_months"]
+    assert [m.title for m in months] == ["Jun 2026", "Jul 2026", "Aug 2026"]
+    assert months[0].collected == months[2].collected == 0
+    assert months[1].collected == Decimal("100.00")
+
+
+def test_the_too_slow_page_has_no_chart(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ledger.views import reports
+
+    three_months()
+
+    def cancelled(compute: object) -> object:
+        raise reports.ReportTooSlow
+
+    monkeypatch.setattr(reports, "bounded", cancelled)
+    html = pnl_page(THREE_MONTHS)
+    assert 'id="pnl-too-slow"' in html and 'id="pnl-chart-card"' not in html
+
+
+def test_a_month_label_never_carries_user_text() -> None:
+    store = pnl_world.a_store("<script>alert(1)</script>")
+    lease = pnl_world.a_lease(store, pnl_world.an_operator("<b>Op</b>"))
+    pnl_world.a_cost(store)
+    pnl_world.paid(pnl_world.rent(lease, pnl_world.JULY), "10.00", date(2026, 7, 5))
+    card = chart_card(pnl_page({"from": "2026-07", "to": "2026-08"}))
+    assert "script" not in card and "Op" not in card
+    assert set(re.findall(r'data-label="([^"]+)"', card)) == {"Jul 2026", "Aug 2026"}
+
+
+def test_the_pnl_tag_escapes_and_draws_nothing_for_no_months() -> None:
+    from types import SimpleNamespace
+
+    from finance.templatetags.charts import pnl_bars
+
+    assert pnl_bars([]) == ""
+    hostile = SimpleNamespace(
+        label='<b>"x', title="<i>", collected=Decimal("5"), costs=None, margin=None
+    )
+    drawn = str(pnl_bars([hostile]))
+    assert "<b>" not in drawn and "<i>" not in drawn and "&lt;b&gt;&quot;x" in drawn
+
+
+def test_the_costs_key_is_the_quiet_expenses_colour() -> None:
+    from django.template import Context, Template
+
+    key = Template('{% load charts %}{% chart_key "costs" %}').render(Context())
+    assert 'fill="var(--chart-expenses)"' in key
+
+
+def test_the_dashboard_chart_names_its_tooltip_fields() -> None:
+    html = page(client_for(Role.VIEWER)[0], "/")
+    assert (
+        '<div class="collections-chart" id="collections-chart" '
+        'data-tooltip-fields="collected:Collected,due:Due">'
+    ) in html
+    assert html.index("ledger/charts.js") < html.index("ledger/dashboard.js")

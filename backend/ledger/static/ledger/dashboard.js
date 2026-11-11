@@ -1,10 +1,9 @@
 // The dashboard's small behaviours (docs/qa/PLAN-015-design-v2.md §4.2; PLAN-012f-b D6;
 // PLAN-012g C3). The root gets the class "js" first, so that the style sheet hides the mini
-// calendar's script-free list. The Collections chart: hovering a bar (.collection-bar) shows
-// #collections-tooltip over it with the bar's data-label, data-collected and data-due, the other
-// bars dimmed (.is-hovering, .is-hover); leaving the chart hides it (each bar's <title> is the
-// tooltip without the script). The Recent activity kind select submits its GET form on change
-// (a Show button without the script). A tap on a mini calendar day toggles its popover
+// calendar's script-free list. The Collections chart's hover tooltip is ledger/charts.js's
+// (PLAN-015 Batch 4: shared with the Profit and loss chart). The Recent activity kind select
+// submits its GET form on change (a Show button without the script). A tap on a mini
+// calendar day toggles its popover
 // and rings the day (is-selected; hover and focus show the popover through the style sheet);
 // one is open at a time. The tapped day's list is moved (not copied) into #mini-panel in the
 // place of the "Next 7 days" list (#mini-upcoming-body, hidden meanwhile; owner 2026-11-01),
@@ -15,42 +14,6 @@
 document.documentElement.classList.add("js");
 (function () {
   "use strict";
-  var chart = document.getElementById("collections-chart");
-  var tooltip = document.getElementById("collections-tooltip");
-  function line(word, value) {
-    var row = document.createElement("span");
-    row.appendChild(document.createTextNode(word));
-    var figure = document.createElement("b");
-    figure.textContent = value;
-    row.appendChild(figure);
-    return row;
-  }
-  if (chart && tooltip) {
-    Array.prototype.slice.call(chart.querySelectorAll(".collection-bar")).forEach(function (bar) {
-      bar.addEventListener("mouseenter", function () {
-        while (tooltip.firstChild) { tooltip.removeChild(tooltip.firstChild); }
-        var head = document.createElement("strong");
-        head.textContent = bar.getAttribute("data-label") || "";
-        tooltip.appendChild(head);
-        tooltip.appendChild(line("Collected", bar.getAttribute("data-collected") || ""));
-        tooltip.appendChild(line("Due", bar.getAttribute("data-due") || ""));
-        tooltip.hidden = false;
-        var frame = chart.getBoundingClientRect();
-        var box = bar.getBoundingClientRect();
-        var left = box.left - frame.left + chart.scrollLeft + box.width / 2 - tooltip.offsetWidth / 2;
-        var widest = chart.scrollWidth - tooltip.offsetWidth;
-        tooltip.style.left = Math.max(0, Math.min(left, widest)) + "px";
-        tooltip.style.top = Math.max(0, box.top - frame.top - tooltip.offsetHeight - 6) + "px";
-        chart.classList.add("is-hovering");
-        bar.classList.add("is-hover");
-      });
-      bar.addEventListener("mouseleave", function () { bar.classList.remove("is-hover"); });
-    });
-    chart.addEventListener("mouseleave", function () {
-      tooltip.hidden = true;
-      chart.classList.remove("is-hovering");
-    });
-  }
   var kind = document.getElementById("activity-kind");
   if (kind && kind.form) {
     kind.addEventListener("change", function () { kind.form.submit(); });

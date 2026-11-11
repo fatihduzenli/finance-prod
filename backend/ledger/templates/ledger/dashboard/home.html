@@ -36,4 +36,4 @@ two per row, then one column in that order (app.css).{% endcomment %}
     <div class="dashboard-side dashboard-side-fit">{% include "ledger/dashboard/_mini_calendar.html" %}</div>
   </div>
 {% endblock %}
-{% block scripts %}{% if can_act %}<script src="{% static 'ledger/store_picker.js' %}" defer></script>{% endif %}<script src="{% static 'ledger/dashboard.js' %}" defer></script>{% endblock %}
+{% block scripts %}{% if can_act %}<script src="{% static 'ledger/store_picker.js' %}" defer></script>{% endif %}<script src="{% static 'ledger/charts.js' %}" defer></script><script src="{% static 'ledger/dashboard.js' %}" defer></script>{% endblock %}
