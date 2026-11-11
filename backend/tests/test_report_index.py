@@ -361,9 +361,11 @@ def test_three_groups_each_card_one_link_with_open_and_its_id() -> None:
 def test_the_header_line() -> None:
     html = get(viewer(), INDEX).content.decode()
     assert "<h1>Reports</h1>" in html
-    assert '<span class="page-date" id="reports-lede">Every report downloads as a spreadsheet.' in (
-        html
-    )
+    # PLAN-015 Batch 4 re-pin: the lede is the dashboard header's muted sub-line.
+    assert (
+        '<div class="page-title-block"><h1>Reports</h1>'
+        '<p class="page-sub" id="reports-lede">Every report downloads as a spreadsheet.</p></div>'
+    ) in html
 
 
 def test_the_statement_card_searches_the_operator_list() -> None:

@@ -2,7 +2,7 @@
 {% load money icons dates %}
 {% comment %}The Reports index (docs/qa/PLAN-014b item 2; docs/design/reports-dark-laptop.png): ledger.views.reports.report_index. Three groups of cards; each card is one link: the icon and the title on one row, the one-line description, then the live figure of ledger.services.report_index with its sub-line at the left and "Open ›" at the right of the same row. The Customer statement card holds the operator search under its link (a form never sits inside a link; it submits on Enter). Without figures (the statement timeout cancelled them) the cards show without them and the page says so.{% endcomment %}
 {% block title %}Reports{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Reports</h1><span class="page-date" id="reports-lede">Every report downloads as a spreadsheet.</span></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Reports</h1><p class="page-sub" id="reports-lede">Every report downloads as a spreadsheet.</p></div></div>{% endblock %}
 {% block content %}
   {% if too_slow %}<p class="warning" id="reports-too-slow" role="status">{{ too_slow }}</p>{% endif %}
   <section class="report-group" id="reports-collections" aria-labelledby="reports-collections-title">

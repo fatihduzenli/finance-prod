@@ -399,15 +399,16 @@ def test_the_other_family_pages_carry_the_counts_and_title_cells() -> None:
     a_rent_charge(lease, date(2026, 9, 1), RentChargeStatus.UNPAID, "400.00", day=1)
     admin = client_for(Role.ADMIN)[0]
     arrears = admin.get("/arrears/").content.decode()
-    assert '<span class="list-counts" id="list-counts">1 operator behind · $400.00 owed' in arrears
+    # PLAN-015 Batch 4 re-pin: the counts are the dashboard header's muted sub-line.
+    assert '<p class="page-sub" id="list-counts">1 operator behind · $400.00 owed</p>' in arrears
     assert 'class="cell-subline">Behind</span>' in arrears
     overdue = re.search(r'<td class="arrears-overdue"[^>]*>(.*?)</td>', arrears, re.S)
     assert overdue is not None and "badge-overdue" in overdue[1] and "$400.00 overdue" in overdue[1]
     returns = admin.get("/returns/").content.decode()
-    assert '<span class="list-counts" id="list-counts">0 not resolved</span>' in returns
+    assert '<p class="page-sub" id="list-counts">0 not resolved</p>' in returns
     assert '<div class="pager list-footer"' in returns
     disputes = admin.get("/disputes/").content.decode()
-    assert 'id="list-counts">0 disputes in the last 90 days</span>' in disputes
+    assert '<p class="page-sub" id="list-counts">0 disputes in the last 90 days</p>' in disputes
     search = admin.get("/search/", {"q": "behind"}).content.decode()
-    assert 'id="list-counts">1 store · 1 operator</span>' in search
+    assert '<p class="page-sub" id="list-counts">1 store · 1 operator</p>' in search
     assert '<span class="cell-subline">' in search and 'class="cell-chevron"' in search

@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
-{% load money responsive dates components %}
+{% load money responsive dates components icons %}
 {% block title %}Disputes{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Disputes</h1><span class="list-counts" id="list-counts">{{ rows|length }} dispute{{ rows|length|pluralize }} in the last 90 days</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:disputes:export' %}">Download spreadsheet</a><form method="post" action="{% url 'ledger:disputes:refresh' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="refresh-disputes"{% if job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Disputes</h1><p class="page-sub" id="list-counts">{{ rows|length }} dispute{{ rows|length|pluralize }} in the last 90 days</p></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:disputes:export' %}">{% icon "file" 16 %}Download spreadsheet</a><form method="post" action="{% url 'ledger:disputes:refresh' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="refresh-disputes"{% if job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form></div></div>{% endblock %}
 {% block content %}
   <p class="muted">The disputes {{ company.provider_name }} reports for the last 90 days, read in the background each day, on a dispute event and when you press Update from {{ company.provider_name }}. Statuses and reasons are {{ company.provider_name }}'s own words. Transaction identifiers are masked. Fewer than {{ highlight_days }} days left to respond is highlighted.</p>
 
