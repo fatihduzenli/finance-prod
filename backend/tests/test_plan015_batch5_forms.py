@@ -33,13 +33,15 @@ from tests.receivables_helpers import (
     a_store,
     an_operator,
 )
-from tests.test_add_payment_page import a_plain_operator, invoiced, page_of
+from tests.test_add_payment_page import page_of
+from tests.test_bank_debit import invoiced
+from tests.test_installments import a_one_off
+from tests.test_one_off_charges import an_operator as a_banked_operator
 from tests.test_operator_views import client_for
 from tests.test_plan012f_d_pages import APP_CSS
 from tests.test_plan012fa_c_builder import a_draft, a_world, element, new_store_path, text
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
-from tests.test_split_page import a_one_off, billing, fake, fixed_now  # noqa: F401
-from tests.test_split_page import an_operator as a_banked_operator
+from tests.test_split_page import billing, fake, fixed_now  # noqa: F401
 from tests.test_split_page import page as split_page
 
 pytestmark = pytest.mark.django_db
@@ -190,7 +192,7 @@ def test_add_payment_summary_rows_and_shape(fake: FakeProvider) -> None:  # noqa
 
 
 def test_add_payment_with_no_bank_greys_the_debit_card_and_chooses_the_record_card() -> None:
-    lease = a_lease(a_store("1991 Istanbul", 1991), a_plain_operator("Fatih Co"))
+    lease = a_lease(a_store("1991 Istanbul", 1991), an_operator("Fatih Co"))
     charge = a_rent_charge(lease, date(2026, 10, 1), due="2000.00")
     body = get(Role.ADMIN, reverse("ledger:charges:record_payment", kwargs={"pk": charge.pk}))
     how = element(body, HOW_CARD, "fieldset")
