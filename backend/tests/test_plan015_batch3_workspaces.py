@@ -14,7 +14,14 @@ import pytest
 from django.test import Client
 
 from accounts.roles import Role
-from ledger.models import ContactKind, Operator, PaymentStatus, RentChargeStatus
+from ledger.models import (
+    CollectionStatus,
+    ContactKind,
+    Lease,
+    Operator,
+    PaymentStatus,
+    RentChargeStatus,
+)
 from ledger.services import store_costs
 from tests.receivables_helpers import a_lease, a_payment, a_rent_charge, a_store, an_operator
 from tests.test_operator_views import client_for
@@ -115,8 +122,9 @@ def test_the_store_figures_with_a_lease_read_the_header() -> None:
 
     rent = figure(row, "rent")
     assert icon_of(rent) == "banknote"
-    assert sub_of(rent) == "Debit day 1st"
-    assert value_of(rent) == ("kpi2-value", "$2,000.00 / month")
+    # The figure is an amount, never a sentence: the words go to the sub-line.
+    assert sub_of(rent) == "per month · debit day 1st"
+    assert value_of(rent) == ("kpi2-value", "$2,000.00")
     assert link_of(rent) == (f"/leases/{lease.pk}/", "Lease")
 
     autopay = figure(row, "autopay")
@@ -161,7 +169,29 @@ def test_a_paid_up_store_shows_zero_without_the_red_tone() -> None:
     row = figure_row(page(client_for(Role.BILLING)[0], f"/stores/{lease.store_id}/"))
     balance = figure(row, "open-balance")
     assert value_of(balance) == ("kpi2-value", "$0.00") and sub_of(balance) is None
-    assert sub_of(figure(row, "rent")) == "Debit day 5th"
+    assert sub_of(figure(row, "rent")) == "per month · debit day 5th"
+
+
+def test_the_rent_sub_line_names_both_debit_days_or_none() -> None:
+    twice = a_lease(
+        a_store("Twice", 2003), an_operator("Twice LLC"), debit_day=1, second_debit_day=15
+    )
+    rent = figure(
+        figure_row(page(client_for(Role.BILLING)[0], f"/stores/{twice.store_id}/")), "rent"
+    )
+    assert value_of(rent) == ("kpi2-value", "$3,500.00")
+    assert sub_of(rent) == "per month · debit day 1st and 15th"
+
+    # A paused lease may have no debit day (an active one must: leases_active_has_day_and_operator).
+    dayless = a_lease(
+        a_store("Dayless", 2004), an_operator("Dayless LLC"), status=CollectionStatus.PAUSED
+    )
+    Lease.objects.filter(pk=dayless.pk).update(debit_day=None)
+    rent = figure(
+        figure_row(page(client_for(Role.BILLING)[0], f"/stores/{dayless.store_id}/")), "rent"
+    )
+    assert value_of(rent) == ("kpi2-value", "$3,500.00")
+    assert sub_of(rent) == "per month"
 
 
 def test_a_viewer_sees_the_figures_and_only_pages_a_viewer_reads() -> None:
@@ -262,7 +292,9 @@ def test_the_operator_figure_row_has_its_four_cards_with_or_without_a_store(
 
     promise = figure(row, "promise")
     assert icon_of(promise) == "handshake"
-    assert value_of(promise) == ("kpi2-value", "$3,000.00 by Nov 1, 2026")
+    # The figure is an amount, never a sentence: the day goes to the sub-line.
+    assert value_of(promise) == ("kpi2-value", "$3,000.00")
+    assert sub_of(promise) == "by Nov 1, 2026"
     assert '<span class="kpi2-pill kpi2-pill-pending">Open</span>' in promise
     assert link_of(promise) == (f"{url}?{keep}tab=charges#contacts", "Notes & follow-ups")
 
@@ -278,6 +310,7 @@ def test_an_operator_without_a_store_has_zeros_none_and_no_tiles() -> None:
     assert value_of(figure(row, "returns")) == ("kpi2-value", "0")
     promise = figure(row, "promise")
     assert value_of(promise) == ("kpi2-value", "None") and "kpi2-pill" not in promise
+    assert sub_of(promise) is None
     assert 'id="store-strip"' not in html and 'id="no-stores"' in html
 
 

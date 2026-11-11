@@ -173,7 +173,9 @@ def test_the_store_header_has_the_crumb_title_line_tabs_and_strip() -> None:
         '<span class="kpi2-value tone-unpaid" id="figure-open-balance-value">$2,000.00</span>'
         in strip
     )
-    assert '<span class="kpi2-value" id="figure-rent-value">$2,000.00 / month</span>' in strip
+    # Re-pinned (Batch 3 findings): the figure is the amount; "per month" is the sub-line.
+    assert '<span class="kpi2-value" id="figure-rent-value">$2,000.00</span>' in strip
+    assert '<p class="kpi2-sub">per month · debit day 1st</p>' in strip
     assert '<span class="kpi2-value" id="figure-autopay-value">Not set up</span>' in strip
 
 
