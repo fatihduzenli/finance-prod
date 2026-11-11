@@ -520,7 +520,7 @@ def test_the_calendar_side_cards_open_with_the_card_head() -> None:
     assert re.search(
         r'aria-labelledby="calendar-day-title">\s*<div class="card-head day-panel-head">'
         r'<h2 class="section-label" id="calendar-day-title">[^<]+</h2>'
-        r'<a class="card-link" id="panel-add-entry" href="/calendar/new/\?on=[0-9-]+" '
+        r'<a class="btn btn-sm" id="panel-add-entry" href="/calendar/new/\?on=[0-9-]+" '
         r'data-dialog-open="calendar-entry"',
         day,
     )
