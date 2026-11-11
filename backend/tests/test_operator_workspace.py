@@ -86,6 +86,13 @@ def section(html: str, element_id: str) -> str:
     return found.group(0)
 
 
+def tile_of(html: str, store_id: object) -> str:
+    """The store's tile (li#store-card-<pk>) on the operator page."""
+    found = re.search(rf'<li id="store-card-{store_id}".*?</li>', html, re.S)
+    assert found is not None, store_id
+    return found.group(0)
+
+
 # --- The selector and the header -----------------------------------------------------------
 
 
@@ -110,7 +117,11 @@ def test_the_default_is_all_stores_and_the_selector_lists_the_operators_stores()
     assert f'value="{first.store_id}" selected' in html
     header = section(html, "workspace-header")
     assert has_token(header, "1001") and not has_token(header, "1002")
-    assert re.search(r'id="header-open-balance">\$1,000\.00<', header)
+    # PLAN-015 Batch 5 §9.1 (re-pinned): the store's open balance left its LEASE card; the
+    # selected store's tile carries it, the card the operator's open balance of all stores.
+    assert 'id="header-open-balance"' not in header
+    tile = tile_of(html, first.store_id)
+    assert '<span class="store-tile-balance tone-unpaid">$1,000.00</span>' in tile
     assert re.search(r'id="header-operator-balance">\$1,250\.00<', header)
     actions = bar(html)
     assert f"lease={first.pk}" in actions and f"lease={second.pk}" not in actions
@@ -136,7 +147,11 @@ def test_the_store_parameter_switches_the_store_and_the_bar() -> None:
     html = page(client_for(Role.BILLING)[0], operator_page(operator, store=str(second.store_id)))
     assert f'value="{second.store_id}" selected' in html
     header = section(html, "workspace-header")
-    assert has_token(header, "1002") and re.search(r'id="header-open-balance">\$250\.00<', header)
+    # PLAN-015 Batch 5 §9.1 (re-pinned): the store's open balance is its tile's, not the card's.
+    assert has_token(header, "1002") and 'id="header-open-balance"' not in header
+    tile = tile_of(html, second.store_id)
+    assert 'aria-current="true"' in tile
+    assert '<span class="store-tile-balance tone-unpaid">$250.00</span>' in tile
     assert re.search(r'id="header-operator-balance">\$1,250\.00<', header)
     actions = bar(html)
     assert f"lease={second.pk}" in actions and f"lease={first.pk}" not in actions

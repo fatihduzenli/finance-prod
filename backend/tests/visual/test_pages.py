@@ -83,6 +83,11 @@ PAGES: dict[str, Callable[[Site], str]] = {
     "payment-detail": lambda site: reverse(
         "ledger:payments:detail", kwargs={"pk": settled_payment_of(site).pk}
     ),
+    # PLAN-015 Batch 5: the lease page in the detail family (KPI cards v2, the card heads, the
+    # header's status badge), seen as billing.
+    "lease-detail": lambda site: reverse(
+        "ledger:leases:detail", kwargs={"pk": site.world.lease.pk}
+    ),
     # PLAN-012f-b Batch E: a confirmation as a dialog over its parent, the Help pages, the
     # not-found page in the shell.
     "void-payment": lambda site: reverse(

@@ -11,10 +11,10 @@ and an existing charge's quantity and amount read-only. Each control has a visua
 label naming its line and column (_line_label.html; the Save box's label names its line the
 same way). The table sits in the scroll region (PLAN-012e-3 D5), so a wide table scrolls inside
 it and the page stays within the viewport. The memo and the due date are in the SUMMARY card
-(_summary.html).{% endcomment %}
+(_summary.html). PLAN-015 Batch 5: the card opens with the New lease page's numbered step head (1 Lines), the help sentence its muted note.{% endcomment %}
 {% load responsive money builder icons %}
-<section class="card lines-card" id="draft-card">
-<h2>Lines</h2>
+<section class="card lines-card step-card" id="draft-card" aria-labelledby="lines-title">
+<div class="step-head"><span class="step-number" aria-hidden="true">1</span><div class="step-title"><h2 id="lines-title">Lines</h2><p class="muted step-note" id="lines-help">Item: Rent, an open charge of the lease, a catalogue item or a new name; the line total is the quantity (empty: 1) times the unit amount. Learn more: <a href="{% url 'finance:help_topic' slug='invoice-lines' %}">The lines of an invoice</a></p></div></div>
 {% if errors %}<ul class="errorlist" id="draft-errors">{% for error in errors %}<li>{{ error.text }}{% if error.url %}<a href="{{ error.url }}" class="draft-link">{{ error.number }}</a>{{ error.after }}{% endif %}</li>{% endfor %}</ul>{% endif %}
 {{ form.creation_key }}
 {% if form.lease.is_hidden %}{{ form.lease }}{% else %}{% include "ledger/stores/_form_field.html" with field=form.lease %}{% endif %}
@@ -37,5 +37,5 @@ it and the page stays within the viewport. The memo and the due date are in the 
   </tbody>
 </table>
 {% endresponsive_table %}
-<div class="add-line-row"><button class="btn add-line js-only" type="button" id="add-line" hidden>{% icon "plus" 16 %} Add line</button><p class="help" id="lines-help">Item: Rent, an open charge of the lease, a catalogue item or a new name; the line total is the quantity (empty: 1) times the unit amount. Learn more: <a href="{% url 'finance:help_topic' slug='invoice-lines' %}">The lines of an invoice</a></p></div>
+<div class="add-line-row"><button class="btn add-line js-only" type="button" id="add-line" hidden>{% icon "plus" 16 %} Add line</button></div>
 </section>

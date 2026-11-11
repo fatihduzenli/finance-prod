@@ -113,7 +113,8 @@ def tile_row(html: str) -> str:
 
 
 def tile_labels(html: str) -> list[str]:
-    return re.findall(r'<span class="kpi-label">(.*?)</span>', tile_row(html))
+    # Re-pinned (Opus, PLAN-015 Batch 5): the tiles are kpi2 cards.
+    return re.findall(r'<p class="kpi2-title">(.*?)</p>', tile_row(html))
 
 
 def a_rent_charge_of(name: str = "Rent Ops", due: str = "1500.00") -> RentCharge:
@@ -324,11 +325,10 @@ def test_a_zelle_payment_shows_amount_and_applied_to_and_the_line() -> None:
     html = payment_page(payment)
     row = tile_row(html)
     assert tile_labels(html) == ["Amount", "Applied to"]
-    assert (
-        '<div id="tile-applied"><div class="kpi"><span class="kpi-label">Applied to</span>'
-        '<span class="kpi-value">$500.00</span><span class="kpi-note">Rent Oct 2026</span>'
-        "</div></div>"
-    ) in row
+    # Re-pinned (Opus, PLAN-015 Batch 5): a kpi2 card, the charge its sub-line, paid tone.
+    applied = row[row.index('<div id="tile-applied">') :]
+    assert '<p class="kpi2-title">Applied to</p><p class="kpi2-sub">Rent Oct 2026</p>' in applied
+    assert '<span class="kpi2-value tone-paid" id="tile-applied-value">$500.00</span>' in applied
     assert 'id="tile-refunded"' not in row and 'id="tile-remaining"' not in row
     line = (
         '<p class="muted" id="paid-outside">Paid outside PayCo: void it to undo, it cannot be '
@@ -352,9 +352,9 @@ def test_a_manual_payment_on_a_one_off_charge_names_the_charge(fake: FakeProvide
     row = tile_row(payment_page(payment))
     label = installments.parent_screen_label(charge)
     assert label
-    assert (
-        f'<span class="kpi-value">$40.00</span><span class="kpi-note">{escape(label)}</span>' in row
-    )
+    # Re-pinned (Opus, PLAN-015 Batch 5): the kpi2 card's sub-line and figure.
+    assert f'<p class="kpi2-sub">{escape(label)}</p>' in row
+    assert '<span class="kpi2-value tone-paid" id="tile-applied-value">$40.00</span>' in row
 
 
 def test_an_ach_payment_keeps_amount_refunded_remaining(fake: FakeProvider) -> None:
@@ -377,16 +377,12 @@ def test_a_voided_manual_payment_keeps_the_two_tiles_and_the_line() -> None:
     html = payment_page(payment)
     assert tile_labels(html) == ["Amount", "Applied to"]
     row = tile_row(html)
-    assert (
-        '<div id="tile-amount"><div class="kpi"><span class="kpi-label">Amount</span>'
-        '<span class="kpi-value">$500.00</span>'
-    ) in row
-    # The charge owes the voided amount again: the payment applies nothing to it.
-    assert (
-        '<div id="tile-applied"><div class="kpi"><span class="kpi-label">Applied to</span>'
-        '<span class="kpi-value">$0.00</span><span class="kpi-note">Rent Oct 2026 · voided</span>'
-        "</div></div>"
-    ) in row
+    # Re-pinned (Opus, PLAN-015 Batch 5): kpi2 cards.
+    assert '<span class="kpi2-value" id="tile-amount-value">$500.00</span>' in row
+    # The charge owes the voided amount again: the payment applies nothing to it (muted).
+    applied = row[row.index('<div id="tile-applied">') :]
+    assert '<p class="kpi2-sub">Rent Oct 2026 · voided</p>' in applied
+    assert '<span class="kpi2-value tone-muted" id="tile-applied-value">$0.00</span>' in applied
     assert _applied_tile(payment) == {"label": "Rent Oct 2026 · voided", "amount": D("0.00")}
     assert 'id="paid-outside">Paid outside PayCo: void it to undo' in html
 

@@ -24,7 +24,7 @@
   var more = document.getElementById("count-more");
   var rows = document.getElementById("split-rows");
   var message = document.getElementById("split-preview-message");
-  var tile = document.querySelector("#split-installments .kpi-value");
+  var tile = document.querySelector("#split-installments dd");
   var last = document.getElementById("split-last-value");
   var button = document.getElementById("split-confirm");
   var large = document.getElementById("split-large");

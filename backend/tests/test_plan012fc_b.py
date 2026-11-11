@@ -634,10 +634,10 @@ def test_a_voided_manual_payment_has_nothing_refundable_and_its_tile_says_so() -
     # PLAN-012f-c §11 E3: a payment recorded outside the processor, voided or not, shows
     # Amount and Applied to; nothing about refunds.
     assert 'id="tile-applied"' in tiles_html
-    assert (
-        '<span class="kpi-value">$0.00</span><span class="kpi-note">Rent Oct 2026 · voided</span>'
-        in tiles_html
-    )
+    # Re-pinned (Opus, PLAN-015 Batch 5): a kpi2 card, the charge's label its sub-line, the
+    # zero muted.
+    assert '<p class="kpi2-sub">Rent Oct 2026 · voided</p>' in tiles_html
+    assert '<span class="kpi2-value tone-muted" id="tile-applied-value">$0.00</span>' in tiles_html
     assert 'id="tile-remaining"' not in tiles_html and 'id="tile-refunded"' not in tiles_html
     assert "refundable" not in tiles_html
 
@@ -658,4 +658,4 @@ def test_a_voided_processor_payment_has_nothing_refundable_and_keeps_its_refusal
     assert after.refund_refusal == refunds.REFUND_NOT_SETTLED
     assert after.void_refusal == refunds.VOID_NOT_OPEN.format(status="voided")
     tiles_html = element(payment_page(payment), '<section class="kpi-row detail-tiles"', "section")
-    assert '<span class="kpi-note">nothing refundable</span>' in tiles_html
+    assert '<p class="kpi2-sub">nothing refundable</p>' in tiles_html  # re-pinned: kpi2

@@ -2,7 +2,7 @@
 {% load components money dates people %}
 {% load responsive %}
 {% block title %}Rent {{ charge.period_month|month }}, debit {{ charge.seq }}{% endblock %}
-{% comment %}The rent charge page, in the detail family (PLAN-012f-a D4; DESIGN-SPEC §4 Charge detail): the header (breadcrumb, title with the status badge, the muted line, Add payment, Split into installments, More ▾), the tiles, Invoices, Payments, Activity and the charge's other cards beside DETAILS, the open promise and MORE.{% endcomment %}
+{% comment %}The rent charge page, in the detail family (PLAN-012f-a D4; DESIGN-SPEC §4 Charge detail): the header (breadcrumb, title with the status badge, the muted line, Add payment, Split into installments, More ▾), the tiles, Invoices, Payments, Activity and the charge's other cards beside DETAILS, the open promise and MORE. PLAN-015 Batch 5: the tiles are {% kpi2 %} cards (Amount, Paid green above zero, Balance red above zero and muted at zero) and each card opens with its .card-head.{% endcomment %}
 {% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=charges#tab-charges" id="charges-crumb">Charges</a> <span aria-hidden="true">›</span> <span aria-current="page">Rent {{ charge.period_month|month }}, debit {{ charge.seq }}</span></nav><h1 class="store-title">Rent {{ charge.period_month|month }}, debit {{ charge.seq }} <span id="charge-status">{% status_badge charge.get_status_display charge.status %}</span>{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if can_record or can_split or can_link_invoice %}<div class="page-actions" id="charge-actions">{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}{% if can_split %}<a class="btn" href="{{ split_url }}" id="split-installments">Split into installments</a>{% endif %}{% if can_link_invoice %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
   <li><a href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a></li>
 </ul></details>{% endif %}</div>{% endif %}</div>{% endblock %}
@@ -26,18 +26,18 @@
   <div class="detail-grid">
   <div class="detail-main">
   <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
-    <div id="tile-amount">{% kpi "Amount" charge.amount_due|money %}</div>
-    <div id="tile-paid">{% kpi "Paid" charge.amount_paid|money %}</div>
-    <div id="tile-balance">{% if balance_open %}{% kpi "Balance" charge.balance|money "" "unpaid" %}{% else %}{% kpi "Balance" charge.balance|money %}{% endif %}</div>
+    <div id="tile-amount">{% kpi2 "banknote" "Amount" "" charge.amount_due|money value_id="tile-amount-value" %}</div>
+    <div id="tile-paid">{% if charge.amount_paid > 0 %}{% kpi2 "check" "Paid" "" charge.amount_paid|money value_tone="paid" value_id="tile-paid-value" %}{% else %}{% kpi2 "check" "Paid" "" charge.amount_paid|money value_tone="muted" value_id="tile-paid-value" %}{% endif %}</div>
+    <div id="tile-balance">{% if balance_open %}{% kpi2 "alert" "Balance" "" charge.balance|money value_tone="unpaid" value_id="tile-balance-value" %}{% elif charge.balance > 0 %}{% kpi2 "alert" "Balance" "" charge.balance|money value_id="tile-balance-value" %}{% else %}{% kpi2 "alert" "Balance" "" charge.balance|money value_tone="muted" value_id="tile-balance-value" %}{% endif %}</div>
   </section>
 
   <section class="card" id="invoices-card">
-  <div class="card-header"><h2>Invoices</h2>{% if can_link_invoice %}<a class="card-link" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="attach-invoice-link">Attach {{ company.provider_name }} invoice</a>{% endif %}</div>
+  <div class="card-head"><h2>Invoices</h2>{% if can_link_invoice %}<a class="card-link" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="attach-invoice-link">Attach {{ company.provider_name }} invoice</a>{% endif %}</div>
   {% include "ledger/_detail_invoices.html" %}
   </section>
 
   <section class="card" id="payments-card">
-  <h2>Payments</h2>
+  <div class="card-head"><h2>Payments</h2></div>
   {% if open_debit %}<p id="open-debit">{{ open_debit.label }} · {{ open_debit.price|money }} on {{ open_debit.due_date|day }} {% status_badge open_debit.get_status_display open_debit.status %} <a href="{% url 'ledger:one_off_charges:detail' pk=open_debit.pk %}" id="open-debit-link">Open ›</a></p>{% endif %}
   {% if payments %}
   {% responsive_table %}
@@ -70,7 +70,7 @@
   <section class="card" id="collections-card">{% include "ledger/collections/_charge.html" %}</section>
 
   <section class="card" id="charge-notes">
-  <h2>Notes</h2>
+  <div class="card-head"><h2>Notes</h2></div>
   {% for note in notes %}
     <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{% if note.author_label %}{{ note.author_label }}{% else %}{{ note.author|staff }}{% endif %} {{ note.created_at|day }}</span></p>
   {% empty %}
@@ -81,7 +81,7 @@
 
   <aside class="detail-side" aria-label="Details">
   <section class="card" id="charge-summary" aria-label="Charge">
-  <h2 class="section-label">Details</h2>
+  <div class="card-head"><h2 class="section-label">Details</h2></div>
   <dl class="detail-list side-list">
     <dt>Lease</dt><dd id="charge-lease"><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a></dd>
     <dt>Due</dt><dd id="due-date">{{ charge.due_on|day }}</dd>
@@ -95,7 +95,7 @@
 
   {% if can_link_invoice %}
   <section class="card" id="more-card">
-    <h2 class="section-label">More</h2>
+    <div class="card-head"><h2 class="section-label">More</h2></div>
     <ul class="detail-more">
       <li><a href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="more-link-invoice">Attach {{ company.provider_name }} invoice</a></li>
     </ul>

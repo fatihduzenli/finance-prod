@@ -343,13 +343,18 @@ def test_the_card_has_no_since_and_the_open_balance_tone() -> None:
     store, lease, _ = a_store_with_lease()
     card = lease_card(store)
     assert 'id="header-since"' not in card and "Since" not in card
-    assert "$0.00 ✓" in card and "side-paid" in card
+    # PLAN-015 Batch 5 §9.1 (re-pinned): the open balance left the card for the figure row,
+    # its figure red above zero and untoned at zero.
+    assert 'id="header-open-balance"' not in card and "Open balance" not in card
+    html = page(client_for(Role.BILLING)[0], f"/stores/{store.pk}/")
+    assert '<span class="kpi2-value" id="figure-open-balance-value">$0.00</span>' in html
     a_rent_charge(lease, date(2026, 9, 1), due="1000.00")
     card = lease_card(store)
+    assert 'id="header-open-balance"' not in card and "$1,000.00" not in card
+    html = page(client_for(Role.BILLING)[0], f"/stores/{store.pk}/")
     assert (
-        "side-unpaid" in card
-        and "$1,000.00" in card
-        and "✓" not in section(card, "header-open-balance", "</dd>")
+        '<span class="kpi2-value tone-unpaid" id="figure-open-balance-value">$1,000.00</span>'
+        in html
     )
 
 

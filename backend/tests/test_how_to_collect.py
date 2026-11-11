@@ -449,7 +449,8 @@ def test_the_buttons_name_the_choice_and_the_amount(fake: FakeProvider, enabled:
     store_methods(operator)
     draft = a_draft(operator, lease, one_line("175.00"))
     html = draft_page(draft, Role.ADMIN)
-    assert "<legend>How to collect</legend>" in html
+    # Re-pinned (Opus, PLAN-015 Batch 5): the legend carries its id (the step head's title).
+    assert '<legend id="collect-title">How to collect</legend>' in html
     for label in (
         "Save",
         "Charge now",

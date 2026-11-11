@@ -37,7 +37,7 @@ from tests.test_bank_debit import enabled, fake, invoiced, setup_charge, today
 from tests.test_charge_now import LAST_FOUR, NICKNAME
 from tests.test_one_off_charges import an_operator, created, fresh, item
 from tests.test_operator_views import client_for
-from tests.text_helpers import has_token
+from tests.text_helpers import assert_absent, has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -70,7 +70,10 @@ def element(body: str, start: str, tag: str) -> str:
 
 def tiles(body: str) -> dict[str, str]:
     """The two radio cards' markup, the bank debit's first."""
-    card = element(body, '<fieldset class="card form-card collect-card how-card"', "fieldset")
+    # Re-pinned (Opus, PLAN-015 Batch 5): the card is a numbered step card.
+    card = element(
+        body, '<fieldset class="card form-card collect-card how-card step-card"', "fieldset"
+    )
     debit, record = re.split(r'<div class="collect-tile[ "]', card)[1:]
     return {"debit": debit, "record": record}
 
@@ -474,12 +477,13 @@ def test_a_debit_note_with_a_card_number_is_refused_and_nothing_written(
 def test_the_note_label_follows_the_card(fake: FakeProvider) -> None:
     charge = invoiced(fake)
     debit_body = get(Role.ADMIN, page_of(charge))
-    note = element(debit_body, '<section class="card form-card note-card"', "section")
+    # Re-pinned (Opus, PLAN-015 Batch 5): the Note card is step 2.
+    note = element(debit_body, '<section class="card form-card note-card step-card"', "section")
     assert f'<label for="id_note">{NOTE_OPTIONAL_LABEL}</label>' in note
     assert f'data-label="{NOTE_REQUIRED_LABEL}"' in note and 'data-label-when="how-record"' in note
     with override_settings(STAX_PAY_INVOICE_ENABLED=False):
         record_body = get(Role.ADMIN, page_of(charge))
-    note = element(record_body, '<section class="card form-card note-card"', "section")
+    note = element(record_body, '<section class="card form-card note-card step-card"', "section")
     assert f'<label for="id_note">{NOTE_REQUIRED_LABEL}</label>' in note
 
 
@@ -511,11 +515,15 @@ def test_with_no_amount_the_button_has_no_figure_and_this_payment_shows_a_dash(
         side = summary(get(Role.ADMIN, page_of(charge)))
     assert 'Record <span class="payment-amount" hidden></span> as paid' in side
     assert 'Charge <span class="payment-amount" hidden></span> by ACH' in side
-    this_payment = element(side, '<div id="tile-this-payment">', "div></div")
-    assert '<span class="kpi-value">—</span>' in this_payment
+    # Re-pinned (Opus, PLAN-015 Batch 5): This payment is the summary's bold total row.
+    assert (
+        '<div class="lease-summary-total" id="tile-this-payment"><dt>This payment</dt><dd>—</dd>'
+        "</div>"
+    ) in side
     script = (
         Path(__file__).resolve().parents[1] / "ledger" / "static" / "ledger" / "add_payment.js"
     ).read_text(encoding="utf-8")
+    assert 'document.querySelector("#tile-this-payment dd")' in script
     assert 'var text = amount > 0 ? money(amount) : "";' in script
     assert 'tile.textContent = text || "—";' in script and "span.hidden = !text;" in script
 
@@ -525,7 +533,8 @@ def test_with_an_amount_the_button_names_it(fake: FakeProvider) -> None:
     side = summary(get(Role.ADMIN, page_of(charge)))
     assert 'Charge <span class="payment-amount">$75.00</span> by ACH' in side
     assert 'Record <span class="payment-amount">$75.00</span> as paid' in side
-    assert '<span class="kpi-value">$75.00</span>' in side
+    # Re-pinned (Opus, PLAN-015 Batch 5): the total row's value.
+    assert "<dt>This payment</dt><dd>$75.00</dd>" in side
 
 
 def test_the_phone_rules_one_column_and_the_summary_above_the_full_width_button() -> None:
@@ -540,7 +549,9 @@ def test_the_phone_rules_one_column_and_the_summary_above_the_full_width_button(
 
 def test_the_summary_tiles_come_before_the_button(fake: FakeProvider) -> None:
     side = summary(get(Role.ADMIN, page_of(invoiced(fake))))
-    assert side.index('id="summary-tiles"') < side.index('id="after-payment"')
+    # Re-pinned (Opus, PLAN-015 Batch 5): the rows (the tiles before) come first.
+    assert side.index('id="summary-rows"') < side.index('id="tile-this-payment"')
+    assert side.index('id="tile-this-payment"') < side.index('id="after-payment"')
     assert side.index('id="after-payment"') < side.index('id="save-payment"')
     assert side.index('id="save-payment"') < side.index('id="cancel-payment"')
     assert side.index('id="payment-summary"') < side.index('id="operator-card"')
@@ -550,7 +561,7 @@ def test_no_provider_name_or_account_number_in_the_templates() -> None:
     root = Path(__file__).resolve().parents[1] / "ledger" / "templates" / "ledger" / "payments"
     for name in ("add_payment.html", "_how.html", "_add_payment_summary.html"):
         text = (root / name).read_text(encoding="utf-8")
-        assert "stax" not in text.lower(), name
+        assert_absent(text.lower(), "stax", name)
     assert not (root.parent / "one_off_charges" / "payment_form.html").exists()
     assert not (root.parent / "charges" / "payment_form.html").exists()
 

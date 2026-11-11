@@ -3,7 +3,7 @@
 {% load responsive charge_kinds %}
 {% load static %}
 {% block title %}{{ preview.number }}{% endblock %}
-{% comment %}The invoice builder's page: the draft's form while it is a draft (the builder of PLAN-012f-a D5, _builder.html: its header is the new draft's, with Preview and Print view; Discard opens the draft's delete page); once sent, the invoice in the detail family (PLAN-012f-a D4): the tiles Total / Paid / Balance (its charges' figures), the Lines, Charges and Activity cards beside DETAILS and MORE (Cancel).{% endcomment %}
+{% comment %}The invoice builder's page: the draft's form while it is a draft (the builder of PLAN-012f-a D5, _builder.html: its header is the new draft's, with Preview and Print view; Discard opens the draft's delete page); once sent, the invoice in the detail family (PLAN-012f-a D4): the tiles Total / Paid / Balance (its charges' figures), the Lines, Charges and Activity cards beside DETAILS and MORE (Cancel). PLAN-015 Batch 5: the tiles are {% kpi2 %} cards (Amount, Paid green above zero, Balance red above zero and muted at zero) and each card opens with its .card-head.{% endcomment %}
 {% block header %}<div class="page-header{% if sent_paid is not None %} detail-head{% elif editable %} builder-head{% endif %}"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% if preview.invoice %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=invoices#tab-invoices" id="invoices-crumb">Invoices</a> <span aria-hidden="true">›</span> {% endif %}{% else %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %}</span></nav><h1{% if sent_paid is not None or editable %} class="store-title"{% endif %}>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1>{% if editable %}{% if store_context %}{% include "ledger/_store_context.html" %}{% else %}<p class="muted" id="known-fields">{{ draft.operator.display_name }}</p>{% endif %}{% elif header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if editable %}<p class="builder-note" id="builder-note">Draft · nothing reaches {{ company.provider_name }} until you choose how to collect</p>{% endif %}<div class="page-actions"><a class="btn" href="{% url 'ledger:invoices:preview' pk=draft.pk %}" id="draft-preview">Preview</a><a class="btn" href="{% url 'ledger:invoices:print' pk=draft.pk %}" id="draft-print">Print view</a>{% if preview.invoice %}<a class="btn" href="{% url 'ledger:invoices:pdf' pk=preview.invoice.pk %}" id="invoice-pdf">Download PDF</a>{% endif %}{% if can_cancel and not editable %}{% if sent_paid is not None %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><a class="menu-danger" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel invoice</a></li></ul></details>{% else %}<a class="btn" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel</a>{% endif %}{% endif %}</div></div>{% endblock %}
 {% block content %}
   {% if editable %}
@@ -16,14 +16,14 @@
     <div class="detail-grid">
     <div class="detail-main">
     <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
-      <div id="tile-total">{% kpi "Total" preview.total|money %}</div>
-      <div id="tile-paid">{% kpi "Paid" sent_paid|money %}</div>
-      <div id="tile-balance">{% if sent_balance > 0 %}{% kpi "Balance" sent_balance|money "" "unpaid" %}{% else %}{% kpi "Balance" sent_balance|money %}{% endif %}</div>
+      <div id="tile-total">{% kpi2 "banknote" "Total" "" preview.total|money value_id="tile-total-value" %}</div>
+      <div id="tile-paid">{% if sent_paid > 0 %}{% kpi2 "check" "Paid" "" sent_paid|money value_tone="paid" value_id="tile-paid-value" %}{% else %}{% kpi2 "check" "Paid" "" sent_paid|money value_tone="muted" value_id="tile-paid-value" %}{% endif %}</div>
+      <div id="tile-balance">{% if sent_balance > 0 %}{% kpi2 "alert" "Balance" "" sent_balance|money value_tone="unpaid" value_id="tile-balance-value" %}{% elif sent_balance > 0 %}{% kpi2 "alert" "Balance" "" sent_balance|money value_id="tile-balance-value" %}{% else %}{% kpi2 "alert" "Balance" "" sent_balance|money value_tone="muted" value_id="tile-balance-value" %}{% endif %}</div>
     </section>
 
     {% if preview.lines %}
     <section class="card" id="invoice-lines-card">
-    <h2>Lines</h2>
+    <div class="card-head"><h2>Lines</h2></div>
     {% responsive_table %}
     <table id="invoice-lines">
       <thead><tr><th>Item</th><th class="money">Quantity</th><th class="money">Unit amount</th><th class="money">Amount</th></tr></thead>
@@ -41,7 +41,7 @@
     {% endif %}
 
     <section class="card" id="sent-invoice-card">
-    <h2>Charges</h2>
+    <div class="card-head"><h2>Charges</h2></div>
     {% include "ledger/_job_status.html" %}
     {% responsive_table %}
     <table id="sent-charges">
@@ -70,7 +70,7 @@
 
     <aside class="detail-side" aria-label="Details">
     <section class="card" id="draft-summary-card">
-    <h2 class="section-label">Details</h2>
+    <div class="card-head"><h2 class="section-label">Details</h2></div>
     <dl id="draft-summary" class="detail-list side-list">
       <dt>Number</dt><dd id="sent-number">{{ preview.invoice.invoice_number }}</dd>
       <dt>Here</dt><dd id="sent-internal-status">{{ preview.invoice.get_internal_status_display }}</dd>
@@ -87,7 +87,7 @@
 
     {% if can_cancel %}
     <section class="card" id="more-card">
-      <h2 class="section-label">More</h2>
+      <div class="card-head"><h2 class="section-label">More</h2></div>
       <ul class="detail-more">
         <li><a class="detail-danger" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="more-draft-cancel">Cancel invoice</a></li>
       </ul>
