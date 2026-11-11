@@ -1311,6 +1311,8 @@ fieldset.card > legend + * { clear: both; }
   .wizard-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
   .wizard-tiles .kpi2, .detail-tiles .kpi2 { gap: var(--space-2); padding: 10px; }
   .wizard-tiles .kpi2-head, .detail-tiles .kpi2-head { gap: 6px; }
+  /* The statement's titles and notes are longer: the icon goes above them, so they take the card's width. */
+  .wizard-tiles .kpi2-head { flex-direction: column; }
   .wizard-tiles .kpi2-icon, .detail-tiles .kpi2-icon { flex-basis: 24px; width: 24px; height: 24px; }
   .wizard-tiles .kpi2-title, .detail-tiles .kpi2-title { font-size: var(--fs-base); }
   .wizard-tiles .kpi2-value, .detail-tiles .kpi2-value { font-size: var(--fs-lg); white-space: normal; overflow-wrap: anywhere; }
