@@ -12,6 +12,7 @@ import html as html_module
 import re
 from collections.abc import Sequence
 from datetime import date
+from pathlib import Path
 
 import pytest
 from django.db import connection
@@ -275,6 +276,30 @@ def test_every_link_keeps_the_other_filters_and_date_by_and_drops_the_page() -> 
             False,
         ),
     ]
+
+
+FILTERS_JS = Path(__file__).resolve().parents[1] / "finance" / "static" / "finance" / "filters.js"
+
+
+def test_the_as_you_type_refresh_carries_the_period_links_with_the_typed_search() -> None:
+    # Fable's round-1 finding: filters.js swaps #payments-period like #list-counts and
+    # #export-csv, so the links follow the search typed without a reload. The request below is
+    # the script's own: the form's every field (the empty ones too) and its header.
+    form = "q=Harbor&date_by=paid&date_from=&date_to=&method=&status=&operator=&store="
+    response = client_for(Role.VIEWER)[0].get(
+        f"/payments/?{form}", headers={"X-Requested-With": "fetch"}
+    )
+    assert response.status_code == 200
+    assert links_of(response.content.decode()) == [
+        ("All time", "/payments/?q=Harbor", True),
+        ("This month", f"/payments/?date_from={MONTH[0]}&date_to={MONTH[1]}&q=Harbor", False),
+        ("Quarter", f"/payments/?date_from={QUARTER[0]}&date_to={QUARTER[1]}&q=Harbor", False),
+        ("Year", f"/payments/?date_from={YEAR[0]}&date_to={YEAR[1]}&q=Harbor", False),
+    ]
+    script = FILTERS_JS.read_text(encoding="utf-8")
+    assert 'var swapped = ["filters-chips", "list-counts", "export-csv", "payments-period"];' in (
+        script
+    )
 
 
 def test_the_windows_follow_today_and_run_no_query() -> None:

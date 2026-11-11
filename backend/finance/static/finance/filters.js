@@ -3,9 +3,9 @@
 // shows and toggles the panel (aria-expanded; on a phone, 768 px and under, the panel is a
 // bottom sheet over #filters-backdrop); Escape and a tap on the backdrop close it. Typing in
 // the search field fetches the same page with the form's values after 300 ms without a key,
-// replaces #results (and the chips, the counts line and the spreadsheet link, which carry the
-// query) with the response's own, and writes the address with history.replaceState; any error
-// falls back to submitting the form.
+// replaces #results (and the chips, the counts line, the spreadsheet link and the Payments period
+// links, which carry the query) with the response's own, and writes the address with
+// history.replaceState; any error falls back to submitting the form.
 (function () {
   "use strict";
   var form = document.getElementById("filters");
@@ -14,7 +14,7 @@
   var panel = document.getElementById("filters-panel");
   var backdrop = document.getElementById("filters-backdrop");
   var search = form.querySelector(".filters-search");
-  var swapped = ["filters-chips", "list-counts", "export-csv"];
+  var swapped = ["filters-chips", "list-counts", "export-csv", "payments-period"];
   var phone = window.matchMedia("(max-width: 768px)");
 
   form.classList.add("is-enhanced");
