@@ -2,8 +2,9 @@
 {% load components money dates icons filters static %}
 {% load responsive %}
 {% block title %}Payments{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Payments</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} payment{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:payments:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Payments</h1><p class="page-sub" id="list-counts">{{ page.paginator.count }} payment{{ page.paginator.count|pluralize }}</p></div><div class="page-actions"><div class="segmented period-control" id="payments-period" role="group" aria-label="Period">{% for label, href, active in period_links %}<a href="{{ href }}"{% if active %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</div><a class="btn" id="export-csv" href="{% url 'ledger:payments:export' %}{% if query %}?{{ query }}{% endif %}">{% icon "file" 16 %}Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
+  {% comment %}PLAN-015 Batch 2: the header's period links (views.payments.period_links: All time, This month, Quarter, Year; each keeps the other filters) before Download; the totals as five {% kpi2 %} cards under their head row (the ⓘ and its tooltip), inside #results so a filter refreshes them; a zero figure is muted, Settled green, Returned red above zero.{% endcomment %}
   <div class="card filter-card">{% filters active=active_filters search_name="q" search_value=selected.query search_maxlength=100 search_placeholder="Store number or name, operator or reference" search_label="Search payments" %}
       <span class="filter-field"><label for="date_by">Date</label>
       <select name="date_by" id="date_by">
@@ -36,15 +37,13 @@
   {% endfilters %}</div>
 
   <div id="results">
-  <section class="card" id="payment-totals-card">
-  <div class="card-header"><h2>Totals of the {{ totals.count }} payment{{ totals.count|pluralize }} shown</h2><span class="info-wrap"><button type="button" class="info" aria-label="About these totals" aria-describedby="totals-help">ⓘ</button><span role="tooltip" id="totals-help" class="tooltip">Pending payments are never counted as collected. Refunds are shown as their own rows. Deposits are money held for the operator, not revenue: they are left out of the other totals. "Deposits held" is the settled deposit payments shown minus their refunds and the deposit refunds shown.</span></span></div>
-  <div class="tile-row" id="payments-totals">
-    <div class="tile{% if not totals.settled %} is-zero{% else %} tone-paid{% endif %}"><span class="tile-label">Settled</span><span class="tile-value" id="total-settled">{{ totals.settled|money }}</span></div>
-    <div class="tile{% if not totals.pending %} is-zero{% endif %}"><span class="tile-label">Pending</span><span class="tile-value" id="total-pending">{{ totals.pending|money }}</span></div>
-    <div class="tile{% if totals.returned > 0 %} tone-unpaid{% elif not totals.returned %} is-zero{% endif %}"><span class="tile-label">Returned</span><span class="tile-value" id="total-returned">{{ totals.returned|money }}</span></div>
-    <div class="tile{% if not totals.refunded %} is-zero{% endif %}"><span class="tile-label">Refunded</span><span class="tile-value" id="total-refunded">{{ totals.refunded|money }}</span></div>
-    <div class="tile{% if not totals.deposits_held %} is-zero{% endif %}"><span class="tile-label">Deposits held</span><span class="tile-value" id="total-deposits-held">{{ totals.deposits_held|money }}</span></div>
-  </div>
+  <div class="card-head" id="payment-totals-card"><p class="section-label" id="payment-totals-label">Totals of the {{ totals.count }} payment{{ totals.count|pluralize }} shown</p><span class="info-wrap"><button type="button" class="info" aria-label="About these totals" aria-describedby="totals-help">ⓘ</button><span role="tooltip" id="totals-help" class="tooltip">Pending payments are never counted as collected. Refunds are shown as their own rows. Deposits are money held for the operator, not revenue: they are left out of the other totals. "Deposits held" is the settled deposit payments shown minus their refunds and the deposit refunds shown.</span></span></div>
+  <section class="kpi-row kpi2-row" id="payments-totals" aria-labelledby="payment-totals-label">
+    {% kpi2 "banknote" "Settled" "" totals.settled|money value_tone=totals.settled|yesno:"paid,muted" value_id="total-settled" %}
+    {% kpi2 "circle-half" "Pending" "" totals.pending|money value_tone=totals.pending|yesno:",muted" value_id="total-pending" %}
+    {% if totals.returned > 0 %}{% kpi2 "alert" "Returned" "" totals.returned|money value_tone="unpaid" value_id="total-returned" %}{% else %}{% kpi2 "alert" "Returned" "" totals.returned|money value_tone=totals.returned|yesno:",muted" value_id="total-returned" %}{% endif %}
+    {% kpi2 "dash" "Refunded" "" totals.refunded|money value_tone=totals.refunded|yesno:",muted" value_id="total-refunded" %}
+    {% kpi2 "lock" "Deposits held" "" totals.deposits_held|money value_tone=totals.deposits_held|yesno:",muted" value_id="total-deposits-held" %}
   </section>
 
   <div class="card table-card list-card">

@@ -1,16 +1,10 @@
 {% extends "finance/base.html" %}
-{% load filters dates money responsive %}
+{% load components dates money responsive %}
 {% block title %}Bank deposits{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Bank deposits</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} deposit{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><form method="post" action="{% url 'banking:fetch_now' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="fetch-now"{% if readiness %} disabled{% endif %}>Fetch now</button></form></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Bank deposits</h1><p class="page-sub" id="list-counts">{{ page.paginator.count }} deposit{{ page.paginator.count|pluralize }}</p></div><div class="page-actions">{% url 'banking:page' as page_url %}<div class="segmented" id="deposit-states" role="group" aria-label="State">{% for value, label in status_choices %}<a href="{{ page_url }}?status={{ value }}"{% if value == status %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</div><form method="post" action="{% url 'banking:fetch_now' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="fetch-now"{% if readiness %} disabled{% endif %}>Fetch now</button></form></div></div>{% endblock %}
 {% block content %}
-  {% comment %}Admin › Bank deposits (docs/qa/PLAN-014 I4; banking.views.page): the credits read from the business's bank account, new ones first by default, 50 a page. A new deposit shows the suggestion (store, charge, confidence) made over what is owed now, with Confirm (records it through the store page's payment entry), Choose another, Split and Ignore; a recorded or ignored one shows what it became and Undo. When nothing can be fetched, the one sentence says why.{% endcomment %}
+  {% comment %}Admin › Bank deposits (docs/qa/PLAN-014 I4; banking.views.page): the credits read from the business's bank account, new ones first by default, 50 a page. A new deposit shows the suggestion (store, charge, confidence) made over what is owed now, with Confirm (records it through the store page's payment entry), Choose another, Split and Ignore; a recorded or ignored one shows what it became and Undo. When nothing can be fetched, the one sentence says why. PLAN-015 Batch 2: the state is the header's segmented links (New · Confirmed · Split · Ignored · All, ?status=), no filter card; the suggestion's confidence is a {% chip %} (Exact paid, Strong pending, Weak partial, No match neutral).{% endcomment %}
   {% if readiness %}<p class="side-note warning" id="bank-readiness">{{ readiness }}</p>{% endif %}
-  <div class="card filter-card">{% filters active=active_filters %}
-      <span class="filter-field"><label for="status">State</label>
-      <select name="status" id="status">
-        {% for value, label in status_choices %}<option value="{{ value }}"{% if value == status %} selected{% endif %}>{{ label }}</option>{% endfor %}
-      </select></span>
-  {% endfilters %}</div>
   <div id="results">
   <div class="card table-card list-card">
   {% responsive_table %}
@@ -23,7 +17,7 @@
           <td class="money">{{ txn.amount|money }}</td>
           <td><span class="deposit-description">{{ txn.description|default:"—" }}</span>{% if txn.counterparty %}<br><span class="muted">From {{ txn.counterparty }}</span>{% endif %}<br><span class="badge">{{ txn.get_kind_display }}</span></td>
           {% if txn.status == "new" %}
-            <td>{% if s.lease %}<span class="badge{% if s.confidence == 'exact' %} badge-paid{% elif s.confidence == 'strong' %} badge-pending{% elif s.confidence == 'weak' %} badge-partial{% endif %}">{{ s.confidence|capfirst }}</span> {{ row.store }}<br><span class="muted">{{ row.charge }}</span>{% elif row.candidates %}<span class="badge">No match</span><br><span class="muted">Could be: {{ row.candidates|join:", " }}</span>{% else %}<span class="badge">No match</span>{% endif %}</td>
+            <td data-role="status">{% if s.lease %}{% if s.confidence == "exact" %}{% chip "paid" "Exact" %}{% elif s.confidence == "strong" %}{% chip "pending" "Strong" %}{% elif s.confidence == "weak" %}{% chip "partial" "Weak" %}{% else %}{% chip "neutral" s.confidence|capfirst %}{% endif %} {{ row.store }}<br><span class="muted">{{ row.charge }}</span>{% elif row.candidates %}{% chip "neutral" "No match" %}<br><span class="muted">Could be: {{ row.candidates|join:", " }}</span>{% else %}{% chip "neutral" "No match" %}{% endif %}</td>
             <td class="deposit-actions">
               {% if s.lease %}<form method="post" action="{% url 'banking:confirm' pk=txn.pk %}" class="js-single-submit">{% csrf_token %}<input type="hidden" name="return_status" value="{{ status }}"><input type="hidden" name="lease" value="{{ s.lease }}"><input type="hidden" name="charge_type" value="{{ s.charge_type }}"><input type="hidden" name="charge" value="{% if s.charge_id %}{{ s.charge_id }}{% else %}whole{% endif %}">
                 {% if row.alias %}<label class="inline"><input type="checkbox" name="remember" value="1" checked> Remember {{ row.alias }} for {{ row.store }}</label><br>{% endif %}

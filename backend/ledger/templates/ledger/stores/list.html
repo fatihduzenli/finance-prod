@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% load components responsive money icons filters static %}
 {% block title %}Stores{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Stores</h1><span class="list-counts" id="list-counts">{{ listed.total }} store{{ listed.total|pluralize }} · {{ listed.with_lease }} with a lease · {{ listed.vacant }} vacant</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:stores:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">{% icon "plus" 16 %} New store</a>{% endif %}</div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Stores</h1><p class="page-sub" id="list-counts">{{ listed.total }} store{{ listed.total|pluralize }} · {{ listed.with_lease }} with a lease · {{ listed.vacant }} vacant</p></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:stores:export' %}{% if export_query %}?{{ export_query }}{% endif %}">{% icon "file" 16 %}Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">{% icon "plus" 16 %} New store</a>{% endif %}</div></div>{% endblock %}
 {% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
 {% block content %}
   {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3; DESIGN-SPEC §4 Stores list, stores-list-laptop.png).

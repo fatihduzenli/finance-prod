@@ -321,7 +321,8 @@ td.line-number { white-space: nowrap; color: var(--muted); }
    .kpi2 ({% kpi2 %}): the dashboard mockup's KPI card. Its head (.kpi2-head): the 32 px tinted
    square (.kpi2-icon, --link on --month-current) and the titles (.kpi2-title 15/600, the muted
    12 px .kpi2-sub under it); the figure row (.kpi2-amount): the 28/700 .kpi2-value (.tone-unpaid
-   red) and the pill .kpi2-pill-<paid|unpaid|pending|neutral>; the footer (.kpi2-link): the link text
+   red, .tone-paid green, .tone-muted a zero; PLAN-015 Batch 2) and the pill
+   .kpi2-pill-<paid|unpaid|pending|neutral>; the footer (.kpi2-link): the link text
    in --link 13/600 and the arrow at the far right.
    .period-control ({% period_control %}): the .segmented track as a GET form.
    .avatar-tile ({% avatar_tile %}): the 28 px (.avatar-tile-36: 36 px) tinted square with the
@@ -337,6 +338,8 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .kpi2-amount { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
 .kpi2-value { color: var(--text); font-size: var(--fs-kpi); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .kpi2-value.tone-unpaid { color: var(--unpaid-text); }
+.kpi2-value.tone-paid { color: var(--paid-text); }
+.kpi2-value.tone-muted { color: var(--muted); }
 .kpi2-pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 600; line-height: 1.3; white-space: nowrap; }
 .kpi2-pill-paid { background: var(--paid-bg); color: var(--paid-text); }
 .kpi2-pill-unpaid { background: var(--unpaid-bg); color: var(--unpaid-text); }
@@ -1362,6 +1365,8 @@ a.pager-page:hover { background: var(--surface-2); }
 th.cell-chevron, td.cell-chevron { width: 1%; padding-left: 0; text-align: right; white-space: nowrap; }
 td.cell-chevron a { display: inline-flex; color: var(--muted); }
 td.cell-chevron a:hover { color: var(--text); }
+/* PLAN-015 Batch 2: the Operators list's first cell, the avatar tile beside the name and its badges. */
+.cell-title-avatar { display: flex; align-items: center; gap: 8px; min-width: 0; }
 /* --- Search and filters (PLAN-014 A5; finance/_filters.html, finance/filters.js) ----------------
    .filters-row: the wide search field (.filters-search, flex), the "Filters" button and, where
    the page sorts, the "Sort: … ▾" menu. .filters-panel: the page's own fields (.filters-fields,
@@ -1388,25 +1393,21 @@ td.cell-chevron a:hover { color: var(--text); }
   .filters-fields { flex-direction: column; align-items: stretch; }
   .filters .filters-row .btn, .filters .filters-row button { width: auto; }
 }
-/* --- Totals tiles (PLAN-014 A6; the Payments list's totals) ----------------------------------
-   .tile-row: five tiles across (two per row at 768 px and under), each a label over its figure,
-   the figure right-aligned in its tile; .tone-paid green, .tone-unpaid red, .is-zero muted.
-   .info: the round ⓘ beside the card's title; its .tooltip (role=tooltip) opens on hover, focus
+/* --- The Payments list's totals (PLAN-014 A6) -------------------------------------------------
+   .info: the round ⓘ beside the totals' label; its .tooltip (role=tooltip) opens on hover, focus
    and a tap (.is-open), on the popover's surface, edge and shadow (--popover-*). */
-.tile-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-3); }
-.tile { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); }
-.tile-label { color: var(--muted); font-size: var(--fs-sm); }
-.tile-value { color: var(--text); font-size: var(--fs-lg); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.tile.tone-paid .tile-value { color: var(--paid-text); }
-.tile.tone-unpaid .tile-value { color: var(--unpaid-text); }
-.tile.is-zero .tile-value { color: var(--muted); font-weight: 600; }
+/* PLAN-015 Batch 2: the Payments totals as {% kpi2 %} cards. The ⓘ stays beside its label (its
+   tooltip opens to the right of it); the five cards fit one row on a laptop (10rem each, as on the
+   phone), their figures 22 px so a five-figure sum keeps one line. */
+#payment-totals-card { justify-content: flex-start; }
+#payments-totals.kpi2-row { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+#payments-totals .kpi2-value { font-size: 22px; }
 .info-wrap { position: relative; display: inline-flex; }
 .info { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); font: inherit; font-size: var(--fs-md); cursor: pointer; }
 .info:hover, .info:focus-visible { color: var(--text); }
 .tooltip { display: none; position: absolute; top: calc(100% + var(--space-1)); left: 0; z-index: 20; width: min(22rem, 80vw); padding: var(--space-3); border: 1px solid var(--popover-border); border-radius: var(--radius-ctl); background: var(--surface-2); box-shadow: var(--popover-shadow); color: var(--text-2); font-size: var(--fs-sm); font-weight: 400; }
 .info-wrap:hover .tooltip, .info-wrap:focus-within .tooltip, .info-wrap.is-open .tooltip { display: block; }
 @media (max-width: 768px) {
-  .tile-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tooltip { left: auto; right: 0; }
 }
 /* PLAN-014 A4: a vacant store's "+ Add lease" link after its Status badge (admins). */
@@ -1862,6 +1863,9 @@ p.detail-more-notes { padding-left: 0; }
   .list-card > .table-cards > table > tbody > tr:last-child > td { border-bottom: 0; }
   .table-cards > table td.cell-chevron, .table-cards > table th.cell-chevron { display: none; }
   .table-cards > table#stores.role-cards > tbody > tr > td[data-role=status] { order: 3; margin-left: 0; text-align: left; }
+  /* PLAN-015 Batch 2: a list header's segmented control (Payments' period, Bank deposits' state)
+     keeps one row and scrolls sideways inside the header, as the period control does. */
+  .page-header > .page-actions > .segmented { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
   /* PLAN-013a C6 (12f-a B-3): the list family's meta line. Its inline links (the stores list's
      Operator) at text height, not the 44 px of a cell's link, so they no longer stretch the
      line; the row itself stays at least 44 px tall (its title link is). The stores list's

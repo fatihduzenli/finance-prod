@@ -37,7 +37,8 @@ from django.views.decorators.http import require_POST, require_safe
 
 import mail
 from finance.dates import day_text
-from ledger.models import RULES_WITHOUT_STORE, HeldReason, MessageStatus
+from finance.templatetags.components import NEUTRAL, PAID, PENDING, UNPAID
+from ledger.models import RULES_WITHOUT_STORE, HeldReason, MessageStatus, OutboundMessage
 from ledger.services import list_filters, messaging, outbox_preview
 from ledger.views.leases import _admin_only
 from ledger.views.operators import _actor, role_required
@@ -62,6 +63,35 @@ def _day(raw: object) -> date | None:
 
 def _day_choice(day: date | None) -> dict[str, str]:
     return {day.isoformat(): day_text(day)} if day is not None else {}
+
+
+#: The Status cell's chip tone of each message status (PLAN-015 Batch 2 §3.5): waiting to go
+#: (queued, held, the 3-day fold) pending; sent paid; failed unpaid; what never goes on its own
+#: (suppressed, the retired test inbox, combined) neutral.
+STATUS_TONES: dict[str, str] = {
+    MessageStatus.QUEUED: PENDING,
+    MessageStatus.SENT: PAID,
+    MessageStatus.FAILED: UNPAID,
+    MessageStatus.SUPPRESSED: NEUTRAL,
+    MessageStatus.CATCH_ALL: NEUTRAL,
+    MessageStatus.HELD: PENDING,
+    MessageStatus.WAITING: PENDING,
+    MessageStatus.COMBINED: NEUTRAL,
+}
+
+
+def status_cell(message: OutboundMessage) -> tuple[str, str, str]:
+    """(tone, label, rest) of the Status cell: the chip's tone (:data:`STATUS_TONES`) and the
+    status's display word, then the rest of :func:`ledger.services.messaging.status_text` for
+    the line under it — the held reason, the error, the fold's day ("until Nov 5, 2026") —
+    or, for a row combined into another, the whole "Combined into the D message: Sent"."""
+    label = str(message.get_status_display())
+    text = messaging.status_text(message)
+    if message.status == MessageStatus.COMBINED and message.combined_into_id is not None:
+        return STATUS_TONES[message.status], label, text
+    if text.startswith(f"{label} (") and text.endswith(")"):
+        return STATUS_TONES[message.status], label, text[len(label) + 2 : -1]
+    return STATUS_TONES[message.status], label, "" if text == label else text
 
 
 @role_required
@@ -104,7 +134,7 @@ def outbox_page(request: HttpRequest) -> HttpResponse:
             "rows": [
                 (
                     message,
-                    messaging.status_text(message),
+                    status_cell(message),
                     managers if message.template.internal else message.to_address,
                     message.rule in RULES_WITHOUT_STORE,
                 )

@@ -42,7 +42,7 @@ from accounts.views import forbidden
 from banking import services
 from banking.models import BankTransaction, ChargeType, IgnoreReason, Status
 from ledger.models import Lease, Store
-from ledger.services import list_filters, payments_entry
+from ledger.services import payments_entry
 from ledger.views.operators import _actor, _role, role_required
 
 PAGE = "banking:page"
@@ -129,12 +129,6 @@ def page(request: HttpRequest) -> HttpResponse:
             "readiness": services.readiness(),
             "status": status,
             "status_choices": choices.items(),
-            "active_filters": list_filters.active(
-                request,
-                {"status": ("State", choices)},
-                accepted={"status": status},
-                defaults={"status": Status.NEW.value},
-            ),
             "query": urlencode({"status": status}),
             "ignore_reasons": IgnoreReason.choices,
             "is_admin": meets(_role(request), Role.ADMIN),

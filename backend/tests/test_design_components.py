@@ -134,6 +134,9 @@ LIST_PAGES = [
     "/audit/",
     "/settings/",
     "/search/?q=zzz",
+    # PLAN-015 Batch 2: the two Admin lists of the list family.
+    "/admin-settings/bank-deposits/",
+    "/admin-settings/outbox/",
 ]
 
 
@@ -1056,10 +1059,28 @@ def test_kpi2_badge_tones(tone: str) -> None:
     assert f'<span class="kpi2-pill kpi2-pill-{tone}">3 unmatched</span>' in html
 
 
+# PLAN-015 Batch 2: the Payments list's totals add the paid (green) and muted (a zero) figures.
+@pytest.mark.parametrize("tone", ["unpaid", "paid", "muted"])
+def test_kpi2_value_tones(tone: str) -> None:
+    html = rendered("{% kpi2 'banknote' 'Settled' value='$1.00' value_tone=t %}", t=tone)
+    assert f'<span class="kpi2-value tone-{tone}">$1.00</span>' in html
+
+
+def test_kpi2_names_its_figure_when_given_an_id() -> None:
+    html = rendered("{% kpi2 'banknote' 'Settled' value='$1.00' value_id='total-settled' %}")
+    assert '<span class="kpi2-value" id="total-settled">$1.00</span>' in html
+    html = rendered(
+        "{% kpi2 'banknote' 'Settled' value='$0.00' value_tone='muted' value_id=i %}", i="<x>"
+    )
+    assert '<span class="kpi2-value tone-muted" id="&lt;x&gt;">$0.00</span>' in html
+    assert " id=" not in rendered("{% kpi2 'banknote' 'Settled' value='$1.00' %}")
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
-        "value_tone='paid'",
+        # PLAN-015 Batch 2 re-pin: paid became a figure tone; pending never is one.
+        "value_tone='pending'",
         "value_tone='red'",
         "badge='x' badge_tone='overdue'",
         "badge='x' badge_tone=''",
@@ -1225,6 +1246,8 @@ def test_the_new_components_take_their_colours_from_documented_pairs() -> None:
     for selector in (".kpi2-icon", ".avatar-tile"):
         assert "background: var(--month-current); color: var(--link);" in rule(selector)
     assert "color: var(--unpaid-text)" in rule(".kpi2-value.tone-unpaid")
+    assert "color: var(--paid-text)" in rule(".kpi2-value.tone-paid")  # PLAN-015 Batch 2
+    assert "color: var(--muted)" in rule(".kpi2-value.tone-muted")
     tokens = TOKENS_CSS.read_text()
     assert "pair: --link on --month-current" in tokens
     assert "pair[dark]: --link on --month-current over --surface" in tokens
@@ -1265,3 +1288,23 @@ def test_every_dark_pair_meets_wcag_aa_with_the_dark_values() -> None:
         if not low <= ratio <= high:
             failures.append(f"{pair}: {ratio:.2f}")
     assert failures == []
+
+
+@pytest.mark.parametrize("tone", ["unpaid", "paid", "muted"])
+def test_the_kpi2_figure_tones_meet_aa_on_the_card_in_both_themes(tone: str) -> None:
+    """PLAN-015 Batch 2: each {% kpi2 %} figure colour (.kpi2-value.tone-*) on the card's
+    --surface, with the light values and with the dark block's, at the text minimum."""
+    from tests.test_design_accessibility import TEXT_MINIMUM, Pair, definitions, pair_ratio
+    from tests.test_plan012g_a_tokens import block_after, declarations, strip_comments
+
+    css = APP_CSS.read_text()
+    colour = css.split(f"\n.kpi2-value.tone-{tone} {{", 1)[1].split("}", 1)[0]
+    foreground = colour.split("color: var(", 1)[1].split(")", 1)[0]
+    assert "background: var(--surface)" in css.split("\n.kpi2 {", 1)[1].split("}", 1)[0]
+    tokens = TOKENS_CSS.read_text()
+    light = definitions(tokens)
+    dark = dict(light)
+    dark.update(declarations(block_after(strip_comments(tokens), r':root\[data-theme="dark"\]')))
+    pair = Pair(foreground, "--surface", "")
+    for theme in (light, dark):
+        assert pair_ratio(pair, theme) >= TEXT_MINIMUM, (tone, pair_ratio(pair, theme))

@@ -105,7 +105,8 @@ def test_the_counts_line_counts_every_store_whatever_the_filter(viewer: Client) 
     world()
     for params in ({}, {"q": "owing"}, {"status": "closed"}, {"balance": "overdue"}):
         html = page(viewer, **params)
-        counts = re.search(r'<span class="list-counts" id="list-counts">([^<]+)</span>', html)
+        # PLAN-015 Batch 2 re-pin: the counts are the dashboard header's muted sub-line.
+        counts = re.search(r'<p class="page-sub" id="list-counts">([^<]+)</p>', html)
         assert counts is not None
         assert counts.group(1) == "7 stores · 4 with a lease · 3 vacant", params
 
@@ -343,7 +344,10 @@ def test_the_family_structure_of_each_paged_list(path: str, table_id: str) -> No
     html = client_for(Role.ADMIN)[0].get(path).content.decode()
     start = html.index('<div class="page-header">')
     header = html[start : html.index("</header>", start)]
-    assert re.search(r'<div class="page-title"><h1>[^<]+</h1><span class="list-counts"', header)
+    # PLAN-015 Batch 2 re-pin: the dashboard's header (the title block, the counts as its sub-line).
+    assert re.search(
+        r'<div class="page-title-block"><h1>[^<]+</h1><p class="page-sub" id="list-counts">', header
+    )
     assert 'id="export-csv"' in header
     assert html.count('class="card filter-card"') == 1
     # PLAN-014 A5: the shared search and filters form, its Apply in the panel.
@@ -379,7 +383,7 @@ def test_the_operators_list_reads_the_name_the_stores_and_the_email(viewer: Clie
     assert re.findall(r"<th[^>]*>([^<]*)<", head[1]) == ["Operator", "Stores", "E-mail", ""]
     assert re.search(r'<td class="operator-stores"[^>]*>2</td>', html)
     assert re.search(r"<td[^>]*>count@example.com</td>", html)
-    assert '<span class="list-counts" id="list-counts">1 operator</span>' in html
+    assert '<p class="page-sub" id="list-counts">1 operator</p>' in html  # PLAN-015 Batch 2
 
 
 def test_the_leases_list_reads_the_operator_and_a_status_badge(viewer: Client) -> None:

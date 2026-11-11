@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load components responsive icons filters static %}
 {% block title %}Operators{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Operators</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} operator{{ page.paginator.count|pluralize }}{% if include_archived %}, archived included{% endif %}</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:operators:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:operators:create' %}">{% icon "plus" 16 %} New operator</a>{% endif %}</div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Operators</h1><p class="page-sub" id="list-counts">{{ page.paginator.count }} operator{{ page.paginator.count|pluralize }}{% if include_archived %}, archived included{% endif %}</p></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:operators:export' %}{% if export_query %}?{{ export_query }}{% endif %}">{% icon "file" 16 %}Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:operators:create' %}">{% icon "plus" 16 %} New operator</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
-  {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3).{% endcomment %}
+  {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3). PLAN-015 Batch 2: the Operator cell leads with the dashboard's {% avatar_tile %}, the name and its badges on one line beside it.{% endcomment %}
   <div class="card filter-card">{% filters active=active_filters search_name="q" search_value=query search_maxlength=200 search_placeholder="Name or e-mail" search_label="Search operators" %}
     <label class="inline"><input type="checkbox" name="archived" value="1"{% if include_archived %} checked{% endif %}> Include archived</label>
   {% endfilters %}</div>
@@ -17,7 +17,7 @@
     <tbody>
       {% for operator in page %}{% url 'ledger:operators:detail' pk=operator.pk as operator_url %}
         <tr>
-          <td>{% include "ledger/_cell_title.html" with title=operator.display_name link=operator_url %}{% if operator.archived_at %} <span class="badge">Archived</span>{% endif %}{% if operator.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
+          <td><span class="cell-title-avatar">{% avatar_tile operator.display_name %}{% include "ledger/_cell_title.html" with title=operator.display_name link=operator_url %}{% if operator.archived_at %} <span class="badge">Archived</span>{% endif %}{% if operator.needs_review %} {% status_badge "Needs review" %}{% endif %}</span></td>
           <td class="operator-stores">{{ operator.store_count }}</td>
           <td>{{ operator.email|default:"" }}</td>
           <td class="cell-chevron" data-role="meta"><a href="{{ operator_url }}" aria-label="Open {{ operator.display_name }}">{% icon "chevron-right" 16 %}</a></td>

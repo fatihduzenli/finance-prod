@@ -520,7 +520,12 @@ def test_the_outbox_lists_every_message_with_its_reason_and_full_address(
     client, _ = client_for(Role.ADMIN)
     page = client.get("/admin-settings/outbox/").content.decode()
     table = page[page.index('id="outbox"') :]
-    assert CEO in table and "Held (not sent (mail not set up))" in table
+    # PLAN-015 Batch 2 re-pin: the status is a chip ("Held") over the held reason.
+    assert CEO in table
+    assert (
+        '<span>Held</span></span><span class="cell-subline">not sent (mail not set up)</span>'
+        in (table)
+    )
     assert "C — Payment overdue" in table and "Send now" in table
     assert 'id="outbox-not-set-up"' in page
     assert "We have not yet received $2,450.00" in table  # the stored body opens in the row

@@ -1,8 +1,9 @@
 """PLAN-014 Batch A in a browser (Fable): the search + Filters component on the stores list
 (results as you type without a navigation, the panel with Apply and Clear, the count and the
 chips, the bottom sheet on the phone, Escape) and the payments tiles' tooltip on focus (PLAN-015
-Batch 1 removed the Payment status card and its pill test). The QA shots (``QA_SHOTS_DIR``) come
-from here, in both themes."""
+Batch 1 removed the Payment status card and its pill test), and the Payments period links keeping
+the typed search (PLAN-015 Batch 2). The QA shots (``QA_SHOTS_DIR``) come from here, in both
+themes."""
 
 from __future__ import annotations
 
@@ -157,10 +158,39 @@ def test_the_tiles_tooltip_opens_on_focus(live_server: LiveServer, laptop: Brows
     a_world()
     page = signed_in(laptop, live_server, "e2e-14a-tiles", "light", Role.BILLING)
     page.goto(f"{live_server.url}/payments/")
-    tiles = page.locator("#payments-totals .tile")
+    # PLAN-015 Batch 2 re-pin: the five tiles are five KPI cards v2.
+    tiles = page.locator("#payments-totals .kpi2")
     assert tiles.count() == 5
     tooltip = page.locator("#totals-help")
     assert not tooltip.is_visible()
     page.locator("#payment-totals-card button.info").focus()
     expect(tooltip).to_be_visible()
     shot(page, "payments-tiles-light-laptop")
+
+
+def test_the_payments_period_links_keep_the_search_typed(
+    live_server: LiveServer, laptop: BrowserContext
+) -> None:
+    # Fable's round-1 finding on PLAN-015 Batch 2: the search refreshes the list in place, so the
+    # period links must be refreshed with it, or "This month" drops the typed search.
+    today = date.today()
+    for number, label in ((2701, "Harbor Point"), (2702, "Inland Plaza")):
+        lease = a_lease(a_store(label, number), an_operator(f"{label} Co"))
+        charge = a_rent_charge(lease, date(today.year, today.month, 1), due="900.00")
+        a_payment(charge, "300.00", today)
+    page = signed_in(laptop, live_server, "e2e-15b2-period", "light", Role.BILLING)
+    page.goto(f"{live_server.url}/payments/")
+    rows = page.locator("#results tbody tr")
+    expect(rows).to_have_count(2)
+    page.fill("#filters input[type=search]", "Harbor")
+    expect(rows).to_have_count(1)
+    month = page.locator("#payments-period a", has_text="This month")
+    expect(month).to_have_attribute("href", re.compile(r"q=Harbor"))
+    month.click()
+    start = date(today.year, today.month, 1).isoformat()
+    page.wait_for_url(re.compile(rf"date_from={start}"))
+    assert "q=Harbor" in page.url and "date_to=" in page.url
+    expect(rows).to_have_count(1)
+    assert "Harbor Point" in page.locator("#results").inner_text()
+    assert "Inland Plaza" not in page.locator("#results").inner_text()
+    expect(page.locator("#payments-period a[aria-current=page]")).to_have_text("This month")

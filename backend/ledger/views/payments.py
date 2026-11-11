@@ -26,6 +26,7 @@ over the payment page; ``?store=`` naming another store than the payment's is a 
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from datetime import date
 from decimal import Decimal
@@ -37,12 +38,14 @@ from django.core.paginator import Paginator
 from django.db.models.functions import Lower
 from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from finance.dates import day_text
+from finance.templatetags.components import PERIODS
 from ledger.forms import RefundForm, VoidForm, VoidManualForm
 from ledger.models import (
     MANUAL_PAYMENT_METHODS,
@@ -53,7 +56,14 @@ from ledger.models import (
     PaymentStatus,
     Store,
 )
-from ledger.services import detail_cards, installments, list_filters, one_off_charges, refunds
+from ledger.services import (
+    dashboard_v2,
+    detail_cards,
+    installments,
+    list_filters,
+    one_off_charges,
+    refunds,
+)
 from ledger.services import payments_ledger as ledger
 from ledger.services import stores as store_service
 from ledger.services.pdf import downloads
@@ -110,6 +120,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
                 defaults={"date_by": ledger.DATE_BY_PAID},
             ),
             "page": page,
+            "period_links": period_links(selected, timezone.localdate()),
             "rows": ledger.rows_for(page),
             "totals": ledger.totals(rows),
             "selected": selected,
@@ -121,6 +132,30 @@ def payment_list(request: HttpRequest) -> HttpResponse:
             "stores": stores,
         },
     )
+
+
+#: The header's period links (PLAN-015 Batch 2 §3.3): "All time" (no date), then the
+#: dashboard's periods.
+ALL_TIME = "All time"
+
+
+def period_links(selected: ledger.PaymentFilter, today: date) -> list[tuple[str, str, bool]]:
+    """(label, href, active) of "All time", "This month", "Quarter" and "Year": the current
+    filter (``date_by`` and every other value kept, the page left out) with the dates replaced
+    by today's calendar month, quarter or year (:func:`ledger.services.dashboard_v2.window`),
+    "All time" with both removed. A link is active when the filter's dates are exactly its
+    own (All time: both empty); any other range leaves every link inactive. No query."""
+    path = reverse("ledger:payments:list")
+    spans: list[tuple[str, date | None, date | None]] = [(ALL_TIME, None, None)]
+    for period, label in PERIODS:
+        span = dashboard_v2.window(period, today)
+        spans.append((label, span.start, span.end))
+    links = []
+    for label, start, end in spans:
+        query = urlencode(dataclasses.replace(selected, date_from=start, date_to=end).as_query())
+        active = (selected.date_from, selected.date_to) == (start, end)
+        links.append((label, f"{path}?{query}" if query else path, active))
+    return links
 
 
 def _day_choice(day: date | None) -> dict[str, str]:
