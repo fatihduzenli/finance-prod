@@ -62,8 +62,11 @@ def url(route: str, value: str = "") -> str:
 
 
 def whole_tokens_absent(body: str) -> None:
+    # A whole token is bounded by text punctuation only: a UUID group ("-9999-"), a path
+    # segment ("/9999/") or a query value ("=9999") is random data, not B's figure (the check
+    # was intermittent on a lucky UUID: re-pinned 2026-11-10).
     for token in B_TOKENS:
-        assert re.search(rf"(?<![\w,.]){re.escape(token)}(?![\w,.])", body) is None, token
+        assert re.search(rf"(?<![\w,.=/-]){re.escape(token)}(?![\w,.=/-])", body) is None, token
 
 
 def test_every_portal_route_is_classified_and_the_public_set_is_exactly_the_sign_in_flow() -> None:
