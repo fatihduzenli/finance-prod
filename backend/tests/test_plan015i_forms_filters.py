@@ -13,14 +13,16 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from django.template.loader import render_to_string
 from django.test import Client
+from django.urls import reverse
 
 from accounts.roles import Role
 from finance.dates import day_text
+from ledger.models import MessageTemplate
 from ledger.services import audit
 from ledger.views import audit as audit_views
 from ledger.views.reports import ReportTooSlow
 from tests.test_operator_views import client_for
-from tests.test_plan012f_d_pages import World, client_of, path_of
+from tests.test_plan012f_d_pages import APP_CSS, World, client_of, path_of
 from tests.test_plan012f_d_pages import world as world  # noqa: F401 (fixture)
 from tests.test_plan012fa_c_builder import element, text
 from tests.test_plan015_batch6_admin import an_event, page
@@ -349,3 +351,24 @@ def test_the_messages_export_is_in_the_header_with_the_same_query() -> None:
         'type=update_invoice">Download spreadsheet</a>'
     ) in actions
     assert body.count('id="export-csv"') == 1
+
+
+# --- D: the template status chip -------------------------------------------------------------
+
+
+def test_only_the_templates_table_chip_is_drawn_on_its_row_text_line() -> None:
+    css = APP_CSS.read_text(encoding="utf-8")
+    rule = "#templates-table td[data-role=status] .status-chip { position: relative; top: -2px; }"
+    assert css.count(rule) == 1
+    # No other rule moves a chip: the only chip rules that place it are the component's own.
+    assert re.findall(r"[^\n{}]*\.status-chip[^\n{}]*\{[^}]*\b(?:top|position)\b[^}]*\}", css) == [
+        rule
+    ]
+    # Outside the phone block, as no phone rule is needed.
+    assert css.index(rule) < css.index("@media (max-width: 719.98px) {")
+    MessageTemplate.objects.get_or_create(
+        code="visual_check", defaults={"name": "Check", "subject": "S", "body": "B"}
+    )
+    body = page(admin(), reverse("ledger:settings:templates"))
+    cell = re.search(r'<td data-role="status"[^>]*>(.*?)</td>', body)
+    assert cell is not None and cell.group(1).startswith('<span class="status-chip status-chip-')
