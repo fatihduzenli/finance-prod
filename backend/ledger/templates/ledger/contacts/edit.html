@@ -2,7 +2,8 @@
 {% block title %}Edit contact entry{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ back_url }}">Notes &amp; follow-ups</a> <span aria-hidden="true">›</span> <span aria-current="page">Edit contact entry</span></nav><h1>Edit contact entry</h1></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
+  <section class="card form-card step-card" aria-labelledby="contact-edit-card-title">
+  {% include "ledger/leases/_step_head.html" with heading_id="contact-edit-card-title" title="Contact" note="" action="" %}
   <p id="edit-window">You recorded this entry; you can change it until {{ edit_until|moment }} (New York). After that, add a correction instead.</p>
   <form method="post" id="contact-edit-form" class="js-single-submit">
     {% csrf_token %}

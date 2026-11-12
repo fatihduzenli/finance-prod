@@ -4,7 +4,8 @@
 {% block title %}Set up autopay: lease {{ lease.store.external_label }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Set up autopay</span></nav><h1>Set up autopay</h1></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
+  <section class="card form-card step-card" aria-labelledby="enrol-card-title">
+  {% include "ledger/leases/_step_head.html" with heading_id="enrol-card-title" title="Autopay" note="" action="" %}
   <p>One autopay is set up in {{ company.provider_name }} per debit day. It debits the chosen bank method every month, starting on the date below. Card methods are never used.</p>
 
   {% if blockers %}
