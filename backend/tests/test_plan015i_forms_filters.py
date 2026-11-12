@@ -358,7 +358,7 @@ def test_the_messages_export_is_in_the_header_with_the_same_query() -> None:
 
 def test_only_the_templates_table_chip_is_drawn_on_its_row_text_line() -> None:
     css = APP_CSS.read_text(encoding="utf-8")
-    rule = "#templates-table td[data-role=status] .status-chip { position: relative; top: -2px; }"
+    rule = "#templates-table .template-status .status-chip { position: relative; top: -2px; }"
     assert css.count(rule) == 1
     # No other rule moves a chip: the only chip rules that place it are the component's own.
     assert re.findall(r"[^\n{}]*\.status-chip[^\n{}]*\{[^}]*\b(?:top|position)\b[^}]*\}", css) == [
@@ -370,5 +370,11 @@ def test_only_the_templates_table_chip_is_drawn_on_its_row_text_line() -> None:
         code="visual_check", defaults={"name": "Check", "subject": "S", "body": "B"}
     )
     body = page(admin(), reverse("ledger:settings:templates"))
-    cell = re.search(r'<td data-role="status"[^>]*>(.*?)</td>', body)
-    assert cell is not None and cell.group(1).startswith('<span class="status-chip status-chip-')
+    # Re-pinned (Fable, small gate run 1): the cell is named by its own class, so the stylesheet
+    # names no data-role outside the phone block; the role is kept for the phone cards.
+    cells = re.findall(r"<td ([^>]*)>(<span class=\"status-chip status-chip-[^\"]+\">)", body)
+    assert cells and all(
+        attrs == 'data-role="status" class="template-status" data-label="Status"'
+        for attrs, _ in cells
+    ), cells
+    assert body.count('class="template-status"') == len(cells)
