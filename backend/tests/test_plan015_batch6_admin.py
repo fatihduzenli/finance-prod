@@ -341,8 +341,10 @@ def test_an_outcome_word_is_escaped_in_its_chip() -> None:
 
 
 def filter_card(html: str) -> str:
+    # Re-pinned (Opus, PLAN-015i §3.2): the card holds the list pages' filter component, whose
+    # form is followed by the phone sheet's backdrop.
     start = html.index('<div class="card filter-card">')
-    return html[start : html.index("</form></div>", start)]
+    return html[start : html.index('<div class="filters-backdrop"', start)]
 
 
 @pytest.mark.parametrize("path", ["/audit/", "/webhooks/"])
@@ -350,16 +352,23 @@ def test_the_two_filter_forms_carry_no_inline_style(path: str) -> None:
     card = filter_card(page(admin(), path))
     assert "style=" not in card
     assert card.count('<span class="filter-field">') == (6 if path == "/audit/" else 2)
-    actions = card[card.index('<span class="filter-actions">') :]
-    assert '<button class="btn" type="submit">' in actions and "Download spreadsheet</a>" in actions
+    # Re-pinned (PLAN-015i §3.2): the panel's Apply submits; the export is in the header.
+    footer = card[card.index('<div class="filters-footer">') :]
+    assert '<button class="btn btn-dark" type="submit" id="filters-apply">Apply</button>' in footer
+    assert 'class="filter-actions"' not in card and "Download spreadsheet" not in card
 
 
 def test_the_activity_log_filter_keeps_its_fields_and_buttons() -> None:
-    card = filter_card(page(admin(), "/audit/"))
+    html = page(admin(), "/audit/")
+    card = filter_card(html)
     for name in ("action", "user", "entity_type", "entity_id", "from", "to"):
         assert f'name="{name}"' in card, name
-    assert '<button class="btn" type="submit">Show</button>' in card
-    assert 'id="audit-export"' in card
+    # Re-pinned (PLAN-015i §3.2): Show became the panel's Apply; the export moved to the header.
+    assert ">Show</button>" not in card and 'id="filters-apply"' in card
+    assert 'id="audit-export"' not in card
+    start = html.index('<div class="page-header">')
+    header = html[start : html.index("</header>", start)]
+    assert 'id="audit-export"' in header[header.index('<div class="page-actions">') :]
 
 
 #: The list footer's shape (ledger/_list_footer.html) with the page's own words.

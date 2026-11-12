@@ -24,7 +24,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST, require_safe
 
 from accounts.roles import Role, meets
-from ledger.services import csv_export
+from ledger.services import csv_export, list_filters
 from ledger.services.csv_export import CsvWriter
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import PAGE_SIZE, _role, csv_response, export_name, role_required
@@ -111,6 +111,14 @@ def webhook_list(request: HttpRequest) -> HttpResponse:
         {
             "page": page,
             "rows": rows,
+            "active_filters": list_filters.active(
+                request,
+                {
+                    "outcome": ("Outcome", dict(WebhookOutcome.choices)),
+                    "type": ("Type", None),
+                },
+                accepted={"outcome": outcome, "type": event_type},
+            ),
             "outcome": outcome,
             "event_type": event_type,
             "export_query": urlencode(
