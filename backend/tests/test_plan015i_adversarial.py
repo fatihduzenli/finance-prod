@@ -9,7 +9,7 @@ from django.urls import reverse
 
 from accounts.roles import Role
 from tests.test_operator_views import client_for
-from tests.test_plan012fa_c_builder import element
+from tests.test_plan012fa_c_builder import element, text
 from tests.test_plan015_batch6_admin import an_event, page
 from tests.test_plan015i_forms_filters import chips, clear_url, params, toggle
 
@@ -26,7 +26,8 @@ def test_messages_never_reflect_a_hostile_outcome_or_type() -> None:
         admin(),
         "/webhooks/?outcome=<script>alert(1)</script>&type=%22><img src=x onerror=1>",
     )
-    assert "alert(1)" not in body and "onerror" not in body
+    assert "<script>alert(1)</script>" not in body and "<img src=x onerror=1>" not in body
+    assert "alert(1)" not in text(body) and "onerror=1" not in text(body)
     assert chips(body) == [] and toggle(body) == "Filters"
     assert clear_url(body) == "/webhooks/"
 
