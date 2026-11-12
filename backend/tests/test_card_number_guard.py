@@ -404,6 +404,7 @@ GUARD_MODULES = (
     "ledger.migrations.0076_one_off_charge_dated",
     "ledger.migrations.0077_credit_return",
     "ledger.migrations.0078_invoice_email_portal_link_only",
+    "ledger.migrations.0079_calendar_entry_email_at",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0003_webhook_event_processing",
     "payments.migrations.0005_jobs",

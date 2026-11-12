@@ -16,7 +16,7 @@ import itertools
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -1811,6 +1811,12 @@ LEDGER_CASES: list[ConstraintCase] = [
         "calendar_entries_title_not_blank",
         new_calendar_entry,
         lambda: new_calendar_entry(title="   "),
+    ),
+    # PLAN-015h: the reminder's time is one of the 31 offered half hours.
+    ConstraintCase(
+        "calendar_entries_email_at_offered",
+        lambda: new_calendar_entry(email_at=time(21, 0)),
+        lambda: new_calendar_entry(email_at=time(6, 15)),
     ),
     # calendar_feeds (PLAN-011b D8)
     ConstraintCase(

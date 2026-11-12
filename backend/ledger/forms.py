@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import uuid
 from collections.abc import Iterable, Sequence
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -63,6 +63,7 @@ from ledger.models import (
 )
 from ledger.services import (
     autopay_plans,
+    calendar,
     deposits,
     free_rent,
     installments,
@@ -3673,8 +3674,16 @@ class _CalendarEntryFields(forms.Form):
     )
     email_morning = forms.BooleanField(
         required=False,
-        label="E-mail me that morning",
-        help_text="An e-mail to you on the morning of that day (09:00 New York).",
+        label="E-mail me a reminder",
+        widget=forms.CheckboxInput(attrs={"class": "switch", "role": "switch"}),
+    )
+    # PLAN-015h: the reminder's New York time, a half hour from 6:00 AM to 9:00 PM.
+    email_at = _QuietChoiceField(
+        choices=calendar.REMINDER_TIME_CHOICES,
+        initial="09:00",
+        required=False,
+        label="Time",
+        error_messages={"invalid_choice": "Pick a time from the list."},
     )
 
     def clean_title(self) -> str:
@@ -3682,6 +3691,11 @@ class _CalendarEntryFields(forms.Form):
         if not title:
             raise forms.ValidationError(self.fields["title"].error_messages["required"])
         return title
+
+    def clean_email_at(self) -> time:
+        """The chosen time; the default (9:00 AM) when none was sent."""
+        value = self.cleaned_data.get("email_at") or ""
+        return time.fromisoformat(value) if value else calendar.DEFAULT_REMINDER_TIME
 
 
 class CalendarEntryForm(_CalendarEntryFields):
@@ -3753,13 +3767,6 @@ class CalendarEntryDialogForm(_CalendarEntryFields):
     # Checked together in clean(): a hidden field's own error would show nowhere.
     link_kind = forms.CharField(required=False, widget=forms.HiddenInput)
     link_id = forms.CharField(required=False, widget=forms.HiddenInput)
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        # The dialog writes "09:00 New York" beside the switch in place of the help text.
-        morning = self.fields["email_morning"]
-        morning.help_text = ""
-        morning.widget.attrs.update({"class": "switch", "role": "switch"})
 
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean() or {}

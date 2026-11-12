@@ -51,7 +51,7 @@
   <aside class="detail-side calendar-side">
     <section class="card" id="calendar-day-panel" aria-labelledby="calendar-day-title">
       <div class="card-head day-panel-head"><h2 class="section-label" id="calendar-day-title">{% if day.year == today.year %}{{ day|date:"l" }}, {{ day|day_short }}{% else %}{{ day|day_long }}{% endif %}</h2>{% if can_add %}<a class="btn btn-sm" id="panel-add-entry" href="{% url 'ledger:calendar:add' %}?on={{ day|date:'Y-m-d' }}" data-dialog-open="calendar-entry" data-day="{{ day|date:'Y-m-d' }}">{% icon "plus" 14 %} Add entry</a>{% endif %}</div>
-      {% if day_items %}<ul class="day-entries">{% for item in day_items %}<li class="day-entry kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a class="day-entry-title" href="{{ item.url }}">{{ item.title }}</a><span class="day-entry-meta">{{ item.kind_label }}</span></li>{% endfor %}</ul>
+      {% if day_items %}<ul class="day-entries">{% for item in day_items %}<li class="day-entry kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a class="day-entry-title" href="{{ item.url }}">{{ item.title }}</a><span class="day-entry-meta">{{ item.kind_label }}{% if item.email_at is not None %} · e-mail at {{ item.email_at|clock }}{% endif %}</span></li>{% endfor %}</ul>
       {% else %}{% include "finance/_empty_state.html" with id="calendar-day-empty" icon="calendar" title="Nothing on this day." text="Debit days, insurance anniversaries, lease ends and notes show here." only %}{% endif %}
     </section>
     <section class="card" id="calendar-next-days" aria-labelledby="calendar-next-title">
@@ -68,4 +68,4 @@
   </div>
 {% endblock %}
 {% block dialog %}{% if entry_form %}{% include "ledger/calendar/_entry_dialog.html" %}{% endif %}{% endblock %}
-{% block scripts %}{% if entry_form %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/calendar_dialog.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% if entry_form %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/calendar_dialog.js' %}" defer></script><script src="{% static 'ledger/reminder_time.js' %}" defer></script>{% endif %}{% endblock %}

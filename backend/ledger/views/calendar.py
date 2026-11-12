@@ -349,6 +349,7 @@ def _input(form: CalendarEntryForm | CalendarEntryDialogForm) -> calendar.EntryI
         title=data["title"],
         body=data.get("body") or "",
         email_morning=bool(data.get("email_morning")),
+        email_at=data.get("email_at") or calendar.DEFAULT_REMINDER_TIME,
         **_links(form),
     )
 
@@ -382,6 +383,7 @@ def _save(request: HttpRequest, entry: CalendarEntry) -> HttpResponse:
                 "title": entry.title,
                 "body": entry.body,
                 "email_morning": entry.email_morning,
+                "email_at": f"{entry.email_at:%H:%M}",
                 "store": str(entry.store_id or ""),
                 "operator": str(entry.operator_id or ""),
                 "lease": str(entry.lease_id or ""),

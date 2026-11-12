@@ -1146,14 +1146,21 @@ fieldset.card > legend + * { clear: both; }
 #log-contact-about { margin: 0; }
 /* New calendar entry (owner, 2026-11-06; ledger/calendar/_entry_dialog.html): the Log contact
    frame and its kind cards, one column per kind; the Date input with the day's words beside it;
-   the switch with "09:00 New York"; the link's type-ahead rows (the picker's list, each row a
+   the switch with its time (.entry-time, PLAN-015h: the select, compact as the calendar's
+   filters, and "New York time", its error under them; beside the switch, on a phone under it
+   with the full-width select of every phone form; the edit page shares the row); the link's type-ahead rows (the picker's list, each row a
    button) and the chosen link as a neutral chip with its × (.link-chip-remove). */
 #calendar-entry { max-height: 90vh; overflow: auto; }
 .calendar-entry-form .field input:not([type=radio]):not([type=checkbox]):not([type=date]), .calendar-entry-form textarea { width: 100%; }
 #entry-kind .kind-card-grid { grid-template-columns: none; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; }
 .entry-date-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
-.entry-morning { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); }
+.entry-morning { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
 .entry-morning label.inline { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; font-weight: 600; }
+.entry-time { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.entry-time[hidden] { display: none; }
+.entry-time .muted { font-size: var(--fs-sm); }
+.entry-time > .errorlist { flex-basis: 100%; margin: 0; }
+@media (min-width: 720px) { .entry-time select { padding: 7px 10px; font-size: var(--fs-base); } }
 .entry-link-field [hidden] { display: none; }
 .entry-link-results li button { display: block; width: 100%; min-height: 0; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-ctl); background: none; color: var(--text); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .entry-link-results li button:hover, .entry-link-results li.is-active button { background: var(--month-current); }
@@ -1783,6 +1790,8 @@ p.detail-more-notes { padding-left: 0; }
   /* A form dialog (.dialog-lg) takes the whole screen; the confirmation keeps the sheet. */
   .dialog-lg { height: 100dvh; max-height: none; margin: 0; border-width: 0; border-radius: 0; }
   .dialog-form-grid { grid-template-columns: minmax(0, 1fr); }
+  /* PLAN-015h: the reminder's time takes its own line under the switch. */
+  .entry-time { flex-basis: 100%; }
   /* The dashboard (PLAN-015 Batch 1): the operator tiles one column; the Collections bars
      scroll sideways inside their card; the header's controls wrap under the title. */
   .operator-tiles { grid-template-columns: minmax(0, 1fr); }

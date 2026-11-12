@@ -5,14 +5,15 @@ open it with that day as the Date and its words beside the input; typing in the 
 lists the matches and choosing one shows the chip (its × brings the field back); Save closes the
 dialog and the entry is on its day, linked to the store's lease and operator; on a phone the
 dialog is a sheet at the bottom of the screen, a tap selects a day and a tap-and-hold shows its
-"+"."""
+"+". The switch "E-mail me a reminder" shows its time (a select and "New York time") only while
+it is on: beside the switch on the laptop, under it on the phone (PLAN-015h)."""
 
 from __future__ import annotations
 
 import os
 import re
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,16 @@ def phone(browser: Browser) -> Iterator[BrowserContext]:
     context.close()
 
 
+def themed_shots(page: Page, name: str) -> None:
+    """With ``QA_SHOTS_DIR`` set, ``name`` in the dark theme (the users' default) and in light."""
+    if not os.environ.get("QA_SHOTS_DIR"):
+        return
+    for theme in ("dark", "light"):
+        page.evaluate(f"document.documentElement.dataset.theme = '{theme}'")
+        shot(page, f"{name}-{theme}")
+    page.evaluate("document.documentElement.dataset.theme = 'dark'")
+
+
 def a_world() -> tuple[Store, Lease]:
     store = a_store("Elm Park", number=1601)
     lease = a_lease(store, an_operator("Istanbul Repairs"), started=date(2025, 7, 1))
@@ -95,8 +106,9 @@ def test_new_entry_on_the_laptop(live_server: LiveServer, laptop: BrowserContext
     dialog.locator("#cancel-calendar-entry").click()
     expect(dialog).to_be_hidden()
     assert page.url == calendar_url
-    # A click on a day selects it in the panel; the dialog stays closed.
-    chosen = today.replace(day=20)
+    # A click on a day selects it in the panel; the dialog stays closed. Not today: a reminder
+    # for today at a time already past would be refused (PLAN-015h).
+    chosen = today.replace(day=20 if today.day != 20 else 19)
     cell = page.locator(f'.calendar-day[data-day="{chosen.isoformat()}"]')
     cell.locator(".calendar-num-link").click()
     page.wait_for_url(f"{live_server.url}/calendar/?month={chosen:%Y-%m}&on={chosen.isoformat()}")
@@ -124,10 +136,28 @@ def test_new_entry_on_the_laptop(live_server: LiveServer, laptop: BrowserContext
     dialog.locator("[name=on]").fill(chosen.isoformat())
     expect(dialog.locator("#entry-day")).to_have_text(day_text(chosen))
     expect(dialog.locator("#entry-day")).to_have_text(day_text(chosen))
-    # Reminder, a title, the morning e-mail.
+    # Reminder, a title, the reminder e-mail at 2:30 PM: the time shows beside the switch while
+    # it is on (PLAN-015h).
     dialog.locator("label.kind-card", has_text="Reminder").click()
     dialog.locator("[name=title]").fill("Collect the keys")
-    dialog.locator("label.inline", has_text="E-mail me that morning").click()
+    when = dialog.locator("#entry-time-wrap")
+    expect(when).to_be_hidden()
+    switch = dialog.locator("label.inline", has_text="E-mail me a reminder")
+    switch.click()
+    expect(when).to_be_visible()
+    expect(when).to_contain_text("New York time")
+    select = dialog.locator("[name=email_at]")
+    expect(select).to_have_value("09:00")
+    select.select_option("14:30")
+    label_box, select_box = switch.bounding_box(), select.bounding_box()
+    assert label_box is not None and select_box is not None
+    assert select_box["x"] >= label_box["x"] + label_box["width"]
+    assert select_box["y"] < label_box["y"] + label_box["height"]
+    themed_shots(page, "calendar-entry-reminder-laptop")
+    switch.click()
+    expect(when).to_be_hidden()
+    switch.click()
+    expect(when).to_be_visible()
     # The link: typing lists the store and its lease; choosing the store shows the chip.
     dialog.locator("#entry-link").fill("1601")
     results = dialog.locator("#entry-link-results li button")
@@ -158,13 +188,37 @@ def test_new_entry_on_the_laptop(live_server: LiveServer, laptop: BrowserContext
     entry = CalendarEntry.objects.get()
     day = page.locator(f'.calendar-day[data-day="{chosen.isoformat()}"]')
     expect(day.locator(f"#entry-{entry.pk}")).to_have_text("Collect the keys")
-    assert (entry.kind, entry.on, entry.email_morning) == ("reminder", chosen, True)
+    assert (entry.kind, entry.on, entry.email_morning, entry.email_at) == (
+        "reminder",
+        chosen,
+        True,
+        time(14, 30),
+    )
     assert (entry.store_id, entry.lease_id, entry.operator_id) == (
         store.pk,
         lease.pk,
         lease.operator_id,
     )
     shot(page, "calendar-entry-saved-laptop")
+    # The edit page shares the row: the switch on, 2:30 PM beside it; off hides it (PLAN-015h).
+    page.goto(f"{live_server.url}/calendar/{entry.pk}/edit/")
+    toggle = page.locator("#id_email_morning")
+    expect(toggle).to_be_checked()
+    expect(toggle).to_have_class("switch")
+    edit_when = page.locator("#id_time-wrap")
+    expect(edit_when).to_be_visible()
+    edit_select = page.locator("#id_email_at")
+    expect(edit_select).to_have_value("14:30")
+    edit_switch = page.locator("label.inline", has_text="E-mail me a reminder")
+    label_box, select_box = edit_switch.bounding_box(), edit_select.bounding_box()
+    assert label_box is not None and select_box is not None
+    assert select_box["x"] >= label_box["x"] + label_box["width"]
+    assert select_box["y"] < label_box["y"] + label_box["height"]
+    themed_shots(page, "calendar-entry-edit-laptop")
+    edit_switch.click()
+    expect(edit_when).to_be_hidden()
+    edit_switch.click()
+    expect(edit_when).to_be_visible()
 
 
 def test_a_tap_selects_a_day_and_a_hold_shows_its_plus_on_the_phone(
@@ -222,6 +276,18 @@ def test_new_entry_is_a_sheet_on_the_phone(live_server: LiveServer, phone: Brows
     assert box["y"] + box["height"] == pytest.approx(PHONE["height"], abs=1)
     assert box["y"] > 0
     shot(page, "calendar-entry-phone")
+    # The reminder's time: shown under the switch while it is on (PLAN-015h).
+    when = dialog.locator("#entry-time-wrap")
+    expect(when).to_be_hidden()
+    switch = dialog.locator("label.inline", has_text="E-mail me a reminder")
+    switch.tap()
+    expect(when).to_be_visible()
+    label_box, select_box = switch.bounding_box(), dialog.locator("[name=email_at]").bounding_box()
+    assert label_box is not None and select_box is not None
+    assert select_box["y"] >= label_box["y"] + label_box["height"]
+    themed_shots(page, "calendar-entry-reminder-phone")
+    switch.tap()
+    expect(when).to_be_hidden()
     # The foot is reachable inside the sheet.
     save = dialog.locator("#save-calendar-entry")
     save.scroll_into_view_if_needed()
