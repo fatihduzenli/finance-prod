@@ -250,6 +250,21 @@ def test_a_refused_value_has_no_chip_and_keeps_its_message() -> None:
     assert audit.TOO_LONG.format(limit=200, name="action") in body
 
 
+@pytest.mark.parametrize("name", audit.TEXT_FILTERS)
+@pytest.mark.parametrize("value", ["%00", "a%00b"])
+def test_a_filter_holding_a_nul_has_no_chip_an_empty_field_and_one_message(
+    name: str, value: str
+) -> None:
+    response = admin().get(f"/audit/?{name}={value}")
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert chips(body) == [] and toggle(body) == "Filters"
+    assert body.count(audit.BAD_CHARACTER.format(name=name)) == 1
+    field = f"audit-{name.replace('_', '-')}"
+    assert re.search(rf'<input type="text" name="{name}" id="{field}" value=""', body)
+    assert "\x00" not in body and "ab" not in re.findall(r'value="([^"]*)"', body)
+
+
 def test_the_chips_show_when_the_query_was_too_slow(monkeypatch: pytest.MonkeyPatch) -> None:
     def too_slow(_read: object) -> object:
         raise ReportTooSlow
