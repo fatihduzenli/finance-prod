@@ -3,7 +3,8 @@
 {% block title %}Attach {{ company.provider_name }} invoice{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=charge.lease.store %}<a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Rent {{ charge.period_month|month }}, {{ charge.lease.store.external_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Attach {{ company.provider_name }} invoice</span></nav><h1>Attach {{ company.provider_name }} invoice</h1></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
+  <section class="card form-card step-card" aria-labelledby="link-invoice-card-title">
+  {% include "ledger/leases/_step_head.html" with heading_id="link-invoice-card-title" title="Invoice" note="" action="" %}
   <p>Amount due: <strong id="amount-due">{{ charge.amount_due|money }}</strong>. Balance: <strong id="balance">{{ charge.balance|money }}</strong>.</p>
   <p class="muted">The invoices of this lease's operator that are not linked to any charge, such as one created on the {{ company.provider_name }} dashboard. A charge has at most one invoice, and a link cannot be undone here. When the invoice total differs from the balance, check the box and say why in the note; the charge is then marked Needs review.</p>
   {{ form.non_field_errors }}

@@ -12,7 +12,9 @@ so no date arithmetic can leave the calendar), ``documents_of`` (``store:<id>`` 
 ``lease:<id>``: the ``document.*`` rows of that record, as its Activity list reads them),
 ``store_of`` (a store id: the rows of the store and of its records, as the store page's
 History tab reads them, :func:`store_filter`; PLAN-012d D3) and ``page``.
-A filter longer than :data:`FILTER_MAX_LENGTH` characters is dropped.
+A filter longer than :data:`FILTER_MAX_LENGTH` characters is dropped, and so is a text
+filter (:data:`TEXT_FILTERS`) holding a NUL character, which PostgreSQL text cannot hold
+(the other values are refused by their own reading: no NUL is a date, a page or an id).
 
 Rows are newest first, :data:`PAGE_SIZE` per page, read with one query (no count). The
 CSV holds at most :data:`CSV_MAX_ROWS` rows; it is written by
@@ -83,6 +85,9 @@ ENTITY_OPERATOR = "operator"
 OWNER_STORE = "store"
 OWNER_LEASE = "lease"
 PREFIX_MARK = "*"
+#: The filters compared as text with the rows; their values reach the database as given.
+TEXT_FILTERS: tuple[str, ...] = ("action", "user", "entity_type", "entity_id")
+NUL = "\x00"
 
 #: The entity types whose rows link to a record page; a document links to its owner's.
 LINKED_TYPES: frozenset[str] = frozenset(
@@ -107,6 +112,7 @@ UNREADABLE_DATES = "The dates could not be read; the last {days} days are shown.
 SWAPPED = "The end date was before the start date; they were swapped."
 CAPPED = "The range is at most {days} days; it now starts on {start}."
 TOO_LONG = "A filter longer than {limit} characters was ignored: {name}."
+BAD_CHARACTER = "A filter with a character that cannot be searched was ignored: {name}."
 UNKNOWN_USER = "No user has that username; no rows match."
 BAD_OWNER = "The documents filter could not be read and was ignored."
 BAD_STORE = "The store filter could not be read and was ignored."
@@ -200,10 +206,13 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> AuditQu
     day = today or today_in_new_york()
     messages: list[str] = []
     text: dict[str, str] = {}
-    for name in ("action", "user", "entity_type", "entity_id", "documents_of", "store_of"):
+    for name in (*TEXT_FILTERS, "documents_of", "store_of"):
         value = (params.get(name, "") or "").strip()
         if len(value) > FILTER_MAX_LENGTH:
             messages.append(TOO_LONG.format(limit=FILTER_MAX_LENGTH, name=name))
+            value = ""
+        elif name in TEXT_FILTERS and NUL in value:
+            messages.append(BAD_CHARACTER.format(name=name))
             value = ""
         text[name] = value
     raw_from = (params.get("from", "") or "").strip()[:FILTER_MAX_LENGTH]

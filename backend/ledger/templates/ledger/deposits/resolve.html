@@ -3,7 +3,8 @@
 {% block title %}Return deposit{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Return deposit</span></nav><h1>Return deposit</h1></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
+  <section class="card form-card step-card" aria-labelledby="deposit-card-title">
+  {% include "ledger/leases/_step_head.html" with heading_id="deposit-card-title" title="Deposit" note="" action="" %}
   <p>Paid on this deposit: <strong id="deposit-paid">{{ paid|money }}</strong>. Lease ended {{ lease.ended_on|day|default:"— (not ended)" }}.</p>
   <p class="muted">A deposit is resolved once. <strong>Refunded</strong>: the amount paid back by Zelle, wire, check or other (recorded as a deposit refund, money out). <strong>Withheld</strong>: the business keeps the whole paid deposit. <strong>Transferred</strong>: the amount becomes the deposit of another lease of the same operator. For a refund or a transfer below the paid amount, the rest is recorded as withheld; say why in the note. Nothing is sent to {{ company.provider_name }}.</p>
   {% if not can_resolve %}<p id="cannot-resolve"><strong>This deposit cannot be resolved now: it is resolved already, or its lease has not ended.</strong></p>{% endif %}

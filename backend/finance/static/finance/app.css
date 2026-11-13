@@ -798,6 +798,10 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
 .message-body { margin: var(--space-2) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .settings-actions { white-space: nowrap; }
 .settings-actions form { display: inline-block; margin: 0; }
+/* PLAN-015i §3.4: the Message templates table's cells are top-aligned and the chip is the tallest
+   thing on its line, so it starts at the cell's top and its words sat 2px under the row's text line;
+   drawn 2px higher, without changing the row's layout (a chip elsewhere is not moved). */
+#templates-table .template-status .status-chip { position: relative; top: -2px; }
 .settings-add { padding: 12px 20px 16px; border-top: 1px solid var(--border); }
 .form-card { max-width: 760px; }
 .form-card .field:first-child > label, .form-card form > .field:first-of-type > label { margin-top: 0; }

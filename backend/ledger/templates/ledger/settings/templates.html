@@ -14,7 +14,7 @@
             <td><a href="{% url 'ledger:settings:template_edit' pk=template.pk %}">{{ template.display_name }}</a>{% if template.internal %} <span class="badge">Internal</span>{% endif %}</td>
             <td><code>{{ template.code }}</code></td>
             <td>{{ template.get_channel_display }}</td>
-            <td data-role="status">{% if template.active %}{% chip "paid" "Active" %}{% else %}{% chip "neutral" "Inactive" %}{% endif %}</td>
+            <td data-role="status" class="template-status">{% if template.active %}{% chip "paid" "Active" %}{% else %}{% chip "neutral" "Inactive" %}{% endif %}</td>
           </tr>
         {% empty %}
           <tr><td colspan="4" class="muted empty">No templates yet.</td></tr>

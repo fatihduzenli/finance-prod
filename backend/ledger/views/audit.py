@@ -22,8 +22,9 @@ from django.views.decorators.http import require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
-from ledger.services import audit
+from ledger.services import audit, list_filters
 from ledger.views.operators import _role, csv_response, role_required
+from ledger.views.outbox import _day_choice
 from ledger.views.reports import TOO_SLOW, ReportTooSlow, bounded
 
 #: The record page of each linked entity type (``ledger.services.audit.LINKED_TYPES``
@@ -45,6 +46,33 @@ def _link(row: audit.AuditRow) -> str:
     return reverse(RECORD_PAGES[kind], kwargs={"pk": pk})
 
 
+def _active_filters(request: HttpRequest, query: audit.AuditQuery) -> list_filters.ActiveFilters:
+    """The Filters button's count, the chips and Clear (PLAN-015i §3.2), from the values the
+    query accepted. A date counts only when the request gave it and it is not the default
+    window's (a refused date falls back to the default: no chip); the scoped links'
+    ``documents_of`` and ``store_of`` survive Clear."""
+    accepted = {
+        name: value
+        for name, value in query.as_query(page=1).items()
+        if name not in ("from", "to") or (request.GET.get(name, "") or "").strip()
+    }
+    default = audit.parse_query({})
+    return list_filters.active(
+        request,
+        {
+            "action": ("Action", None),
+            "user": ("User", None),
+            "entity_type": ("Entity type", None),
+            "entity_id": ("Entity id", None),
+            "from": ("From", _day_choice(query.date_from)),
+            "to": ("To", _day_choice(query.date_to)),
+        },
+        accepted=accepted,
+        defaults={"from": default.date_from.isoformat(), "to": default.date_to.isoformat()},
+        keep=("documents_of", "store_of"),
+    )
+
+
 def _page(
     request: HttpRequest, query: audit.AuditQuery, found: audit.AuditPage | None
 ) -> HttpResponse:
@@ -53,6 +81,7 @@ def _page(
         "ledger/audit/page.html",
         {
             "query": query,
+            "active_filters": _active_filters(request, query),
             "too_slow": TOO_SLOW if found is None else "",
             "messages_shown": found.messages if found is not None else query.messages,
             "rows": [(row, _link(row)) for row in found.rows] if found is not None else [],

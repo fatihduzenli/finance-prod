@@ -1,10 +1,9 @@
 {% extends "finance/base.html" %}
-{% load responsive people %}
+{% load filters responsive people %}
 {% block title %}Activity log{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><h1>Activity log</h1></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><h1>Activity log</h1></div><div class="page-actions"><a class="btn" id="audit-export" href="{% url 'ledger:audit:export' %}?{{ export_query }}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:audit:page' %}" id="audit-filters" role="search">
-    <div class="actions">
+  <div class="card filter-card">{% filters active=active_filters %}
       <span class="filter-field"><label for="audit-action">Action</label>
       <input type="text" name="action" id="audit-action" value="{{ query.action }}" maxlength="200" placeholder="document.*"></span>
       <span class="filter-field"><label for="audit-user">User</label>
@@ -19,10 +18,7 @@
       <input type="date" name="to" id="audit-to" value="{{ query.date_to|date:'Y-m-d' }}"></span>
       {% if query.documents_of %}<input type="hidden" name="documents_of" value="{{ query.documents_of.0 }}:{{ query.documents_of.1 }}">{% endif %}
       {% if query.store_of %}<input type="hidden" name="store_of" value="{{ query.store_of }}">{% endif %}
-      <span class="filter-actions"><button class="btn" type="submit">Show</button>
-      <a class="btn" id="audit-export" href="{% url 'ledger:audit:export' %}?{{ export_query }}">Download spreadsheet</a></span>
-    </div>
-  </form></div>
+  {% endfilters %}</div>
   <p class="muted">Newest first, {{ page_size }} rows a page. Dates are New York calendar days, at most {{ max_days }} days. An action or entity id ending in * matches every value that starts with the text before it. Identifiers are masked; amounts are shown as they were recorded.{% if query.documents_of %} Showing the document activity of one {{ query.documents_of.0 }}.{% endif %}{% if query.store_of %} Showing the rows of one store and its records.{% endif %}</p>
   {% if messages_shown %}
     <ul class="messages" id="audit-messages">{% for text in messages_shown %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>

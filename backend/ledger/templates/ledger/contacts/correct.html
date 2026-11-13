@@ -2,9 +2,9 @@
 {% block title %}Add a correction{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ back_url }}">Notes &amp; follow-ups</a> <span aria-hidden="true">›</span> <span aria-current="page">Add a correction</span></nav><h1>Add a correction</h1></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
+  <section class="card form-card step-card" aria-labelledby="contact-correct-card-title">
+  {% include "ledger/leases/_step_head.html" with heading_id="contact-correct-card-title" title="Correction" note="The entry stays as it was recorded; the correction is listed under it with your name and the time. Never write card or account numbers." action="" %}
   {% include "ledger/contacts/_entry.html" %}
-  <p class="muted">The entry stays as it was recorded; the correction is listed under it with your name and the time. Never write card or account numbers.</p>
   <form method="post" id="contact-correct-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}

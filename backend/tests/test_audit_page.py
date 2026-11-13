@@ -218,6 +218,34 @@ def test_a_filter_over_200_characters_is_ignored_with_a_message() -> None:
     assert query(action="a" * 200).action == "a" * 200
 
 
+@pytest.mark.parametrize("name", audit.TEXT_FILTERS)
+@pytest.mark.parametrize("value", ["\x00", "a\x00b", "\x00*"])
+def test_a_text_filter_with_a_nul_is_ignored_whole_with_a_message(name: str, value: str) -> None:
+    found = query(**{name: value})
+    assert getattr(found, name) == ""
+    assert found.messages == (audit.BAD_CHARACTER.format(name=name),)
+
+
+def test_a_nul_in_the_other_values_is_refused_by_their_own_reading() -> None:
+    found = query(**{"from": "2026-10-01\x00", "to": "\x00", "page": "2\x00"})
+    assert (found.date_from, found.date_to, found.page) == (TODAY - timedelta(days=6), TODAY, 1)
+    assert found.messages == (audit.UNREADABLE_DATES.format(days=audit.DEFAULT_DAYS),)
+    owner = query(documents_of=f"store:{uuid.uuid4()}\x00", store_of=f"{uuid.uuid4()}\x00")
+    assert (owner.documents_of, owner.store_of) == (None, None)
+    assert owner.messages == (audit.BAD_OWNER, audit.BAD_STORE)
+
+
+@pytest.mark.parametrize("name", audit.TEXT_FILTERS)
+def test_a_nul_filter_answers_200_on_the_page_and_the_export(name: str) -> None:
+    client, _ = admin()
+    entry = log()
+    body = page(client, **{name: "a\x00b"})
+    assert body.count(audit.BAD_CHARACTER.format(name=name)) == 1
+    rows = export(client, **{name: "a\x00b"})
+    assert rows[0] == list(audit.CSV_HEADER)
+    assert str(entry.pk) in [row[0] for row in rows[1:]]
+
+
 def test_the_page_number_is_bounded() -> None:
     assert query(page="0").page == 1
     assert query(page="-3").page == 1

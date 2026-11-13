@@ -7,9 +7,8 @@
     {% csrf_token %}
     <div class="form-layout">
     <div class="form-main">
-    <section class="card form-card" id="calendar-entry-card">
-    <h2>Entry</h2>
-    <p class="muted">Calendar entries are shared with all staff and appear in every staff member's calendar feed. Never write card or account numbers.</p>
+    <section class="card form-card step-card" id="calendar-entry-card" aria-labelledby="calendar-card-title">
+    {% include "ledger/leases/_step_head.html" with heading_id="calendar-card-title" title="Entry" note="Calendar entries are shared with all staff and appear in every staff member's calendar feed. Never write card or account numbers." action="" %}
     {{ form.non_field_errors }}
     {% for field in form.visible_fields %}
       {% if field.name != "email_morning" and field.name != "email_at" %}{% include "ledger/stores/_form_field.html" %}{% endif %}

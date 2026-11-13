@@ -2,7 +2,8 @@
 {% block title %}Reschedule the installments of {{ parent_label }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if plan.lease %}{% include "ledger/_store_crumb.html" with crumb_store=plan.lease.store %}{% endif %}<a href="{% url 'ledger:plans:detail' pk=plan.pk %}">Installment plan</a> <span aria-hidden="true">›</span> <span aria-current="page">Reschedule</span></nav><h1>Reschedule the installments of {{ parent_label }}</h1></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
+  <section class="card form-card step-card" aria-labelledby="reschedule-card-title">
+  {% include "ledger/leases/_step_head.html" with heading_id="reschedule-card-title" title="New dates" note="" action="" %}
   <p class="muted" id="page-help">{{ help }}</p>
   <form method="post" id="reschedule-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
