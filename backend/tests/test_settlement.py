@@ -470,6 +470,17 @@ def test_the_preview_route_refuses_each_bad_parameter(params: dict[str, str], me
     assert "Nothing was scheduled" not in short
 
 
+@pytest.mark.parametrize("cadence", [MONTHLY, WEEKLY, YEARLY])
+def test_the_preview_route_refuses_a_first_date_in_the_year_9999_as_too_far(cadence: str) -> None:
+    """Fable's finding on 015j: the horizon refuses such a date before any date arithmetic."""
+    response = client_for(Role.BILLING)[0].get(
+        preview_query(count="12", first="9999-12-28", cadence=cadence)
+    )
+    assert response.status_code == 400
+    short = invoice_builder.SETTLEMENT_PREVIEW_SENTENCES[invoice_builder.SETTLEMENT_FIRST_TOO_FAR]
+    assert response.json() == {"ok": False, "message": short}
+
+
 # --- The page ---------------------------------------------------------------------------------
 
 

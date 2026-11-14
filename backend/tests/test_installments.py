@@ -292,6 +292,39 @@ def test_an_unknown_cadence_is_refused(fake: FakeProvider) -> None:
     assert lines == [] and refused is not None and refused.field == "cadence"
 
 
+@pytest.mark.parametrize(
+    ("first", "cadence", "count"),
+    [
+        (date(9999, 12, 1), InstallmentCadence.MONTHLY, 2),
+        (date(9999, 12, 28), InstallmentCadence.WEEKLY, 2),
+        (date(9999, 12, 20), InstallmentCadence.BIWEEKLY, 2),
+        (date(9999, 3, 15), InstallmentCadence.YEARLY, 2),
+    ],
+)
+def test_dates_past_the_year_9999_raise_the_documented_value_error(
+    first: date, cadence: str, count: int, fake: FakeProvider
+) -> None:
+    """Fable's finding on 015j: one ``ValueError`` with the sentence for both failure kinds
+    (a year out of range, a date overflow), so every caller's ``except ValueError`` holds."""
+    with pytest.raises(ValueError, match="^" + installments.PAST_CALENDAR + "$"):
+        installments.schedule_dates(first, cadence, count)
+    for words in (installments.settlement_preview, installments.payments_preview):
+        with pytest.raises(ValueError, match="year 9999"):
+            words(D("100.00"), count, first, cadence)
+    parent = a_one_off(an_operator(fake))
+    lines, refused = installments.preview(parent, count, first, cadence)
+    assert lines == [] and refused is not None
+    assert (refused.ok, refused.field, refused.message) == (
+        False,
+        "first_due",
+        installments.PAST_CALENDAR,
+    )
+    assert installments.schedule_dates(date(9999, 12, 24), InstallmentCadence.WEEKLY, 2) == [
+        date(9999, 12, 24),
+        date(9999, 12, 31),
+    ]
+
+
 # --- The preview and the edits (D10) ----------------------------------------------------------
 
 
@@ -898,6 +931,24 @@ def test_reschedule_is_refused_while_a_provider_request_waits_or_in_the_past(
     assert not busy.ok and busy.message == installments.SHIFT_BUSY
     past = installments.reschedule(plan, TODAY - timedelta(days=1), "monthly", None)
     assert not past.ok and past.message == installments.FIRST_IN_PAST
+
+
+def test_reschedule_past_the_year_9999_is_refused_and_moves_nothing(fake: FakeProvider) -> None:
+    parent = a_one_off(an_operator(fake))
+    plan = plan_for(parent)
+    before = [row.due_date for row in rows_of(plan)]
+    outcome = installments.reschedule(
+        plan, date(9999, 12, 28), InstallmentCadence.WEEKLY, a_user(Role.BILLING)
+    )
+    assert (outcome.ok, outcome.field, outcome.message) == (
+        False,
+        "first_due",
+        installments.PAST_CALENDAR,
+    )
+    assert [row.due_date for row in rows_of(plan)] == before
+    plan.refresh_from_db()
+    assert (plan.first_due, plan.cadence) == (FIRST, InstallmentCadence.MONTHLY)
+    assert not AuditLog.objects.filter(action=installments.RESCHEDULED_ACTION).exists()
 
 
 # --- Cancel (D11) --------------------------------------------------------------------------------

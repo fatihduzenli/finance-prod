@@ -198,6 +198,7 @@ CHOOSE_CADENCE = "Choose weekly, every two weeks or monthly."
 FIRST_REQUIRED = "Enter the first installment's date."
 FIRST_IN_PAST = "The first installment's date must be today or later."
 CENT_TOO_SMALL = "The balance cannot be split into that many installments of at least one cent."
+PAST_CALENDAR = "Choose an earlier first date: the installments would run past the year 9999."
 LINES_COUNT = "Give a date and an amount for every installment."
 LINE_AMOUNT = "Each installment's amount must be at least $0.01, in whole cents."
 LINES_SUM = "The installments must add up to the balance, {balance}; they add up to {total}."
@@ -418,15 +419,19 @@ def schedule_dates(first: date, cadence: str, count: int) -> list[date]:
     first date's day of the month, clamped to the month's last day (the 31st gives 28 or
     29 February, then 31 March), or yearly on the same day (29 February gives 28 February
     in a year that has none, as a short month does; PLAN-012f-b D16). Raises
-    ``ValueError`` on an unknown cadence."""
-    if cadence == InstallmentCadence.WEEKLY:
-        return [first + timedelta(days=7 * index) for index in range(count)]
-    if cadence == InstallmentCadence.BIWEEKLY:
-        return [first + timedelta(days=14 * index) for index in range(count)]
-    if cadence == InstallmentCadence.MONTHLY:
-        return [_add_months(first, index) for index in range(count)]
-    if cadence == InstallmentCadence.YEARLY:
-        return [_add_months(first, 12 * index) for index in range(count)]
+    ``ValueError`` on an unknown cadence, or with :data:`PAST_CALENDAR` when a date would
+    fall after the year 9999."""
+    try:
+        if cadence == InstallmentCadence.WEEKLY:
+            return [first + timedelta(days=7 * index) for index in range(count)]
+        if cadence == InstallmentCadence.BIWEEKLY:
+            return [first + timedelta(days=14 * index) for index in range(count)]
+        if cadence == InstallmentCadence.MONTHLY:
+            return [_add_months(first, index) for index in range(count)]
+        if cadence == InstallmentCadence.YEARLY:
+            return [_add_months(first, 12 * index) for index in range(count)]
+    except (ValueError, OverflowError):
+        raise ValueError(PAST_CALENDAR) from None
     raise ValueError(CHOOSE_CADENCE)
 
 
@@ -857,7 +862,10 @@ def preview(
         amounts = split(balance_of(parent), count)
     except ValueError as error:
         return [], Outcome(False, str(error), "count")
-    dates = schedule_dates(first_due, cadence, count)
+    try:
+        dates = schedule_dates(first_due, cadence, count)
+    except ValueError as error:
+        return [], Outcome(False, str(error), "first_due")
     return [Line(due, amount) for due, amount in zip(dates, amounts, strict=True)], None
 
 
@@ -1257,7 +1265,10 @@ def reschedule(
         if any(jobs.is_active(jobs.latest_for(row)) for row in moving):
             return Outcome(False, SHIFT_BUSY)
         before = plan_state(locked)
-        dates = schedule_dates(first_due, cadence, len(moving))
+        try:
+            dates = schedule_dates(first_due, cadence, len(moving))
+        except ValueError as error:
+            return Outcome(False, str(error), "first_due")
         paused = locked.status == InstallmentPlanStatus.PAUSED
         for row, due in zip(moving, dates, strict=True):
             _move(row, due, actor, create=not paused)

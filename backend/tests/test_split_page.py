@@ -647,6 +647,23 @@ def test_the_pages_values_posted_as_they_are_create_the_plan(
     assert plan.count == 3
 
 
+@pytest.mark.parametrize(
+    ("first", "cadence"), [("9999-12-01", "monthly"), ("9999-12-28", "weekly")]
+)
+def test_a_split_past_the_year_9999_is_refused_on_the_page_and_its_preview(
+    fake: FakeProvider, billing: Client, first: str, cadence: str
+) -> None:
+    """Fable's finding on 015j: the charge page's Split with the dates New lease refused."""
+    parent = a_one_off(an_operator(fake))
+    before = written()
+    status, data = answer(billing, preview_url(parent, count="12", first=first, cadence=cadence))
+    assert (status, data) == (400, {"ok": False, "message": installments.PAST_CALENDAR})
+    body = page(billing, parent, count="12", first_due=first, cadence=cadence)
+    assert installments.PAST_CALENDAR in body
+    assert lines_of(body) == []
+    assert written() == before
+
+
 # --- Yearly, and every two weeks refused (PLAN-012f-c D13 ruling) ------------------------------
 
 

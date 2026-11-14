@@ -607,6 +607,51 @@ def test_the_service_refuses_installments_without_a_first_date_naming_the_row(
     assert not Lease.objects.exists()
 
 
+PAST_9999 = [("9999-12-01", "monthly"), ("9999-12-28", "weekly"), ("9999-12-20", "biweekly")]
+
+
+@pytest.mark.parametrize(("first", "cadence"), PAST_9999)
+def test_the_service_refuses_a_plan_past_the_year_9999_on_the_first_date(
+    today: date, first: str, cadence: str
+) -> None:
+    """Fable's finding on 015j: installments after the year 9999 are an Outcome on
+    ``first_due``, not a server error; the New lease service names the row and saves nothing."""
+    form = bound(**priced(**in_installments(FEE, "12", first, cadence)))
+    assert form.is_valid(), form.errors
+    with pytest.raises(one_off_charges.SetupRefused) as raised:
+        charge_timing.create_lease(
+            form.cleaned_data,
+            rent=form.cleaned_data["rent"],
+            creation_key=form.cleaned_data["creation_key"],
+            items=form.setup_items(),
+            actor=None,
+            timings=form.timings(),
+            today=TODAY,
+        )
+    assert (raised.value.field, raised.value.message) == (
+        "setup_sign_fee_first_due",
+        installments.PAST_CALENDAR,
+    )
+    assert not Lease.objects.exists() and not OneOffCharge.objects.exists()
+    assert not InstallmentPlan.objects.exists() and not InvoiceDraft.objects.exists()
+
+
+@pytest.mark.parametrize(("first", "cadence"), PAST_9999)
+def test_the_page_after_a_plan_past_the_year_9999_shows_the_sentence_and_no_preview(
+    admin: Client, today: date, first: str, cadence: str
+) -> None:
+    store = vacant_store()
+    operator = new_lease.an_operator_with("Far Person", email="far@example.com")
+    data = create_data(store, operator, **priced(**in_installments(FEE, "12", first, cadence)))
+    response = post_create(admin, store, data)
+    assert response.status_code == 302
+    assert not Lease.objects.filter(store=store).exists()
+    text = page(admin, create_path(store))
+    expected = f"Sign fee: {installments.PAST_CALENDAR} The lease was not saved."
+    assert html.escape(expected) in text
+    assert 'hidden id="setup-sign_fee-preview"></p>' in text
+
+
 # --- Errors ----------------------------------------------------------------------------------
 
 
