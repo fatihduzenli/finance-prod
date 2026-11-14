@@ -270,6 +270,10 @@ class Header:
     #: PLAN-015e: "Credit of $1,500.00 reversed Nov 6, 2026" while the lease is flagged after
     #: a returned debit reversed its credit (:func:`ledger.services.credits.credit_row`).
     credit_reversed: str = ""
+    #: PLAN-015j §12: on the store page with a current lease, the store's upcoming prospective
+    #: lease (:func:`upcoming_lease`) when it has an operator: the LEASE card's "Upcoming
+    #: lease" line, its payment entry linked for billing.
+    successor: Lease | None = None
 
 
 #: The Status row's badge tone by collection status (PLAN-015b): Active paid, Paused pending,
@@ -586,13 +590,20 @@ def _actions(store: Store, header: Header, role: Role | None) -> list[Action]:
     """The bar's actions ``role`` may take (PLAN-012e-2 D5), in bar order: Create invoice
     (primary; the operator not archived), Add payment and the Lease menu
     (:func:`_lease_items`); a store without a current lease offers New lease to an admin, and
-    the Lease menu for its upcoming prospective lease; a viewer gets none. Upload, Add entry
-    and Create missing charges are on their tabs."""
+    the Lease menu and Add payment for its upcoming prospective lease (the store page's entry
+    pays that lease, PLAN-015j §11 A); a viewer gets none. Upload, Add entry and Create
+    missing charges are on their tabs."""
     billing = meets(role, Role.BILLING)
     if not billing:
         return []
     lease = header.lease
     found: list[Action] = []
+    record_payment = Action(
+        "record_payment",
+        "Add payment",
+        reverse("ledger:stores:record_payment", kwargs={"pk": store.pk}),
+        element_id="record-payment",
+    )
     if lease is None:
         if meets(role, Role.ADMIN):
             found.append(
@@ -603,6 +614,8 @@ def _actions(store: Store, header: Header, role: Role | None) -> list[Action]:
                     element_id="new-lease",
                 )
             )
+        if header.status_lease is not None:  # the upcoming prospective lease (PLAN-015j §11 A)
+            found.append(record_payment)
     else:
         known = {"store": str(store.pk), "lease": str(lease.pk)}
         operator = header.operator
@@ -616,14 +629,7 @@ def _actions(store: Store, header: Header, role: Role | None) -> list[Action]:
                     element_id="create-invoice",
                 )
             )
-        found.append(
-            Action(
-                "record_payment",
-                "Add payment",
-                reverse("ledger:stores:record_payment", kwargs={"pk": store.pk}),
-                element_id="record-payment",
-            )
-        )
+        found.append(record_payment)
     items = _lease_items(store, header, role)
     if items:
         found.append(Action("lease", "Lease", "", items=items, element_id="lease-menu"))
@@ -1514,8 +1520,11 @@ def store_workspace(
         balances.total,
         len(balances.owed),
     )
-    if header.lease is None and (upcoming := upcoming_lease(store)) is not None:
+    upcoming = upcoming_lease(store)
+    if header.lease is None and upcoming is not None:
         header = replace(header, **_status_fields(upcoming))
+    elif upcoming is not None and upcoming.operator_id is not None:
+        header = replace(header, successor=upcoming)
     return Workspace(
         store=store,
         header=header,

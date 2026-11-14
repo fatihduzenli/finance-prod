@@ -391,18 +391,23 @@ def store_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
     """``ledger:stores:record_payment`` (billing; PLAN-012d D6): one payment received,
     allocated by hand over the open charges of the store's current lease, the rest kept as
     a credit on the lease, the credit held applied (:mod:`ledger.services.payments_entry`).
+    ``?lease=`` names the store's upcoming prospective lease (PLAN-015j §12, the store page's
+    "Upcoming lease" line); any other value is ignored and the current lease is used.
     Returns to the Payments tab."""
     if not meets(_role(request), Role.BILLING):
         return forbidden(request)
     store = _load(pk)
     today = timezone.localdate()
-    lease = payments_entry.current_lease(store, today)
+    requested = request.GET.get("lease")
+    lease = payments_entry.entry_lease(store, today, requested)
     if lease is None:
         return _no_lease(request, store)
     charges = payments_entry.open_charges(lease, today)
     held = credits.balance(lease)
-    target = f"store-payment:{store.pk}"
+    target = f"store-payment:{store.pk}:{lease.pk}"
     here = reverse("ledger:stores:record_payment", kwargs={"pk": store.pk})
+    if requested == str(lease.pk):  # the form posts and returns to the same lease
+        here += "?" + urlencode({"lease": requested})
     if request.method == "POST":
         form = AllocationPaymentForm(request.POST, charges=charges)
         if form.is_valid():
@@ -423,6 +428,7 @@ def store_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
                 ),
                 actor=_actor(request),
                 today=today,
+                requested=str(lease.pk),
             )
             if outcome.ok:
                 if outcome.replayed:

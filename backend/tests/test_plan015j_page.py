@@ -63,7 +63,9 @@ def route(name: str, lease: Lease) -> str:
 def save(client: Client, number: int = 437, **fields: str) -> Lease:
     """New lease of a $3,000.00 deposit and a $500.00 sign fee with ``fields``; saved."""
     store = vacant_store(number, f"Page Store {number}")
-    operator = new_lease.an_operator_with(f"Page Person {number}", email="page@example.com")
+    operator = new_lease.an_operator_with(
+        f"Page Person {number}", email=f"page{number}@example.com"
+    )
     data = create_data(
         store, operator, **{f"{DEP}_price": "3000.00", f"{FEE}_price": "500", **fields}
     )
@@ -275,3 +277,141 @@ def test_the_script_has_no_mirror_and_exposes_the_preview() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
     assert "deposit-mirror" not in script
     assert "window.ledgerNewLease = { paymentsPreview: paymentsPreview };" in script
+
+
+# --- Task 3b (§12, §11 A): the successor's line and the entry's ?lease= -----------------------
+
+
+def with_successor(admin: Client) -> tuple[Lease, Lease]:
+    """A store with a current lease (since 2025) and a prospective successor (Nov 15, 2026)
+    of Page Person 437, saved through New lease: (current, successor)."""
+    successor = save(admin)
+    current = a_lease(successor.store, started=date(2025, 1, 1))
+    return current, successor
+
+
+def store_page(client: Client, lease: Lease) -> str:
+    response = client.get(reverse("ledger:stores:detail", kwargs={"pk": lease.store_id}))
+    assert response.status_code == 200
+    return response.content.decode()
+
+
+def entry(client: Client, lease: Lease, requested: str | None = None) -> Any:
+    path = route("record_payment", lease)
+    return client.get(path + (f"?lease={requested}" if requested is not None else ""))
+
+
+def test_the_store_page_names_the_successor_and_links_its_payment_entry(
+    admin: Client, today: date
+) -> None:
+    current, successor = with_successor(admin)
+    client, _user = billing()
+    text = store_page(client, current)
+    link = f"{route('record_payment', current)}?lease={successor.pk}"
+    assert (
+        '<p class="card-note" id="header-successor">Upcoming lease: Page Person 437, starts '
+        f'Nov 15, 2026 · <a class="card-link" id="successor-payment" href="{link}">'
+        "Record a payment</a></p>"
+    ) in text
+    # The header keeps the current lease.
+    assert workspace.store_workspace(current.store, TODAY, Role.BILLING).header.lease == current
+    # A viewer sees the line without the link.
+    viewer, _user = client_for(Role.VIEWER, "viewer-successor")
+    seen = store_page(viewer, current)
+    assert (
+        '<p class="card-note" id="header-successor">Upcoming lease: Page Person 437, starts '
+        "Nov 15, 2026</p>"
+    ) in seen
+    assert "successor-payment" not in seen
+
+
+def test_no_successor_line_without_a_successor_or_its_operator(admin: Client, today: date) -> None:
+    alone = a_lease(vacant_store(500, "Alone"), started=date(2025, 1, 1))
+    assert 'id="header-successor"' not in store_page(admin, alone)
+    current, successor = with_successor(admin)
+    Lease.objects.filter(pk=successor.pk).update(operator=None)
+    assert 'id="header-successor"' not in store_page(admin, current)
+    # A store whose only lease is prospective shows no such line (its Status row names it).
+    only = save(admin, 501)
+    assert 'id="header-successor"' not in store_page(admin, only)
+
+
+def test_the_entry_with_the_successor_lists_its_open_charges(admin: Client, today: date) -> None:
+    current, successor = with_successor(admin)
+    client, _user = billing()
+    response = entry(client, current, str(successor.pk))
+    assert response.status_code == 200
+    assert response.context["lease"] == successor
+    listed = {row["charge"].charge_id for row in response.context["rows"]}
+    assert listed == {item.pk for item in setup_charges(successor)}
+    assert "Lease from Nov 15, 2026 · Operator Page Person 437" in response.content.decode()
+
+
+@pytest.mark.parametrize("which", ["other-store", "ended", "current", "malformed", "empty"])
+def test_the_entry_ignores_any_other_lease_parameter(
+    admin: Client, today: date, which: str
+) -> None:
+    current, _successor = with_successor(admin)
+    other = save(admin, 502)
+    ended = a_lease(current.store, started=date(2024, 1, 1), status="ended")
+    Lease.objects.filter(pk=ended.pk).update(ended_on=date(2024, 12, 31))
+    requested = {
+        "other-store": str(other.pk),
+        "ended": str(ended.pk),
+        "current": str(current.pk),
+        "malformed": "not-a-uuid'<script>",
+        "empty": "",
+    }[which]
+    client, _user = billing()
+    response = entry(client, current, requested)
+    assert response.status_code == 200
+    assert response.context["lease"] == current
+
+
+def test_a_payment_recorded_for_the_successor_lands_on_its_charge_only(
+    admin: Client, today: date
+) -> None:
+    current, successor = with_successor(admin)
+    fee = OneOffCharge.objects.get(lease=successor, fee_type__code="sign_fee")
+    before = {
+        item.pk: (item.amount_paid, item.status) for item in OneOffCharge.objects.exclude(pk=fee.pk)
+    }
+    client, _user = billing()
+    path = f"{route('record_payment', current)}?lease={successor.pk}"
+    response = client.post(
+        path,
+        {
+            "creation_key": str(uuid.uuid4()),
+            "method": "wire",
+            "amount": "500.00",
+            "paid_on": TODAY.isoformat(),
+            "reference": "W-2",
+            "note": "Wire for the sign fee.",
+            f"alloc_{fee.pk}": "500.00",
+        },
+    )
+    assert response.status_code == 302
+    fee.refresh_from_db()
+    assert (fee.amount_paid, fee.balance) == (D("500.00"), D("0.00"))
+    after = {
+        item.pk: (item.amount_paid, item.status) for item in OneOffCharge.objects.exclude(pk=fee.pk)
+    }
+    assert after == before
+
+
+def test_a_store_whose_only_lease_is_prospective_offers_add_payment_to_billing(
+    admin: Client, today: date
+) -> None:
+    lease = save(admin)
+    keys = [
+        action.key for action in workspace.store_workspace(lease.store, TODAY, Role.BILLING).actions
+    ]
+    assert "record_payment" in keys
+    viewer = workspace.store_workspace(lease.store, TODAY, Role.VIEWER).actions
+    assert viewer == []
+    client, _user = billing()
+    assert 'id="record-payment"' in store_page(client, lease)
+    # A vacant store with no lease at all offers none.
+    empty = vacant_store(503, "Empty")
+    keys = [a.key for a in workspace.store_workspace(empty, TODAY, Role.ADMIN).actions]
+    assert "record_payment" not in keys
