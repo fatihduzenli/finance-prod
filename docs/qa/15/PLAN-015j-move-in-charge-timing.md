@@ -217,3 +217,38 @@ for both "Due on a date" and the first installment, on a deposit and a non-depos
 Added to §8: 10. A first installment date and a due date before the lease's start are accepted.
 11. The probe file's tests pass unchanged before and after the build, except the two that pinned
 `FIRST_BEFORE_START`, which are re-pinned to acceptance.
+
+## 11. The probe's two conflicts and the owner's decisions (2026-11-13)
+
+The probe (`backend/tests/test_plan015j_today_probe.py`, 18 tests, 28cdebc) showed requirement 7
+already holds today except in two places.
+
+- **A. The store page's "Record a payment" refuses a Prospective lease**
+  (`payments_entry.NO_LEASE`, through `lease_end.current_lease`: active or paused, started by
+  today). **Owner: open it.** Contract: `payments_entry.current_lease(store, today)` returns the
+  store's current lease as today and, **only when there is none**, the store's upcoming prospective
+  lease not ended (the rule of `workspace.upcoming_lease`: the earliest start first).
+  `lease_end.current_lease` itself is not changed, so End lease and the transfer wizard read what
+  they read today. A store with a current lease and a prospective successor keeps the current
+  lease on that page; the successor's charges are paid from the charge's own form (Fable's
+  decision; recorded for the owner). Work: task 6, `services/payments_entry.py` only (plus the view
+  if it repeats the rule). Tests: the store-page entry lists and records, in part and in full, a
+  prospective lease's dated deposit, its installment and a charge on its unsent draft; a rent
+  charge of a prospective lease that exists (its first invoice sent) is payable too; the probe's
+  refusal test is re-pinned to acceptance; **lease-end and transfer exactly as before**: End lease
+  is not offered for and refuses a store whose only lease is prospective, the transfer wizard's
+  source and target rules are unchanged, and `lease_end.current_lease` returns `None` for it
+  (new tests asserting the same results on main and on the branch, plus the two suites unchanged).
+- **B. Postponing the start with a sent, partly paid first invoice** re-prices the rent charge and
+  leaves the sent invoice as it was. **Owner: out of this PR**; BACKLOG B11, "must be fixed before
+  go-live"; the owner gives the rule when it is planned. The probe test that pins today's
+  behaviour stays as it is.
+
+**Reading confirmed by the owner:** a charge billed "With the first invoice" has no date of its own
+and follows that invoice when the start changes; rule 6 covers dated charges and plans only;
+charges paid or partly paid are never touched.
+
+Added to §3 In: `services/payments_entry.py`. Added to §5: task 6 (A), after task 2 and before the
+page tasks. Added to §8: 12. The store page's Record a payment lists a prospective lease's open
+charges when the store has no current lease. 13. `git diff main -- backend/ledger/services/
+lease_end.py backend/ledger/services/transfer.py` is empty.
