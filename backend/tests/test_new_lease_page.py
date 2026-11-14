@@ -214,10 +214,12 @@ def test_the_page_has_five_numbered_cards_the_header_and_the_summary(
     ]
     for note in (
         "Who takes the store.",
-        "Rent, start and deposit.",
+        # Re-pinned (Opus, PLAN-015j §9.1): the Terms card no longer holds the deposit.
+        "Rent and start.",
         "When and how rent is collected.",
         "Who this store is billed to. Each store can use its own company, e-mail and bank account.",
-        "One-time charges billed with the first invoice. Leave a price empty to skip it.",
+        # Re-pinned (Opus, PLAN-015j task 3): each row chooses when it is collected.
+        "One-time charges. Leave a price empty to skip it; choose when each is collected.",
     ):
         assert note in html_text
     assert "New lease for #437 Test Store 5" in html_text
@@ -377,14 +379,20 @@ def test_another_channel_is_refused_on_create_and_on_edit_unless_it_is_current(
     assert (current.payment_channel, current.debit_day) == (channel, 6)
 
 
-def test_the_deposit_is_the_refundable_types_price_in_terms(admin: Client, today: date) -> None:
+def test_the_deposit_is_an_ordinary_row_of_the_move_in_charges(admin: Client, today: date) -> None:
+    """Re-pinned (Opus, PLAN-015j §9.1): the deposit is typed in step 5 only, in its own row
+    (its name the fee type's, an editable price, a When); the Terms card and the mirror are
+    gone."""
     store = vacant_store()
     html_text = page(admin, create_path(store))
     terms = html_text[html_text.index('id="terms-step"') : html_text.index('id="collection-step"')]
-    assert '<label for="id_setup_security_deposit_price">Deposit</label>' in terms
-    assert terms.count('name="setup_security_deposit_price"') == 1
+    setup = html_text[html_text.index('id="setup-card"') : html_text.index('id="documents-card"')]
+    assert 'name="setup_security_deposit_price"' not in terms
+    assert '<label class="movein-name" for="id_setup_security_deposit_price">' in setup
+    assert setup.count('name="setup_security_deposit_price"') == 1
     assert html_text.count('name="setup_security_deposit_price"') == 1
-    assert 'id="deposit-mirror"' in html_text
+    assert tag_with(setup, 'name="setup_security_deposit_when"')
+    assert 'id="deposit-mirror"' not in html_text
     operator = an_operator("Deposit Payer")
     post_create(admin, store, create_data(store, operator, setup_security_deposit_price="500"))
     lease = Lease.objects.get(store=store)
@@ -398,7 +406,10 @@ def test_the_deposit_is_the_refundable_types_price_in_terms(admin: Client, today
 def test_no_deposit_field_without_an_active_refundable_type(admin: Client, today: date) -> None:
     FeeType.objects.filter(refundable=True).update(active=False)
     terms = page(admin, create_path(vacant_store()))
-    assert ">Deposit</label>" not in terms and 'id="deposit-mirror"' not in terms
+    # Re-pinned (Opus, PLAN-015j §9.1): no deposit row and no deposit field anywhere.
+    assert 'id="setup-security_deposit"' not in terms
+    assert 'name="setup_security_deposit_price"' not in terms
+    assert 'id="deposit-mirror"' not in terms
 
 
 def test_add_item_rows_are_listed_hidden_and_charge_only_with_a_price(

@@ -82,7 +82,9 @@ def test_by_default_the_deposit_is_a_move_in_line(admin: Client, today: date) ->
 def test_due_on_a_date_is_its_own_charge_off_the_move_in_invoice(
     admin: Client, today: date
 ) -> None:
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-12-01"
+    )
     assert lease is not None
     deposit = the_deposit(lease)
     assert deposit.due_date == date(2026, 12, 1)
@@ -127,7 +129,9 @@ def test_a_deposit_set_on_a_date_is_marked_so_and_the_card_reminders_and_portal_
 ) -> None:
     """The marker is set at creation and read everywhere, whatever becomes of the move-in
     draft (no inference from it)."""
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-12-01"
+    )
     assert lease is not None
     InvoiceDraft.objects.filter(lease=lease).delete()
     deposit = the_deposit(lease)
@@ -145,10 +149,10 @@ def test_a_deposit_set_on_a_date_is_marked_so_and_the_card_reminders_and_portal_
     [
         {},
         {
-            "deposit_when": "installments",
-            "deposit_count": "2",
-            "deposit_first_due": "2026-11-20",
-            "deposit_cadence": "monthly",
+            "setup_security_deposit_when": "installments",
+            "setup_security_deposit_count": "2",
+            "setup_security_deposit_first_due": "2026-11-20",
+            "setup_security_deposit_cadence": "monthly",
         },
     ],
     ids=["with_invoice", "installments"],
@@ -166,7 +170,9 @@ def test_the_lease_cards_deposit_row_reads_its_deposits_in_one_query(
 ) -> None:
     """The LEASE card's row keeps the page's query budget (PLAN-012f-a D4): what was
     collected, the invoice it rides, its plan and the move-in invoice, in one read."""
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-12-01"
+    )
     assert lease is not None
     deposit = the_deposit(lease)
     with django_assert_num_queries(1):
@@ -182,10 +188,10 @@ def test_in_installments_makes_a_deposit_plan_off_the_move_in_invoice(
 ) -> None:
     lease = save(
         admin,
-        deposit_when="installments",
-        deposit_count="3",
-        deposit_first_due="2026-11-15",
-        deposit_cadence="monthly",
+        setup_security_deposit_when="installments",
+        setup_security_deposit_count="3",
+        setup_security_deposit_first_due="2026-11-15",
+        setup_security_deposit_cadence="monthly",
     )
     assert lease is not None
     deposit = the_deposit(lease)
@@ -206,28 +212,37 @@ def test_in_installments_makes_a_deposit_plan_off_the_move_in_invoice(
     assert deposits.card_text(lease) == "$3,000.00 · 0 of 3 installments paid"
 
 
-def test_a_first_installment_before_the_start_date_is_refused_with_nothing_saved(
-    admin: Client, today: date
-) -> None:
+def test_a_first_installment_before_the_start_date_is_accepted(admin: Client, today: date) -> None:
+    """Re-pinned (Opus, PLAN-015j §10): before the start date and not before today is
+    accepted; the plan starts on that date."""
     lease = save(
         admin,
-        deposit_when="installments",
-        deposit_count="3",
-        deposit_first_due="2026-11-10",
-        deposit_cadence="monthly",
+        setup_security_deposit_when="installments",
+        setup_security_deposit_count="3",
+        setup_security_deposit_first_due="2026-11-10",
+        setup_security_deposit_cadence="monthly",
     )
-    assert lease is None
-    assert not InstallmentPlan.objects.exists()
+    assert lease is not None
+    plan = InstallmentPlan.objects.get(one_off_charge=the_deposit(lease))
+    assert (plan.origin, plan.first_due) == (InstallmentOrigin.DEPOSIT, date(2026, 11, 10))
 
 
 @pytest.mark.parametrize(
     "fields",
     [
-        {"deposit_when": "installments", "deposit_count": "13", "deposit_first_due": "2026-11-15"},
-        {"deposit_when": "installments", "deposit_count": "1", "deposit_first_due": "2026-11-15"},
-        {"deposit_when": "installments", "deposit_count": "3"},
-        {"deposit_when": "on_date"},
-        {"deposit_when": "on_date", "deposit_on": "2026-11-02"},
+        {
+            "setup_security_deposit_when": "installments",
+            "setup_security_deposit_count": "13",
+            "setup_security_deposit_first_due": "2026-11-15",
+        },
+        {
+            "setup_security_deposit_when": "installments",
+            "setup_security_deposit_count": "1",
+            "setup_security_deposit_first_due": "2026-11-15",
+        },
+        {"setup_security_deposit_when": "installments", "setup_security_deposit_count": "3"},
+        {"setup_security_deposit_when": "on_date"},
+        {"setup_security_deposit_when": "on_date", "setup_security_deposit_on": "2026-11-02"},
     ],
 )
 def test_an_incomplete_or_out_of_range_timing_is_refused(
@@ -236,13 +251,24 @@ def test_an_incomplete_or_out_of_range_timing_is_refused(
     assert save(admin, **fields) is None
 
 
-def test_a_timing_without_a_deposit_amount_is_refused(admin: Client, today: date) -> None:
+def test_a_timing_without_a_deposit_amount_is_ignored(admin: Client, today: date) -> None:
+    """Re-pinned (Opus, PLAN-015j §4): a row without a price ignores its When fields and
+    saves nothing (it was refused with DEPOSIT_REQUIRED); the lease is saved without it."""
     store = vacant_store()
     operator = new_lease.an_operator_with("No Deposit", email="nodeposit@example.com")
     post_create(
-        admin, store, create_data(store, operator, deposit_when="on_date", deposit_on="2026-12-01")
+        admin,
+        store,
+        create_data(
+            store,
+            operator,
+            setup_security_deposit_when="on_date",
+            setup_security_deposit_on="2026-12-01",
+        ),
     )
-    assert not Lease.objects.filter(store=store).exists()
+    lease = Lease.objects.get(store=store)
+    assert not OneOffCharge.objects.filter(lease=lease).exists()
+    assert not InstallmentPlan.objects.exists()
 
 
 def test_the_summary_leaves_a_deposit_off_the_invoice_out_of_the_first_invoice(
@@ -255,7 +281,13 @@ def test_the_summary_leaves_a_deposit_off_the_invoice_out_of_the_first_invoice(
     on_invoice = LeaseCreateForm(create_data(store, None, **{price: "3000.00"}), today=today)
     dated = LeaseCreateForm(
         create_data(
-            store, None, **{price: "3000.00", "deposit_when": "on_date", "deposit_on": "2026-12-01"}
+            store,
+            None,
+            **{
+                price: "3000.00",
+                "setup_security_deposit_when": "on_date",
+                "setup_security_deposit_on": "2026-12-01",
+            },
         ),
         today=today,
     )
@@ -269,7 +301,9 @@ def test_the_summary_leaves_a_deposit_off_the_invoice_out_of_the_first_invoice(
 
 
 def test_split_into_installments_still_refuses_a_deposit(admin: Client, today: date) -> None:
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-12-01"
+    )
     assert lease is not None
     deposit = the_deposit(lease)
     assert installments.split_refusal(deposit, today) == installments.DEPOSIT
@@ -288,7 +322,9 @@ def _rules_for(charge: OneOffCharge, day: date) -> list[str]:
 
 
 def test_a_dated_deposit_gets_b_three_days_before_and_c_after(admin: Client, today: date) -> None:
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-12-01"
+    )
     assert lease is not None
     deposit = the_deposit(lease)
     assert _rules_for(deposit, date(2026, 11, 28)) == [MessageRule.B]
@@ -309,10 +345,10 @@ def test_a_deposit_on_the_move_in_invoice_never_gets_its_own_reminder(
 def test_a_deposit_installment_gets_the_rules_on_its_own_date(admin: Client, today: date) -> None:
     lease = save(
         admin,
-        deposit_when="installments",
-        deposit_count="2",
-        deposit_first_due="2026-11-20",
-        deposit_cadence="monthly",
+        setup_security_deposit_when="installments",
+        setup_security_deposit_count="2",
+        setup_security_deposit_first_due="2026-11-20",
+        setup_security_deposit_cadence="monthly",
     )
     assert lease is not None
     plan = InstallmentPlan.objects.get(one_off_charge=the_deposit(lease))
@@ -326,7 +362,9 @@ def test_a_deposit_installment_gets_the_rules_on_its_own_date(admin: Client, tod
 def test_the_portal_offers_a_dated_deposit_as_an_open_charge(admin: Client, today: date) -> None:
     from portal import services as portal_services
 
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-12-01"
+    )
     assert lease is not None
     deposit = the_deposit(lease)
     operator_id = lease.operator_id
@@ -358,10 +396,10 @@ def _pay(charge: OneOffCharge, amount: str, on: date) -> Payment:
 def test_a_deposit_installment_paid_is_not_revenue_in_the_pnl(admin: Client, today: date) -> None:
     lease = save(
         admin,
-        deposit_when="installments",
-        deposit_count="3",
-        deposit_first_due="2026-11-15",
-        deposit_cadence="monthly",
+        setup_security_deposit_when="installments",
+        setup_security_deposit_count="3",
+        setup_security_deposit_first_due="2026-11-15",
+        setup_security_deposit_cadence="monthly",
     )
     assert lease is not None
     plan = InstallmentPlan.objects.get(one_off_charge=the_deposit(lease))
@@ -382,7 +420,9 @@ def test_lease_end_and_transfer_still_read_the_deposits_own_settled_payments(
     """Pinned: ``one_off_charges.settled`` itself is unchanged (Fable's finding 3: lease end
     and transfer read :func:`ledger.services.deposits.collected`, which adds the deposit
     plan's installments; for a dated deposit the two agree)."""
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-12-01"
+    )
     assert lease is not None
     deposit = the_deposit(lease)
     assert one_off_charges.settled(deposit) == D("0.00")
@@ -395,10 +435,10 @@ def test_lease_end_and_transfer_still_read_the_deposits_own_settled_payments(
 def _installment_deposit(admin: Client) -> tuple[Lease, OneOffCharge, list[OneOffCharge]]:
     lease = save(
         admin,
-        deposit_when="installments",
-        deposit_count="3",
-        deposit_first_due="2026-11-15",
-        deposit_cadence="monthly",
+        setup_security_deposit_when="installments",
+        setup_security_deposit_count="3",
+        setup_security_deposit_first_due="2026-11-15",
+        setup_security_deposit_cadence="monthly",
     )
     assert lease is not None
     deposit = the_deposit(lease)
@@ -455,7 +495,9 @@ def test_all_installments_paid_hold_the_whole_deposit(admin: Client, today: date
 
 
 def test_a_dated_deposit_reads_its_own_payments_as_before(admin: Client, today: date) -> None:
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-12-01")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-12-01"
+    )
     assert lease is not None
     deposit = the_deposit(lease)
     _pay(deposit, "1200.00", date(2026, 11, 20))
@@ -479,10 +521,10 @@ def test_change_start_with_the_tick_moves_only_the_installments_not_yet_paid(
 
     lease = save(
         admin,
-        deposit_when="installments",
-        deposit_count="3",
-        deposit_first_due="2026-11-15",
-        deposit_cadence="monthly",
+        setup_security_deposit_when="installments",
+        setup_security_deposit_count="3",
+        setup_security_deposit_first_due="2026-11-15",
+        setup_security_deposit_cadence="monthly",
     )
     assert lease is not None
     plan = InstallmentPlan.objects.get(one_off_charge=the_deposit(lease))

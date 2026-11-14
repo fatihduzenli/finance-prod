@@ -165,10 +165,12 @@ def test_the_menu_items_keep_their_urls_and_labels() -> None:
 def test_an_admin_on_a_store_with_only_a_prospective_lease_gets_new_lease_and_the_menu() -> None:
     lease = a_world(CollectionStatus.PROSPECTIVE, date(2026, 12, 1))
     found = workspace.store_workspace(lease.store, TODAY, Role.ADMIN).actions
-    assert [action.key for action in found] == ["new_lease", "lease"]
+    # Re-pinned (Opus, PLAN-015j §11 A, task 3b): the store page's Add payment pays the upcoming
+    # prospective lease, so the bar offers it (it read ["new_lease", "lease"] and ["lease"]).
+    assert [action.key for action in found] == ["new_lease", "record_payment", "lease"]
     billing = workspace.store_workspace(lease.store, TODAY, Role.BILLING).actions
-    assert [action.key for action in billing] == ["lease"]
-    assert [item.key for item in billing[0].items] == ["change_start", "activate"]
+    assert [action.key for action in billing] == ["record_payment", "lease"]
+    assert [item.key for item in billing[1].items] == ["change_start", "activate"]
 
 
 def test_the_paused_reason_line_stays_under_the_badge() -> None:

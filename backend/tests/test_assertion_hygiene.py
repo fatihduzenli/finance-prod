@@ -98,7 +98,7 @@ ALLOWED: dict[str, set[int | str]] = {
     # (listed by text: the file moved with the PLAN-014 D3 re-pins).
     "test_reserved_tables.py": {'assert "outbound" not in text, text'},
     # form.errors, a dict.
-    "test_settlement.py": {672},
+    "test_settlement.py": {'assert not form.is_valid() and "cadence" in form.errors'},
     # An error message's text.
     "test_stax_retries.py": {341},
 }

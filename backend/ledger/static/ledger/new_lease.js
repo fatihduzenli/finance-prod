@@ -11,12 +11,22 @@
 //   the rent: the days from the start through the month's last day over the days in the month,
 //   times the rent, rounded half up to the cent (ledger/services/proration.py, in whole cents);
 //   hidden when the start is the 1st, blank, the rent is not an amount or the switch is off.
-//   #deposit-mirror shows the Deposit typed in Terms in the Move-in charges list.
+// - Move-in charges (PLAN-015j §4): each row's When select is disabled while its price is empty
+//   (a disabled select is not sent and reads "With the first invoice"; the server ignores the
+//   When of an unpriced row either way); a row "In installments" shows its payments sentence
+//   (#setup-<code>-preview), ledger/services/installments.payments_preview computed here: the
+//   price in cents split in equal shares rounded down, the remainder on the last, on the dates
+//   of installments.schedule_dates (monthly on the first date's day, clamped to the month's last
+//   day; every 7 or 14 days), "3 payments of $1,000.00: Dec 1, 2026 … Feb 1, 2027", with
+//   " every week" / " every two weeks" after the share and ", the last $333.34" when the last
+//   differs; nothing when a part is missing or a share would be below one cent.
 // - "+ Add item" (#add-item) reveals the next hidden row of the other fee types (rows marked
 //   data-extra, hidden here; without the script every row shows).
 // - The Summary (aside#lease-summary): operator, start, rent, who collects ("Autopay · 1st"),
-//   the first month (prorated or the rent), the move-in charges (every priced row, the deposit
-//   included) and the first invoice's total; its last line #summary-after reads "Starts Nov 15,
+//   the first month (prorated or the rent), the move-in charges (every priced row "With the
+//   first invoice", the deposit included) and the first invoice's total, then #summary-timed:
+//   one line per other priced row in the server's words (LeaseCreateForm.summary: "Sign fee ·
+//   $500.00 · due Dec 15, 2026", "Security deposit · $3,000.00 · 3 payments from Dec 1, 2026"); its last line #summary-after reads "Starts Nov 15,
 //   2026, activated on that day." for a start after the aside's data-today (PLAN-015b §9.1:
 //   the lease saves prospective), else its data-default. The first month's free rent
 //   (#summary-free-rent, PLAN-015d: ledger/services/free_rent.first_month_concession) is the
@@ -144,8 +154,6 @@
   var rent = byId("id_rent");
   var prorate = byId("id_prorate_first_month");
   var line = byId("prorate-line");
-  var mirror = byId("deposit-mirror");
-  var deposit = mirror ? byId(mirror.getAttribute("for")) : null;
   var debitDay = byId("id_debit_day");
   var secondDay = byId("id_second_debit_day");
   var freeDays = byId("id_free_rent_days");
@@ -176,14 +184,107 @@
       text: MONTHS[day.month - 1] + " " + span + ": " + used + " of " + day.last + " days = " + money(value)
     };
   }
-  // PLAN-015d: a deposit due on a date or in installments is not on the first invoice.
-  var depositWhen = byId("id_deposit_when");
+  // PLAN-015j §4: a row due on a date or in installments is not on the first invoice.
+  function part(row, name) { return row ? row.querySelector('[name$="_' + name + '"]') : null; }
+  function offInvoice(row) {
+    var when = part(row, "when");
+    return Boolean(when && when.value && when.value !== "with_invoice");
+  }
+  function dayText(day) { return MONTHS[day.month - 1] + " " + day.day + ", " + day.year; }
+  function addDays(day, days) {
+    var moved = new Date(Date.UTC(day.year, day.month - 1, day.day + days));
+    return { year: moved.getUTCFullYear(), month: moved.getUTCMonth() + 1, day: moved.getUTCDate() };
+  }
+  function addMonths(day, months) {
+    var index = day.month - 1 + months;
+    var year = day.year + Math.floor(index / 12);
+    var month = (index % 12) + 1;
+    var last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return { year: year, month: month, day: Math.min(day.day, last) };
+  }
+  // installments.schedule_dates and payments_preview's words of a cadence (monthly: none).
+  var STEPS = {
+    weekly: function (first, index) { return addDays(first, 7 * index); },
+    biweekly: function (first, index) { return addDays(first, 14 * index); },
+    monthly: function (first, index) { return addMonths(first, index); },
+    yearly: function (first, index) { return addMonths(first, 12 * index); }
+  };
+  var CADENCE_WORDS = { weekly: " every week", biweekly: " every two weeks" };
+  function paymentCount(text) {
+    var value = String(text || "").trim();
+    return /^\d+$/.test(value) && Number(value) >= 2 && Number(value) <= 12 ? Number(value) : null;
+  }
+  function paymentsPreview(priceText, countText, firstText, cadence) {
+    var total = cents(priceText);
+    var payments = paymentCount(countText);
+    var first = parseDay(firstText);
+    var step = STEPS.hasOwnProperty(cadence || "monthly") ? STEPS[cadence || "monthly"] : null;
+    if (!total || payments === null || !first || !step) { return ""; }
+    var share = Math.floor(total / payments);
+    if (share < 1) { return ""; }
+    var last = total - share * (payments - 1);
+    var sentence = payments + " payments of " + money(share) + (CADENCE_WORDS[cadence] || "") +
+      ": " + dayText(step(first, 0)) + " … " + dayText(step(first, payments - 1));
+    return last === share ? sentence : sentence + ", the last " + money(last);
+  }
+  window.ledgerNewLease = { paymentsPreview: paymentsPreview };
+  function valueOf(row, name) { var field = part(row, name); return field ? field.value : ""; }
+  // The Summary's line of a priced row off the first invoice (LeaseCreateForm._timed_line).
+  function timedLine(row) {
+    var price = cents(valueOf(row, "price"));
+    var name = row.querySelector(".movein-name");
+    if (!price || !name) { return ""; }
+    var head = name.textContent.trim() + " · " + money(price);
+    var when = valueOf(row, "when");
+    if (when === "on_date") {
+      var due = parseDay(valueOf(row, "on"));
+      return head + " · due " + (due ? dayText(due) : NONE);
+    }
+    if (when === "installments") {
+      var payments = paymentCount(valueOf(row, "count"));
+      var first = parseDay(valueOf(row, "first_due"));
+      return head + " · " + (payments === null ? NONE : payments) + " payments from " + (first ? dayText(first) : NONE);
+    }
+    return "";
+  }
+  function updateRows() {
+    var lines = [];
+    form.querySelectorAll(".movein-row").forEach(function (row) {
+      var price = part(row, "price");
+      var when = part(row, "when");
+      var priced = Boolean(price && String(price.value || "").trim());
+      if (when) { when.disabled = !priced; }
+      var preview = row.querySelector(".movein-preview");
+      if (preview) {
+        var text = priced && when && when.value === "installments"
+          ? paymentsPreview(price.value, valueOf(row, "count"), valueOf(row, "first_due"), valueOf(row, "cadence"))
+          : "";
+        if (preview.textContent !== text) { preview.textContent = text; }
+        preview.hidden = !text;
+      }
+      if (!row.hidden) {
+        var line = timedLine(row);
+        if (line) { lines.push(line); }
+      }
+    });
+    var timed = byId("summary-timed");
+    var shown = timed ? Array.prototype.map.call(timed.children, function (item) { return item.textContent; }) : [];
+    if (timed && shown.join("\n") !== lines.join("\n")) {
+      timed.textContent = "";
+      lines.forEach(function (text) {
+        var item = document.createElement("li");
+        item.textContent = text;
+        timed.appendChild(item);
+      });
+    }
+    if (timed) { timed.hidden = !lines.length; }
+  }
   function moveIn() {
     var sum = 0;
     form.querySelectorAll("input.js-total").forEach(function (input) {
       var row = input.closest(".movein-row");
       if (input.disabled || (row && row.hidden)) { return; }
-      if (input === deposit && depositWhen && depositWhen.value && depositWhen.value !== "with_invoice") { return; }
+      if (offInvoice(row)) { return; }
       var value = cents(input.value);
       if (value !== null) { sum += value; }
     });
@@ -202,14 +303,11 @@
     return parts.join(" · ") || NONE;
   }
   function update() {
+    updateRows();
     var first = firstMonth();
     if (line) {
       line.textContent = first.text;
       line.hidden = !first.text;
-    }
-    if (mirror) {
-      var typed = cents(deposit && !deposit.disabled ? deposit.value : "");
-      mirror.textContent = typed === null ? NONE : plain(typed);
     }
     var option = chosenOption();
     setText("summary-operator", option ? option.textContent.trim() : NONE);

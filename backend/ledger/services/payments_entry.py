@@ -28,7 +28,8 @@ the lease's row lock:
 - the audit row ``payment_entry.recorded`` on the lease (the group, the lines, the credit
   kept and applied, the entry's key), beside each service's and each credit's own rows.
 
-Refused, with nothing written (one sentence): no current lease; a method other than
+Refused, with nothing written (one sentence): no current lease (nor, when there is none,
+an upcoming prospective lease, PLAN-015j §11 A); a method other than
 Zelle, wire, check or other; an amount of zero, negative, not in cents or too large; a date in
 the future; a note missing or holding a card or account number (the reference too); an
 allocation or credit application for a charge that is not an open charge of the lease
@@ -74,6 +75,7 @@ from ledger.services import (
     one_off_charges,
     receivables,
     rent_run,
+    workspace,
 )
 from ledger.validators import validate_no_payment_data, visible_text
 from ledger.wording import format_amount
@@ -235,8 +237,29 @@ def open_charges(lease: Lease, today: date) -> list[OpenCharge]:
 
 
 def current_lease(store: Store, today: date) -> Lease | None:
-    """The lease a store page payment is for: the store's current lease."""
-    return lease_end.current_lease(store, today)
+    """The lease a store page payment is for: the store's current lease
+    (:func:`ledger.services.lease_end.current_lease`) and, only when it has none, its upcoming
+    prospective lease not ended (:func:`ledger.services.workspace.upcoming_lease`, the
+    earliest start first; PLAN-015j §11 A: a prospective lease's move-in charges are paid as an
+    active lease's). End lease and the transfer wizard keep reading
+    ``lease_end.current_lease``."""
+    return lease_end.current_lease(store, today) or workspace.upcoming_lease(store)
+
+
+def entry_lease(store: Store, today: date, requested: str | None = None) -> Lease | None:
+    """The lease the store page's entry is for (PLAN-015j §12): ``requested`` (the page's
+    ``?lease=``) when it is the store's upcoming prospective lease
+    (:func:`ledger.services.workspace.upcoming_lease`), else :func:`current_lease`; any other
+    value (another store's lease, an ended or the current lease, a malformed id) is ignored."""
+    if requested:
+        try:
+            wanted = uuid.UUID(str(requested))
+        except ValueError:
+            wanted = None
+        upcoming = workspace.upcoming_lease(store) if wanted is not None else None
+        if upcoming is not None and upcoming.pk == wanted:
+            return upcoming
+    return current_lease(store, today)
 
 
 # --- Recording --------------------------------------------------------------------------
@@ -366,15 +389,21 @@ def _check(
 
 
 def record_entry(
-    store: Store, entry: EntryInput, *, actor: User | None, today: date | None = None
+    store: Store,
+    entry: EntryInput,
+    *,
+    actor: User | None,
+    today: date | None = None,
+    requested: str | None = None,
 ) -> EntryOutcome:
-    """Record ``entry`` against the open charges of the store's current lease (see the
-    module docstring)."""
+    """Record ``entry`` against the open charges of the store's current lease, or of the
+    ``requested`` upcoming prospective lease (:func:`entry_lease`; see the module
+    docstring)."""
     day = today or timezone.localdate()
     refusal = _text_refusal(entry, day)
     if refusal is not None:
         return EntryOutcome(False, refusal[0], refusal[1])
-    lease = current_lease(store, day)
+    lease = entry_lease(store, day, requested)
     if lease is None:
         return EntryOutcome(False, NO_LEASE)
     try:
