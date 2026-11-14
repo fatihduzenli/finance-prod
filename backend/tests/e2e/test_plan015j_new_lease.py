@@ -132,12 +132,15 @@ def test_on_a_phone_the_select_is_under_the_price(
     page.select_option("#id_setup_sign_fee_when", "installments")
     page.fill("#id_setup_sign_fee_count", "3")
     page.fill("#id_setup_sign_fee_first_due", "2026-12-01")
+    # Measured once the sentence is in and the fonts are laid out (a single combined run once
+    # measured before that).
+    expect(page.locator("#setup-sign_fee-preview")).to_be_visible()
+    page.evaluate("document.fonts.ready.then(() => true)")
     price = page.locator("#id_setup_sign_fee_price").bounding_box()
     select = page.locator("#id_setup_sign_fee_when").bounding_box()
     row = page.locator("#setup-sign_fee").bounding_box()
     assert price is not None and select is not None and row is not None
     assert select["y"] >= price["y"] + price["height"]
     assert abs(select["width"] - row["width"]) <= 1  # its own full-width line
-    expect(page.locator("#setup-sign_fee-preview")).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     context.close()
