@@ -105,3 +105,14 @@ Display-only Outbox rows, no "Send now"; Activity words from the stored outcome;
 stored from now on and shown for new lines, older lines read "sent" without it. Fable's additions,
 told to the owner: the subject and the held reason are stored too (older held rows read "Held"
 with no reason); a row with no address on file is not listed.
+
+## 9. Addition (owner, 2026-11-14): the phone order of a Move-in charges row
+
+PLAN-015j's deferred MINOR goes in this PR: on a phone (the one 719.98px block of app.css) a New
+lease row's date / installment fields (`.movein-when`) come directly under its When select, before
+"usual" and "More". Files: `finance/static/finance/app.css` (and `_new_lease.html` only if the
+order cannot be set in CSS). Laptop layout unchanged. Tests: the phone e2e of
+`tests/e2e/test_plan015j_new_lease.py` gains the order (select, then the fields, then More, by
+their boxes' y); the two 390 px New lease baselines are regenerated only if the empty page moves.
+Done after the branch is rebased on the main that holds PLAN-015j (task 5). Still small-change
+class: a stylesheet rule.
