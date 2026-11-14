@@ -30,6 +30,7 @@ from typing import Any
 
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models import Count, OuterRef, QuerySet, Subquery
 from django.utils import timezone
 
 from finance.dates import day_text
@@ -37,6 +38,7 @@ from ledger.models import (
     FeeType,
     InstallmentCadence,
     InstallmentOrigin,
+    InstallmentPlan,
     InstallmentPlanStatus,
     Lease,
     OneOffCategory,
@@ -188,6 +190,63 @@ def _plan(charge: OneOffCharge, timing: ChargeTiming, actor: User | None, day: d
         raise SetupRefused(_field(fee_type, made.field), made.message, fee_type)
 
 
+def with_words(rows: QuerySet[OneOffCharge]) -> QuerySet[OneOffCharge]:
+    """``rows`` with what :func:`words_of` reads of each, in the same query: whether it rides
+    an invoice (:func:`ledger.services.deposits.riding_columns`) and its plan not cancelled
+    (the first: ``words_plan`` and its ``words_plan_count``)."""
+    plans = (
+        InstallmentPlan.objects.filter(one_off_charge=OuterRef("pk"))
+        .exclude(status=InstallmentPlanStatus.CANCELLED)
+        .order_by("pk")
+    )
+    return rows.annotate(
+        **deposits.riding_columns(),
+        words_plan=Subquery(plans.values("pk")[:1]),
+        words_plan_count=Subquery(plans.values("count")[:1]),
+    )
+
+
+def words_of(charges: Iterable[OneOffCharge]) -> dict[Any, str]:
+    """Per charge read through :func:`with_words`, :func:`lease_words`'s words: one query
+    when any setup charge is on a plan (its installments paid), none otherwise, whatever the
+    number of charges."""
+    rows = list(charges)
+    plans = {
+        row.words_plan  # type: ignore[attr-defined]
+        for row in rows
+        if row.category == OneOffCategory.SETUP and row.words_plan is not None  # type: ignore[attr-defined]
+    }
+    paid: dict[Any, int] = {}
+    if plans:
+        paid = dict(
+            OneOffCharge.objects.filter(plan__in=plans, status=OneOffChargeStatus.PAID)
+            .order_by()
+            .values("plan")
+            .annotate(found=Count("pk"))
+            .values_list("plan", "found")
+        )
+    return {row.pk: _words(row, paid) for row in rows}
+
+
+def _words(row: OneOffCharge, paid: Mapping[Any, int]) -> str:
+    if row.category != OneOffCategory.SETUP:
+        return ""
+    plan = row.words_plan  # type: ignore[attr-defined]
+    if plan is not None:
+        count = row.words_plan_count  # type: ignore[attr-defined]
+        return PLAN_PROGRESS.format(paid=paid.get(plan, 0), count=count)
+    if row.status not in (OneOffChargeStatus.OWED, OneOffChargeStatus.PARTIAL):
+        return ""
+    if row.balance <= 0:
+        return ""
+    if row.on_line or row.on_invoice or row.on_draft:  # type: ignore[attr-defined]
+        return ""
+    start = row.lease.started_on if row.lease is not None else None
+    if row.dated or (start is not None and row.due_date != start):
+        return DUE_ON.format(day=day_text(row.due_date))
+    return ""
+
+
 def lease_words(charge: OneOffCharge) -> str:
     """What the lease's charges list says of a setup charge's timing (§4 "Lease page", §9.2),
     ``""`` when nothing (the row's usual words apply):
@@ -200,24 +259,7 @@ def lease_words(charge: OneOffCharge) -> str:
 
     A charge on an invoice or a draft (the first invoice's lines) has no words of its own,
     whatever its due date: "Activate now" or Change start date moves the start, not the
-    charge's stored due date (§13)."""
-    if charge.category != OneOffCategory.SETUP:
-        return ""
-    plan = (
-        charge.installment_plans.exclude(status=InstallmentPlanStatus.CANCELLED)
-        .order_by("pk")
-        .first()
-    )
-    if plan is not None:
-        progress = installments.progress(plan)
-        return PLAN_PROGRESS.format(paid=progress.paid_count, count=progress.count)
-    if charge.status not in (OneOffChargeStatus.OWED, OneOffChargeStatus.PARTIAL):
-        return ""
-    if charge.balance <= 0:
-        return ""
-    if deposits.riding_invoice(charge):
-        return ""
-    start = charge.lease.started_on if charge.lease is not None else None
-    if charge.dated or (start is not None and charge.due_date != start):
-        return DUE_ON.format(day=day_text(charge.due_date))
-    return ""
+    charge's stored due date (§13). The charges list reads them in a batch
+    (:func:`with_words`, :func:`words_of`)."""
+    read = with_words(OneOffCharge.objects.filter(pk=charge.pk).select_related("lease")).first()
+    return words_of([read])[read.pk] if read is not None else ""

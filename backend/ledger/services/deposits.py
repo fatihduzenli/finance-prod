@@ -558,19 +558,28 @@ def _held() -> Coalesce:
     return Coalesce(Subquery(rows, output_field=MoneyField()), zero)
 
 
+def riding_columns() -> dict[str, Exists]:
+    """The annotations :func:`riding_invoice` reads of a charge row: ``on_line`` (a line of
+    an invoice), ``on_invoice`` (an invoice's own charge) and ``on_draft`` (a line of a draft
+    not yet sent)."""
+    return {
+        "on_line": Exists(InvoiceLineItem.objects.filter(one_off_charge=OuterRef("pk"))),
+        "on_invoice": Exists(Invoice.objects.filter(one_off_charge=OuterRef("pk"))),
+        "on_draft": Exists(
+            InvoiceDraftLine.objects.filter(
+                existing_charge=OuterRef("pk"), draft__status=InvoiceDraftStatus.DRAFT
+            )
+        ),
+    }
+
+
 def _read(rows: QuerySet[OneOffCharge]) -> QuerySet[OneOffCharge]:
     """``rows`` with what the LEASE card's deposit row reads of each, in the same query:
     ``held`` (:func:`collected`), ``on_line``/``on_invoice``/``on_draft``
     (:func:`riding_invoice`) and ``plan_pk`` (its deposit plan not cancelled, the first)."""
     return rows.annotate(
         held=_held(),
-        on_line=Exists(InvoiceLineItem.objects.filter(one_off_charge=OuterRef("pk"))),
-        on_invoice=Exists(Invoice.objects.filter(one_off_charge=OuterRef("pk"))),
-        on_draft=Exists(
-            InvoiceDraftLine.objects.filter(
-                existing_charge=OuterRef("pk"), draft__status=InvoiceDraftStatus.DRAFT
-            )
-        ),
+        **riding_columns(),
         plan_pk=Subquery(
             InstallmentPlan.objects.filter(
                 one_off_charge=OuterRef("pk"), origin=InstallmentOrigin.DEPOSIT

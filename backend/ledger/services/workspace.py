@@ -93,6 +93,7 @@ from ledger.models import (
 )
 from ledger.services import (
     audit,
+    charge_timing,
     contacts,
     credits,
     deposits,
@@ -760,6 +761,9 @@ class ChargeRow:
     invoices: list[InvoiceLink] = field(default_factory=list)
     #: An open charge in the Aging bucket the tab was opened with (``?bucket=``, PLAN-014 G1).
     in_bucket: bool = False
+    #: PLAN-015j task 4: a setup charge's timing words ("due Dec 15, 2026", "1 of 3
+    #: installments paid"; :func:`ledger.services.charge_timing.words_of`), or "".
+    timing: str = ""
 
 
 def _on_live_plan(column: str) -> Exists:
@@ -801,7 +805,9 @@ _resolution = DepositResolution.objects.filter(setup_charge=OuterRef("pk"))
 
 
 def _one_off_rows(owner: Owner, chosen: str) -> QuerySet[OneOffCharge]:
-    rows = OneOffCharge.objects.filter(_owned(owner, direct=True)).annotate(
+    rows = charge_timing.with_words(
+        OneOffCharge.objects.filter(_owned(owner, direct=True))
+    ).annotate(
         on_plan=_on_live_plan("one_off_charge"),
         plan_origin=_live_plan_origin("one_off_charge"),
         resolution_kind=Subquery(_resolution.values("kind")[:1]),
@@ -962,7 +968,7 @@ def _rent_row(charge: RentCharge, billing: bool, back: str) -> ChargeRow:
     )
 
 
-def _one_off_row(charge: OneOffCharge, role: Role | None, back: str) -> ChargeRow:
+def _one_off_row(charge: OneOffCharge, role: Role | None, back: str, timing: str = "") -> ChargeRow:
     billing = meets(role, Role.BILLING)
     on_plan = bool(getattr(charge, "on_plan", False))
     open_charge = charge.balance > 0 and charge.status not in _CLOSED_ONE_OFF
@@ -1012,6 +1018,7 @@ def _one_off_row(charge: OneOffCharge, role: Role | None, back: str) -> ChargeRo
             else ""
         ),
         resolution=resolution,
+        timing=timing,
         badges=[
             *(["Deposit"] if deposit else []),
             *_on_plan_badges(charge),
@@ -1054,7 +1061,8 @@ def charges_tab(
     amount subtracted, finding 12d-2), as the insurance row does, so the open charges
     total the header's balance; ``balances`` is the header's, read here when not given.
     Seven queries whatever the number of charges, besides ``balances``; an eighth when a
-    rent row is carried (whether a bank debit carries it, PLAN-012f-b D19).
+    rent row is carried (whether a bank debit carries it, PLAN-012f-b D19), and one more when
+    a setup charge is on a plan (its installments paid, the row's timing words; PLAN-015j).
 
     The total counts the charges the open balance counts: a deposit (money held) and a
     charge owed through its installments show their balance but are not in it, so the
@@ -1092,8 +1100,10 @@ def charges_tab(
         if rent.balance > 0 and rent.status != RentChargeStatus.WAIVED:
             _as_receivables(rent_row, balances, debited)
         rows.append(rent_row)
-    for one_off in _one_off_rows(owner, chosen):
-        one_off_row = _one_off_row(one_off, role, back)
+    one_offs = list(_one_off_rows(owner, chosen))
+    words = charge_timing.words_of(one_offs)  # PLAN-015j task 4: one query, with a plan
+    for one_off in one_offs:
+        one_off_row = _one_off_row(one_off, role, back, words[one_off.pk])
         if one_off.balance > 0 and one_off.status not in _CLOSED_ONE_OFF:
             _as_receivables(one_off_row, balances)
         rows.append(one_off_row)

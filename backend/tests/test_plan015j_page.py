@@ -415,3 +415,83 @@ def test_a_store_whose_only_lease_is_prospective_offers_add_payment_to_billing(
     empty = vacant_store(503, "Empty")
     keys = [a.key for a in workspace.store_workspace(empty, TODAY, Role.ADMIN).actions]
     assert "record_payment" not in keys
+
+
+# --- Task 4: the charges list's words ---------------------------------------------------------
+
+
+def charges_page(client: Client, lease: Lease) -> str:
+    response = client.get(
+        reverse("ledger:stores:detail", kwargs={"pk": lease.store_id}) + "?tab=charges&filter=all"
+    )
+    assert response.status_code == 200
+    return response.content.decode()
+
+
+def test_the_charges_list_shows_each_setup_charges_words(admin: Client, today: date) -> None:
+    lease = save(
+        admin,
+        **{
+            f"{FEE}_when": "on_date",
+            f"{FEE}_on": "2026-12-15",
+            f"{DEP}_when": "installments",
+            f"{DEP}_count": "3",
+            f"{DEP}_first_due": "2026-12-01",
+        },
+    )
+    text = charges_page(admin, lease)
+    assert '· <span class="charge-timing">due Dec 15, 2026</span>' in text
+    assert '· <span class="charge-timing">0 of 3 installments paid</span>' in text
+    rows = workspace.charges_tab(lease.store, "all", Role.BILLING, today=TODAY)["charge_rows"]
+    words = {row.description: row.timing for row in rows if row.kind == "one_off"}
+    fee = OneOffCharge.objects.get(lease=lease, fee_type__code="sign_fee")
+    deposit = OneOffCharge.objects.get(lease=lease, fee_type__code="security_deposit")
+    assert words[fee.label] == charge_timing.lease_words(fee) == "due Dec 15, 2026"
+    assert words[deposit.label] == charge_timing.lease_words(deposit) == "0 of 3 installments paid"
+    # The installments themselves carry no words.
+    assert sum(1 for row in rows if row.kind == "one_off" and row.timing) == 2
+
+
+def test_a_charge_on_the_first_invoice_shows_no_words(admin: Client, today: date) -> None:
+    lease = save(admin)
+    assert 'class="charge-timing"' not in charges_page(admin, lease)
+
+
+def lease_with_planned_charges(admin: Client, number: int, count: int) -> Lease:
+    """A New lease of ``count`` charges of their own fee types, each "In installments" (2
+    from Dec 1, 2026)."""
+    from ledger.models import FeeType
+
+    fields: dict[str, str] = {f"{DEP}_price": "", f"{FEE}_price": ""}
+    for index in range(count):
+        code = f"qc_{number}_{index}"
+        FeeType.objects.create(
+            code=code, name=f"Fee {index}", default_price=D("100"), show_in_setup=True
+        )
+        fields.update(
+            {
+                f"setup_{code}_price": "100.00",
+                f"setup_{code}_when": "installments",
+                f"setup_{code}_count": "2",
+                f"setup_{code}_first_due": "2026-12-01",
+            }
+        )
+    return save(admin, number, **fields)
+
+
+@pytest.mark.parametrize("count", [1, 8])
+def test_the_charges_list_reads_the_words_in_a_constant_number_of_queries(
+    admin: Client, today: date, count: int
+) -> None:
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    small = lease_with_planned_charges(admin, 600, 1)
+    lease = lease_with_planned_charges(admin, 601, count)
+    with CaptureQueriesContext(connection) as baseline:
+        workspace.charges_tab(small.store, "all", Role.BILLING, today=TODAY)
+    with CaptureQueriesContext(connection) as captured:
+        found = workspace.charges_tab(lease.store, "all", Role.BILLING, today=TODAY)
+    assert len(captured) == len(baseline)
+    words = [row.timing for row in found["charge_rows"] if row.timing]
+    assert words == ["0 of 2 installments paid"] * count
