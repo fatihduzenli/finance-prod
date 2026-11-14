@@ -1054,7 +1054,7 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             return
         if when == charge_timing.When.ON_DATE:
             due = data.get(f"{name}_on")
-            if f"{name}_on" in self.errors:
+            if f"{name}_on" in self.errors:  # not a date
                 return
             if due is None:
                 self.add_error(f"{name}_on", charge_timing.DUE_REQUIRED)
@@ -1064,12 +1064,11 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         if data.get(f"{name}_count") is None and f"{name}_count" not in self.errors:
             self.add_error(f"{name}_count", installments.COUNT_RANGE)
         first = data.get(f"{name}_first_due")
-        if f"{name}_first_due" in self.errors:
-            pass
-        elif first is None:
-            self.add_error(f"{name}_first_due", installments.FIRST_REQUIRED)
-        elif first < self.today:
-            self.add_error(f"{name}_first_due", installments.FIRST_IN_PAST)
+        if f"{name}_first_due" not in self.errors:  # else not a date
+            if first is None:
+                self.add_error(f"{name}_first_due", installments.FIRST_REQUIRED)
+            elif first < self.today:
+                self.add_error(f"{name}_first_due", installments.FIRST_IN_PAST)
         if not data.get(f"{name}_cadence"):
             data[f"{name}_cadence"] = InstallmentCadence.MONTHLY
 
