@@ -264,7 +264,7 @@ def test_q2_the_store_page_payment_entry_refuses_a_prospective_lease(
 def test_q2_the_charge_payment_form_records_partial_then_full_before_the_start(
     admin: Client, today: date, which: str
 ) -> None:
-    timing = {"deposit_when": "on_date", "deposit_on": "2026-12-01"}
+    timing = {"setup_security_deposit_when": "on_date", "setup_security_deposit_on": "2026-12-01"}
     lease = save(admin, **(timing if which == "dated_deposit" else {}))
     assert lease is not None and lease.collection_status == "prospective"
     charge = the_deposit(lease) if which == "dated_deposit" else the_sign_fee(lease)
@@ -309,7 +309,7 @@ def test_q2_the_service_records_a_partial_payment_on_the_deposit_of_the_move_in_
 def test_q3_a_deposit_dated_before_the_start_is_accepted(
     admin: Client, today: date, on: str
 ) -> None:
-    lease = save(admin, deposit_when="on_date", deposit_on=on)
+    lease = save(admin, setup_security_deposit_when="on_date", setup_security_deposit_on=on)
     assert lease is not None and lease.collection_status == "prospective"
     deposit = the_deposit(lease)
     assert (deposit.dated, deposit.due_date) == (True, date.fromisoformat(on))
@@ -320,7 +320,9 @@ def test_q3_a_deposit_dated_before_the_start_is_accepted(
 def test_q3_a_dated_deposit_before_the_start_is_a_receivable_and_gets_reminders(
     admin: Client, today: date
 ) -> None:
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-11-10")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-11-10"
+    )
     assert lease is not None
     deposit = the_deposit(lease)
     assert [row.charge_id for row in receivables.dated_deposits()].count(deposit.pk) == 1
@@ -349,10 +351,10 @@ def test_q4_a_first_installment_before_the_start_is_accepted_by_the_form(
         operator,
         **{
             f"setup_{code}_price": "3000.00",
-            "deposit_when": "installments",
-            "deposit_count": "3",
-            "deposit_first_due": "2026-11-10",
-            "deposit_cadence": "monthly",
+            "setup_security_deposit_when": "installments",
+            "setup_security_deposit_count": "3",
+            "setup_security_deposit_first_due": "2026-11-10",
+            "setup_security_deposit_cadence": "monthly",
         },
     )
     response = post_create(admin, store, data)
@@ -381,10 +383,10 @@ def test_q4_the_service_accepts_it_too(today: date) -> None:
         operator,
         **{
             f"setup_{code}_price": "3000.00",
-            "deposit_when": "installments",
-            "deposit_count": "3",
-            "deposit_first_due": "2026-11-15",
-            "deposit_cadence": "monthly",
+            "setup_security_deposit_when": "installments",
+            "setup_security_deposit_count": "3",
+            "setup_security_deposit_first_due": "2026-11-15",
+            "setup_security_deposit_cadence": "monthly",
         },
     )
     data["store"] = str(store.pk)
@@ -418,10 +420,10 @@ def test_q5_a_deposit_plan_on_a_linked_account_is_autopay_due_and_queues_its_sch
         admin,
         operator,
         account=f"same:{holder.pk}",
-        deposit_when="installments",
-        deposit_count="2",
-        deposit_first_due="2026-11-15",
-        deposit_cadence="monthly",
+        setup_security_deposit_when="installments",
+        setup_security_deposit_count="2",
+        setup_security_deposit_first_due="2026-11-15",
+        setup_security_deposit_cadence="monthly",
     )
     assert lease is not None and lease.collection_status == "prospective"
     assert leases.linked_payment_method(lease) == "pm-1991"
@@ -455,7 +457,9 @@ def test_q5_a_deposit_plan_on_a_linked_account_is_autopay_due_and_queues_its_sch
 def test_q6_postponing_leaves_a_paid_dated_deposit_as_it_was(
     admin: Client, today: date, amount: str
 ) -> None:
-    lease = save(admin, deposit_when="on_date", deposit_on="2026-11-10")
+    lease = save(
+        admin, setup_security_deposit_when="on_date", setup_security_deposit_on="2026-11-10"
+    )
     assert lease is not None
     deposit = the_deposit(lease)
     outcome = wire(deposit, amount)

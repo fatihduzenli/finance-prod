@@ -144,8 +144,6 @@
   var rent = byId("id_rent");
   var prorate = byId("id_prorate_first_month");
   var line = byId("prorate-line");
-  var mirror = byId("deposit-mirror");
-  var deposit = mirror ? byId(mirror.getAttribute("for")) : null;
   var debitDay = byId("id_debit_day");
   var secondDay = byId("id_second_debit_day");
   var freeDays = byId("id_free_rent_days");
@@ -176,14 +174,17 @@
       text: MONTHS[day.month - 1] + " " + span + ": " + used + " of " + day.last + " days = " + money(value)
     };
   }
-  // PLAN-015d: a deposit due on a date or in installments is not on the first invoice.
-  var depositWhen = byId("id_deposit_when");
+  // PLAN-015j §4: a row due on a date or in installments is not on the first invoice.
+  function offInvoice(row) {
+    var when = row ? row.querySelector('select[name$="_when"]') : null;
+    return Boolean(when && when.value && when.value !== "with_invoice");
+  }
   function moveIn() {
     var sum = 0;
     form.querySelectorAll("input.js-total").forEach(function (input) {
       var row = input.closest(".movein-row");
       if (input.disabled || (row && row.hidden)) { return; }
-      if (input === deposit && depositWhen && depositWhen.value && depositWhen.value !== "with_invoice") { return; }
+      if (offInvoice(row)) { return; }
       var value = cents(input.value);
       if (value !== null) { sum += value; }
     });
@@ -206,10 +207,6 @@
     if (line) {
       line.textContent = first.text;
       line.hidden = !first.text;
-    }
-    if (mirror) {
-      var typed = cents(deposit && !deposit.disabled ? deposit.value : "");
-      mirror.textContent = typed === null ? NONE : plain(typed);
     }
     var option = chosenOption();
     setText("summary-operator", option ? option.textContent.trim() : NONE);

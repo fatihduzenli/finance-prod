@@ -698,9 +698,14 @@ CHANNEL_REFUSED = provider_sentence(
 )
 #: The New lease page's operator select before a choice (Fable's 14b-1 visual review).
 OPERATOR_EMPTY_LABEL = "Choose an operator\u2026"
-#: The Terms card's label of the refundable fee type's price (decision 2).
-DEPOSIT_LABEL = "Deposit"
-DEPOSIT_REQUIRED = "Enter the deposit's amount to collect it on a date or in installments."
+#: The parts of a Move-in charges row that say when it is collected (PLAN-015j §4).
+TIMING_PARTS = ("when", "on", "count", "first_due", "cadence")
+#: The parts each choice uses; a row ignores the others (PLAN-015j §4).
+TIMING_USED = {
+    charge_timing.When.WITH_INVOICE: ("when",),
+    charge_timing.When.ON_DATE: ("when", "on"),
+    charge_timing.When.INSTALLMENTS: ("when", "count", "first_due", "cadence"),
+}
 
 
 def _channel_cards(
@@ -726,9 +731,12 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
     """Adds the one-time key rendered with the form, so a resubmission saves nothing,
     and the setup checklist (PLAN-010b D5; PLAN-012d D9): per fee type of
     :func:`~ledger.services.one_off_charges.checklist_types` a cost, a price, a vendor
-    and a due date. A row is charged when its price has a value: the price input starts
-    empty with the catalogue's default price as its placeholder, never as a value (no
-    tick box; a posted tick is ignored). An empty due date is the lease's start date.
+    and when it is collected (PLAN-015j §4: ``<row>_when``, with the first invoice by default,
+    due on a date ``<row>_on``, or in ``<row>_count`` installments from ``<row>_first_due``
+    every ``<row>_cadence``). A row is charged when its price has a value: the price input
+    starts empty with the catalogue's default price as its placeholder, never as a value (no
+    tick box; a posted tick is ignored); a row without a price ignores its When fields. A
+    charge with the first invoice is due on the lease's start date.
 
     PLAN-014 C4: the Billing details (:class:`BillingStepMixin`), shown once an operator
     is chosen; the operator select's options carry the contact details "Copy from
@@ -739,9 +747,10 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
     PLAN-015b §9.1, and the daily job activates it on its start date); the Debit day a
     select of the 1st to the 28th (the 1st by default); the channel one of the three cards
     (:data:`CHANNEL_CARDS`; Zelle, Wire and Unknown are refused here, the Edit lease form
-    keeps them); the deposit is the price field of the first refundable fee type
-    (:attr:`deposit_type`); "+ Add item" offers one row per active fee type not in the
-    checklist (:attr:`extra_types`), charged as a checklist row is, only with a price.
+    keeps them); the deposit is the row of the first refundable fee type
+    (:attr:`deposit_type`), an ordinary row (PLAN-015j §9.1); "+ Add item" offers one row
+    per active fee type not in the checklist (:attr:`extra_types`), charged as a checklist
+    row is, only with a price.
     ``stores``: the operator's other current stores per operator id, for the options'
     ``data-stores``."""
 
@@ -798,24 +807,29 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             )
             self.fields[f"{name}_price"] = _setup_price_field(fee_type)
             self.fields[f"{name}_vendor"] = _vendor_field()
-            self.fields[f"{name}_due_date"] = forms.DateField(
-                label="Due date", required=False, widget=forms.DateInput(attrs={"type": "date"})
-            )
-        if self.deposit_type is not None:
-            self.fields[f"{_setup_name(self.deposit_type)}_price"].label = DEPOSIT_LABEL
-        # PLAN-015d §3 (3): when the deposit is collected.
-        self.fields["deposit_when"] = _QuietChoiceField(
+            self._timing_fields(fee_type)
+
+    def _timing_fields(self, fee_type: FeeType) -> None:
+        """The row's When select and the fields of its choices (PLAN-015j §4), each shown by
+        ``ledger/shown_when.js`` for its choice; "Due on a date" on a row that is not the
+        deposit says the charge has no invoice of its own (§9.5)."""
+        name = _setup_name(fee_type)
+        when = f"id_{name}_when"
+        on_date = {SHOWN_WHEN: f"{when}=on_date"}
+        plan = {SHOWN_WHEN: f"{when}=installments"}
+        self.fields[f"{name}_when"] = _QuietChoiceField(
             label="When",
             choices=charge_timing.WHEN_CHOICES,
             initial=charge_timing.When.WITH_INVOICE,
             required=False,
         )
-        on_date = {SHOWN_WHEN: "id_deposit_when=on_date"}
-        plan = {SHOWN_WHEN: "id_deposit_when=installments"}
-        self.fields["deposit_on"] = forms.DateField(
-            label="Due on", required=False, widget=forms.DateInput({"type": "date", **on_date})
+        self.fields[f"{name}_on"] = forms.DateField(
+            label="Due on",
+            required=False,
+            help_text="" if fee_type.refundable else charge_timing.NOT_ON_INVOICE,
+            widget=forms.DateInput({"type": "date", **on_date}),
         )
-        self.fields["deposit_count"] = forms.IntegerField(
+        self.fields[f"{name}_count"] = forms.IntegerField(
             label="Installments",
             min_value=INSTALLMENTS_MIN,
             max_value=INSTALLMENTS_MAX,
@@ -824,10 +838,10 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
                 {"min": INSTALLMENTS_MIN, "max": INSTALLMENTS_MAX, "step": 1, **plan}
             ),
         )
-        self.fields["deposit_first_due"] = forms.DateField(
+        self.fields[f"{name}_first_due"] = forms.DateField(
             label="First due", required=False, widget=forms.DateInput({"type": "date", **plan})
         )
-        self.fields["deposit_cadence"] = _QuietChoiceField(
+        self.fields[f"{name}_cadence"] = _QuietChoiceField(
             label="Every",
             choices=charge_timing.CADENCES,
             initial=InstallmentCadence.MONTHLY,
@@ -847,14 +861,16 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         except forms.ValidationError:
             return None
 
-    def summary(self) -> dict[str, str]:
+    def summary(self) -> dict[str, Any]:
         """The Summary card (decision 5) from what the form holds: the operator, the start
         and the last line (``after``: "Starts <date>, activated on that day." for a start
         after ``today``, PLAN-015b §9.1, else ``default_after``), the rent, who collects, the
         first month (prorated when the toggle is on and the lease starts after the 1st, as
-        :func:`ledger.services.rent_run.first_month`), the move-in charges (every priced row,
-        the deposit included) and the first invoice's total. The page's script keeps it
-        live; this is the page without it."""
+        :func:`ledger.services.rent_run.first_month`), the move-in charges (every priced row
+        "With the first invoice", the deposit included) and the first invoice's total, and
+        ``timed``: one line per other priced row (PLAN-015j §4: "Sign fee · $500.00 · due Dec
+        15, 2026", "Security deposit · $3,000.00 · 3 payments from Dec 1, 2026"). The page's
+        script keeps the figures live; this is the page without it."""
         operator = self._value("operator")
         start: date | None = self._value("started_on")
         rent: Decimal | None = self._value("rent")
@@ -874,11 +890,18 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             month = start.replace(day=1)
             first = proration.prorated(rent, month, start.day, proration.days_in(month)).amount
             prorated = True
-        moving_in = self.setup_total()
-        if self._deposit_off_invoice() and self.deposit_type is not None:
-            # PLAN-015d §3 (3): a deposit due on a date or in installments is its own charge.
-            deposit = self._value(f"{_setup_name(self.deposit_type)}_price")
-            moving_in -= deposit if isinstance(deposit, Decimal) else ZERO
+        moving_in = ZERO
+        timed: list[str] = []
+        for fee_type in self.fee_types:
+            name = _setup_name(fee_type)
+            price = self._value(f"{name}_price")
+            if not isinstance(price, Decimal):
+                continue
+            line = self._timed_line(fee_type, price)
+            if line:
+                timed.append(line)
+            else:
+                moving_in += price
         free = ZERO
         if first is not None:
             free = free_rent.first_month_concession(
@@ -903,31 +926,68 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             "first_month_label": "First month (prorated)" if prorated else "First month",
             "first_month": format_amount(first) if first is not None else NO_VALUE,
             "move_in": format_amount(moving_in),
+            "timed": timed,
             # PLAN-015d: the first month's free rent, "" without any.
             "free_rent": format_amount(-free) if free > 0 else "",
             "total": format_amount(first - free + moving_in) if first is not None else NO_VALUE,
         }
 
-    def deposit_field(self) -> forms.BoundField | None:
-        """The deposit's price field (the Terms card's "Deposit"), or ``None``."""
-        if self.deposit_type is None:
-            return None
-        return self[f"{_setup_name(self.deposit_type)}_price"]
+    def _when_of(self, fee_type: FeeType) -> str:
+        """The row's When as the form holds it; anything not one of the three is "With the
+        first invoice" here (the form refuses it on a priced row)."""
+        value = str(self[f"{_setup_name(fee_type)}_when"].value() or "")
+        return value if value in charge_timing.When else charge_timing.When.WITH_INVOICE
+
+    def _timed_line(self, fee_type: FeeType, price: Decimal) -> str:
+        """The Summary's line of a priced row not on the first invoice, or ``""``."""
+        name = _setup_name(fee_type)
+        when = self._when_of(fee_type)
+        head = f"{fee_type.name} \u00b7 {format_amount(price)}"
+        if when == charge_timing.When.ON_DATE:
+            due = self._value(f"{name}_on")
+            return f"{head} \u00b7 due {day_text(due) if due else NO_VALUE}"
+        if when == charge_timing.When.INSTALLMENTS:
+            count = self._value(f"{name}_count")
+            first = self._value(f"{name}_first_due")
+            return (
+                f"{head} \u00b7 {count or NO_VALUE} payments from "
+                f"{day_text(first) if first else NO_VALUE}"
+            )
+        return ""
+
+    def _row_preview(self, fee_type: FeeType) -> str:
+        """The row's "payments" sentence (:func:`~ledger.services.installments.
+        payments_preview`) when it is "In installments" with a price, a count and a first
+        date the engine accepts; ``""`` otherwise."""
+        name = _setup_name(fee_type)
+        price = self._value(f"{name}_price")
+        count = self._value(f"{name}_count")
+        first = self._value(f"{name}_first_due")
+        cadence = str(self[f"{name}_cadence"].value() or InstallmentCadence.MONTHLY)
+        if self._when_of(fee_type) != charge_timing.When.INSTALLMENTS:
+            return ""
+        if not isinstance(price, Decimal) or count is None or first is None:
+            return ""
+        try:
+            return installments.payments_preview(price, int(count), first, cadence)
+        except ValueError:
+            return ""
 
     def setup_rows(self) -> list[dict[str, Any]]:
         """The checklist, one row of bound fields per checklist fee type, then the rows "+ Add
-        item" reveals (``extra``; shown when one holds a value or an error)."""
+        item" reveals (``extra``; shown when one holds a value or an error), each with its
+        When fields and, "In installments", its ``preview`` sentence."""
         extras = {fee_type.pk for fee_type in self.extra_types}
         rows = []
         for fee_type in self.fee_types:
-            parts = {
-                part: self[f"{_setup_name(fee_type)}_{part}"]
-                for part in ("cost", "price", "vendor", "due_date")
-            }
+            name = _setup_name(fee_type)
+            parts = {part: self[f"{name}_{part}"] for part in ("cost", "price", "vendor")}
+            timing = {part: self[f"{name}_{part}"] for part in TIMING_PARTS}
+            typed = (parts["price"], parts["vendor"], timing["on"], timing["count"])
             filled = any(
-                str(bound.value() or "").strip() or bound.errors
-                for bound in (parts["price"], parts["vendor"], parts["due_date"])
+                str(bound.value() or "").strip() for bound in (*typed, timing["first_due"])
             )
+            filled = filled or any(bound.errors for bound in (*parts.values(), *timing.values()))
             rows.append(
                 {
                     "fee_type": fee_type,
@@ -938,105 +998,107 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
                         if fee_type.default_price is not None
                         else ""
                     ),
+                    "preview": self._row_preview(fee_type),
                     **parts,
+                    **timing,
                 }
             )
         return rows
 
     def setup_total(self) -> Decimal:
-        """The sum of the prices typed so far (the move-in charges, the deposit included)."""
+        """The sum of the prices typed so far (every priced row, whatever its When)."""
         return _setup_total(self, self.fee_types)
 
-    def deposit_timing(self) -> charge_timing.ChargeTiming:
-        """The deposit's timing of a valid form (PLAN-015d §3 (3))."""
-        data = self.cleaned_data
-        return charge_timing.ChargeTiming(
-            when=data.get("deposit_when") or charge_timing.When.WITH_INVOICE,
-            due_on=data.get("deposit_on"),
-            count=int(data.get("deposit_count") or 0),
-            first_due=data.get("deposit_first_due"),
-            cadence=data.get("deposit_cadence") or InstallmentCadence.MONTHLY,
-        )
-
     def timings(self) -> dict[Any, charge_timing.ChargeTiming]:
-        """Per fee type id, the row's timing of a valid form (the deposit's only)."""
-        if self.deposit_type is None:
-            return {}
-        return {self.deposit_type.pk: self.deposit_timing()}
+        """Per fee type id, the timing of each priced row of a valid form (PLAN-015j §4)."""
+        data = self.cleaned_data
+        found = {}
+        for fee_type in self.fee_types:
+            name = _setup_name(fee_type)
+            if data.get(f"{name}_price") is None:
+                continue
+            found[fee_type.pk] = charge_timing.ChargeTiming(
+                when=data.get(f"{name}_when") or charge_timing.When.WITH_INVOICE,
+                due_on=data.get(f"{name}_on"),
+                count=int(data.get(f"{name}_count") or 0),
+                first_due=data.get(f"{name}_first_due"),
+                cadence=data.get(f"{name}_cadence") or InstallmentCadence.MONTHLY,
+            )
+        return found
 
-    def _deposit_off_invoice(self) -> bool:
-        return str(self["deposit_when"].value() or "") in (
-            charge_timing.When.ON_DATE,
-            charge_timing.When.INSTALLMENTS,
-        )
+    def _ignore(self, data: dict[str, Any], name: str, parts: Iterable[str]) -> None:
+        """The row's fields ``parts`` count for nothing: no value, no error."""
+        for part in parts:
+            field = f"{name}_{part}"
+            data[field] = None
+            self.errors.pop(field, None)
 
-    def _clean_deposit(self, data: dict[str, Any], started: date | None) -> None:
-        """The deposit's timing (PLAN-015d §3 (3)): a date not in the past for "Due on a
-        date"; 2 to 12 installments from a first date not before today (PLAN-015j §10: before
-        the start date is accepted), for "In installments"; either needs the deposit's amount."""
-        when = data.get("deposit_when") or charge_timing.When.WITH_INVOICE
-        data["deposit_when"] = when
-        if when == charge_timing.When.WITH_INVOICE:
+    def _clean_timing(self, fee_type: FeeType, data: dict[str, Any], started: date | None) -> None:
+        """One row's When (PLAN-015j §4, §10): a row without a price ignores its When fields;
+        "Due on a date" needs a date not before today; "In installments" 2 to 12 payments
+        from a first date not before today (before the start date is accepted); "With the
+        first invoice" needs the lease's start date (the charge is due on it). A row ignores
+        the fields of the choices it did not make."""
+        name = _setup_name(fee_type)
+        if data.get(f"{name}_price") is None:
+            self._ignore(data, name, TIMING_PARTS)
             return
-        price = (
-            data.get(f"{_setup_name(self.deposit_type)}_price")
-            if self.deposit_type is not None
-            else None
-        )
-        if price is None:
-            self.add_error("deposit_when", DEPOSIT_REQUIRED)
+        if f"{name}_when" in self.errors:  # a value outside the three
+            return
+        when = data.get(f"{name}_when") or charge_timing.When.WITH_INVOICE
+        self._ignore(data, name, [part for part in TIMING_PARTS if part not in TIMING_USED[when]])
+        data[f"{name}_when"] = when
+        if when == charge_timing.When.WITH_INVOICE:
+            if started is None:
+                self.add_error(f"{name}_when", SETUP_DUE_REQUIRED)
             return
         if when == charge_timing.When.ON_DATE:
-            due = data.get("deposit_on")
+            due = data.get(f"{name}_on")
+            if f"{name}_on" in self.errors:
+                return
             if due is None:
-                self.add_error("deposit_on", "Enter the date the deposit is due.")
+                self.add_error(f"{name}_on", charge_timing.DUE_REQUIRED)
             elif due < self.today:
-                self.add_error("deposit_on", charge_timing.DUE_BEFORE_TODAY)
+                self.add_error(f"{name}_on", charge_timing.DUE_BEFORE_TODAY)
             return
-        if data.get("deposit_count") is None:
-            self.add_error("deposit_count", installments.COUNT_RANGE)
-        first = data.get("deposit_first_due")
-        if first is None:
-            self.add_error("deposit_first_due", installments.FIRST_REQUIRED)
+        if data.get(f"{name}_count") is None and f"{name}_count" not in self.errors:
+            self.add_error(f"{name}_count", installments.COUNT_RANGE)
+        first = data.get(f"{name}_first_due")
+        if f"{name}_first_due" in self.errors:
+            pass
+        elif first is None:
+            self.add_error(f"{name}_first_due", installments.FIRST_REQUIRED)
         elif first < self.today:
-            self.add_error("deposit_first_due", installments.FIRST_IN_PAST)
-        if not data.get("deposit_cadence"):
-            data["deposit_cadence"] = InstallmentCadence.MONTHLY
+            self.add_error(f"{name}_first_due", installments.FIRST_IN_PAST)
+        if not data.get(f"{name}_cadence"):
+            data[f"{name}_cadence"] = InstallmentCadence.MONTHLY
 
     def clean(self) -> dict[str, Any]:
         self.cleaned_data["collection_status"] = CollectionStatus.ACTIVE
         data = super().clean()
         started = data.get("started_on")
-        self._clean_deposit(data, started)
         if started is not None and started > self.today:
             # PLAN-015b §9.1: checked by the active lease's rules, saved prospective.
             data["collection_status"] = CollectionStatus.PROSPECTIVE
         for fee_type in self.fee_types:
-            name = _setup_name(fee_type)
-            if data.get(f"{name}_price") is None:
-                continue
-            if data.get(f"{name}_due_date") is None and started is None:
-                self.add_error(f"{name}_due_date", SETUP_DUE_REQUIRED)
+            self._clean_timing(fee_type, data, started)
         return data
 
     def setup_items(self) -> list[ChargeInput]:
-        """The rows of a valid form with a price, in catalogue order."""
+        """The rows of a valid form with a price, in catalogue order: due on the start date
+        "With the first invoice", else on the row's own date (the chosen date, ``dated``, or
+        the first installment's; PLAN-015j §4)."""
         data = self.cleaned_data
         started: date | None = data.get("started_on")
+        timings = self.timings()
         items = []
         for fee_type in self.fee_types:
             name = _setup_name(fee_type)
             price = data.get(f"{name}_price")
             if price is None:
                 continue
-            due = data.get(f"{name}_due_date") or started
-            dated = False
-            if fee_type == self.deposit_type:
-                # PLAN-015d §3 (3): a deposit off the move-in invoice is due on its own date;
-                # "On a date" marks it so (the reminders, the portal and the LEASE card).
-                timing = self.deposit_timing()
-                due = timing.due_date or due
-                dated = timing.when == charge_timing.When.ON_DATE
+            timing = timings[fee_type.pk]
+            due = timing.due_date or started
             if due is None:  # refused by clean()
                 continue
             items.append(
@@ -1046,7 +1108,7 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
                     cost=data.get(f"{name}_cost"),
                     vendor=data.get(f"{name}_vendor") or "",
                     due_date=due,
-                    dated=dated,
+                    dated=timing.when == charge_timing.When.ON_DATE,
                 )
             )
         return items
@@ -1233,7 +1295,7 @@ class LeaseEditForm(_LeaseFormBase):
 
 #: The name prefix of every checklist field of the lease create form.
 SETUP = "setup_"
-SETUP_DUE_REQUIRED = "Enter a due date, or a start date for the lease."
+SETUP_DUE_REQUIRED = "Enter the start date: a charge with the first invoice is due on it."
 COST_HELP = "Empty means the cost is unknown."
 #: The class of an amount input summed by ``ledger/table_total.js`` (the setup checklist's
 #: prices, the lease end's deductions; PLAN-012d D9, D10).

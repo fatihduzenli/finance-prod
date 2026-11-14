@@ -149,7 +149,11 @@ def test_the_proration_line_and_the_summary_match_the_service(
     line = page.locator("#prorate-line")
     expect(line).to_have_text(f"Nov 15–30: 16 of 30 days = {format_amount(expected.amount)}")
     assert line.inner_text() == "Nov 15–30: 16 of 30 days = $1,066.67"
-    assert page.locator("#deposit-mirror").inner_text() == "3,000.00"
+    # Re-pinned (Opus, PLAN-015j §9.1): the deposit is typed in its own row; no mirror.
+    assert page.locator("#deposit-mirror").count() == 0
+    assert page.locator(
+        "#setup-security_deposit #id_setup_security_deposit_price"
+    ).input_value() == ("3000.00")
     assert page.locator("#summary-first-month").inner_text() == "$1,066.67"
     assert page.locator("#setup-total").inner_text() == "$3,800.00"
     assert page.locator("#summary-total").inner_text() == format_amount(
