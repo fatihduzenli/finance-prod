@@ -1,7 +1,9 @@
 """Admin › Outbox (docs/qa/PLAN-014-per-lease-billing-messaging-portal-deposits.md D5).
 
 - ``ledger:outbox:page`` (admin, read-only in the registry; the view refuses below admin):
-  every message, newest first, 50 a page, with its time, store, operator, template, rule,
+  every message and every reminder or promise-to-pay e-mail sent to staff (PLAN-015k,
+  :mod:`ledger.services.outbox_list`: read-only rows, ``staff-<audit id>``, no "Send now"),
+  newest first, 50 a page, with its time, store, operator, template, rule,
   status (and held reason), address ("the managers (n)" for an internal message, which goes
   to every manager) and the time the send window lets it go; filters by status, by held
   reason and by a range of days queued (the list pages' filters component). Each row opens
@@ -29,7 +31,6 @@ from datetime import date
 from urllib.parse import urlencode
 
 from django.contrib import messages
-from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -39,11 +40,11 @@ import mail
 from finance.dates import day_text
 from finance.templatetags.components import NEUTRAL, PAID, PENDING, UNPAID
 from ledger.models import RULES_WITHOUT_STORE, HeldReason, MessageStatus, OutboundMessage
-from ledger.services import list_filters, messaging, outbox_preview
+from ledger.services import list_filters, messaging, outbox_list, outbox_preview
 from ledger.views.leases import _admin_only
 from ledger.views.operators import _actor, role_required
 
-PAGE_SIZE = 50
+PAGE_SIZE = outbox_list.PAGE_SIZE
 #: The days a range may name (anything else is ignored, as an unknown filter value is).
 FIRST_YEAR = 2000
 LAST_YEAR = 2100
@@ -94,6 +95,25 @@ def status_cell(message: OutboundMessage) -> tuple[str, str, str]:
     return STATUS_TONES[message.status], label, "" if text == label else text
 
 
+def staff_status_cell(email: outbox_list.StaffEmail) -> tuple[str, str, str]:
+    """(tone, label, rest) of a staff e-mail's Status cell, as :func:`status_cell` words an
+    engine message of the same status (the list holds sent, held and failed ones only)."""
+    if email.status not in MessageStatus.values:
+        return NEUTRAL, email.status, email.rest
+    return STATUS_TONES[email.status], str(MessageStatus(email.status).label), email.rest
+
+
+def _row(
+    item: OutboundMessage | outbox_list.StaffEmail, managers: str
+) -> tuple[OutboundMessage | None, tuple[str, str, str], str, bool, outbox_list.StaffEmail | None]:
+    """(message, status cell, address, storeless, staff e-mail) of one row: a message's, or a
+    staff e-mail's (PLAN-015k), which has no message."""
+    if isinstance(item, outbox_list.StaffEmail):
+        return None, staff_status_cell(item), item.to, False, item
+    to = managers if item.template.internal else item.to_address
+    return item, status_cell(item), to, item.rule in RULES_WITHOUT_STORE, None
+
+
 @role_required
 @require_safe
 def outbox_page(request: HttpRequest) -> HttpResponse:
@@ -105,8 +125,9 @@ def outbox_page(request: HttpRequest) -> HttpResponse:
     raw_reason = request.GET.get("reason", "")
     reason = raw_reason if raw_reason in HeldReason.values else ""
     since, until = _day(request.GET.get("from")), _day(request.GET.get("to"))
-    found = messaging.outbox(status=status, since=since, until=until, held_reason=reason)
-    page = Paginator(found, PAGE_SIZE).get_page(request.GET.get("page"))
+    page, found = outbox_list.page(
+        request.GET.get("page"), status=status, since=since, until=until, held_reason=reason
+    )
     managers = messaging.managers_to()
     held_for_settings = messaging.held_for_settings().count()
     accepted = {
@@ -131,15 +152,7 @@ def outbox_page(request: HttpRequest) -> HttpResponse:
             ),
             "page": page,
             "query": urlencode({name: value for name, value in accepted.items() if value}),
-            "rows": [
-                (
-                    message,
-                    status_cell(message),
-                    managers if message.template.internal else message.to_address,
-                    message.rule in RULES_WITHOUT_STORE,
-                )
-                for message in page
-            ],
+            "rows": [_row(item, managers) for item in found],
             "status_choices": MessageStatus.choices,
             "reason_choices": HeldReason.choices,
             "selected": {"status": status, "reason": reason, "from": since, "to": until},

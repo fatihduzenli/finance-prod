@@ -157,6 +157,16 @@ def test_on_a_phone_the_select_is_under_the_price(
     assert select["y"] >= price["y"] + price["height"]
     assert abs(select["width"] - row["width"]) <= 1  # its own full-width line
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    # PLAN-015k §9: the chosen When's fields and the sentence come directly under the select,
+    # before "More".
+    count = page.locator("#id_setup_sign_fee_count").bounding_box()
+    preview = page.locator("#setup-sign_fee-preview").bounding_box()
+    more = page.locator("#setup-sign_fee .movein-more > summary")
+    expect(more).to_be_visible()
+    summary = more.bounding_box()
+    assert count is not None and preview is not None and summary is not None
+    assert select["y"] + select["height"] <= count["y"]
+    assert preview["y"] + preview["height"] <= summary["y"]
     page.select_option("#id_setup_security_deposit_when", "on_date")
     shot(page, "015j-rows-phone-dark", "#setup-card")
     context.close()

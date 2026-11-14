@@ -89,7 +89,12 @@ from ledger.models import (
 )
 from ledger.services import insurance
 from ledger.services.rent_run import falls_on
-from ledger.validators import contains_bank_routing_pattern, contains_card_number, visible_text
+from ledger.validators import (
+    contains_bank_routing_pattern,
+    contains_card_number,
+    validate_json_has_no_payment_data,
+    visible_text,
+)
 from ledger.wording import format_amount
 from mail.base import SUBJECT_MAX_LENGTH, is_address
 from payments import jobs
@@ -862,8 +867,20 @@ def _entry_message(entry: CalendarEntry, address: str) -> mail.Message:
     if entry.body:
         text += f"{entry.body}\n\n"
     text += f"Open it: {link}\n"
+    return mail.Message(to=address, subject=entry_subject(entry), text=text)
+
+
+def entry_subject(entry: CalendarEntry) -> str:
+    """The reminder e-mail's subject ("Reminder: Call the landlord"), one line, at most the
+    subject limit; the Outbox rebuilds an older row's subject with it (PLAN-015k)."""
     subject = " ".join(f"{entry.get_kind_display()}: {entry.title}".split())
-    return mail.Message(to=address, subject=subject[:SUBJECT_MAX_LENGTH], text=text)
+    return subject[:SUBJECT_MAX_LENGTH]
+
+
+def promise_subject(promise: ContactEntry) -> str:
+    """The promise-to-pay e-mail's subject, as :func:`entry_subject` for a promise."""
+    subject = " ".join(f"Promise to pay due today: {promise.operator.display_name}".split())
+    return subject[:SUBJECT_MAX_LENGTH]
 
 
 def _promise_message(promise: ContactEntry, address: str) -> mail.Message:
@@ -876,8 +893,7 @@ def _promise_message(promise: ContactEntry, address: str) -> mail.Message:
         f"{by}.\n\n{promise.body}\n\n"
         f"Notes & follow-ups: {settings.APP_BASE_URL.rstrip('/')}{path}#contacts\n"
     )
-    subject = " ".join(f"Promise to pay due today: {operator.display_name}".split())
-    return mail.Message(to=address, subject=subject[:SUBJECT_MAX_LENGTH], text=text)
+    return mail.Message(to=address, subject=promise_subject(promise), text=text)
 
 
 def _morning_item(
@@ -902,10 +918,39 @@ def _morning_item(
     return (promise, promise.author) if promise is not None else (None, None)
 
 
+#: The values of a morning e-mail's audit row that come from staff-written or user data.
+_GUARDED_VALUES = ("to", "subject")
+
+
+def _refused(value: object) -> bool:
+    try:
+        validate_json_has_no_payment_data(value)
+    except ValidationError:
+        return True
+    return False
+
+
+def _storable(after: dict[str, object]) -> dict[str, object]:
+    """``after`` without the address or the subject the payment-data guard refuses (PLAN-015k:
+    the mail may already be gone, so the row must still be written): each refused value is
+    left out, and both when the row is still refused as a whole."""
+    kept = {name: value for name, value in after.items() if name not in _GUARDED_VALUES}
+    for name in _GUARDED_VALUES:
+        if name in after and not _refused(after[name]):
+            kept[name] = after[name]
+    if _refused(kept):
+        kept = {name: value for name, value in kept.items() if name not in _GUARDED_VALUES}
+    return kept
+
+
 def send_morning_email(entity_type: str, entity_id: uuid.UUID, on: date) -> tuple[bool, str]:
     """The ``calendar_email`` job: one morning e-mail to the item's author, if the item
-    still asks for it on ``on``. Audited as ``calendar.morning_email`` with the outcome,
-    never the address or the text."""
+    still asks for it on ``on``. Audited as ``calendar.morning_email`` with the outcome and,
+    once a message was made (PLAN-015k), the address it went or would have gone to (``to``)
+    and its subject; a held one adds the receipt's reason (``reason``). The body is never
+    stored; a row with no address carries the outcome alone. An address or a subject the
+    payment-data guard refuses is left out of the row (:func:`_storable`), so the row of a
+    send is always written."""
     exists = (
         CalendarEntry.objects.filter(pk=entity_id).exists()
         if entity_type == JobEntity.CALENDAR_ENTRY
@@ -936,15 +981,23 @@ def send_morning_email(entity_type: str, entity_id: uuid.UUID, on: date) -> tupl
             entity_type,
             entity_id,
             None,
-            {"outcome": "failed", "error": error.cause},
+            _storable(
+                {
+                    "outcome": "failed",
+                    "error": error.cause,
+                    "to": message.to,
+                    "subject": message.subject,
+                }
+            ),
         )
         return False, MORNING_FAILED.format(cause=error.cause)
-    _audit(
-        None,
-        "calendar.morning_email",
-        entity_type,
-        entity_id,
-        None,
-        {"outcome": receipt.disposition, "on": on.isoformat()},
-    )
+    after: dict[str, object] = {
+        "outcome": receipt.disposition,
+        "on": on.isoformat(),
+        "to": message.to,
+        "subject": message.subject,
+    }
+    if receipt.disposition == mail.HELD and receipt.reason:
+        after["reason"] = receipt.reason
+    _audit(None, "calendar.morning_email", entity_type, entity_id, None, _storable(after))
     return True, MORNING_SENT[receipt.disposition]
