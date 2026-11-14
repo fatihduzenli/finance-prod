@@ -76,8 +76,8 @@ from ledger.models import (
     SyncStatus,
 )
 from ledger.services import (
+    charge_timing,
     csv_export,
-    deposits,
     detail_cards,
     free_rent,
     insurance,
@@ -491,14 +491,14 @@ def lease_create(request: HttpRequest) -> HttpResponse:
             has_operator = form.cleaned_data.get("operator") is not None
             account = form.cleaned_data["account"] if has_operator else service.ACCOUNT_LATER
             try:
-                timing = form.deposit_timing()
-                lease, created, charges = deposits.create_lease_with_deposit(
+                timings = form.timings()
+                lease, created, charges = charge_timing.create_lease(
                     form.cleaned_data,
                     rent=form.cleaned_data["rent"],
                     creation_key=form.cleaned_data["creation_key"],
                     items=form.setup_items(),
                     actor=_actor(request),
-                    timing=timing,
+                    timings=timings,
                     billing=form.billing_values() if has_operator else None,
                     account=account,
                 )
@@ -517,13 +517,9 @@ def lease_create(request: HttpRequest) -> HttpResponse:
                 # Decision 6: the move-in invoice, a draft; the lease stays saved without one.
                 move_in = move_in_service.create_draft(
                     lease,
-                    # PLAN-015d §3 (3): a deposit due on a date or in installments is not a
+                    # PLAN-015j §4: a charge due on a date or in installments is not a
                     # move-in line.
-                    [
-                        charge
-                        for charge in charges
-                        if timing.on_invoice or not deposits.is_deposit(charge)
-                    ],
+                    charge_timing.on_first_invoice(charges, timings),
                     creation_key=form.cleaned_data["creation_key"],
                     actor=_actor(request),
                 )

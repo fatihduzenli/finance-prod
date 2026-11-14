@@ -64,7 +64,7 @@ from ledger.models import (
 from ledger.services import (
     autopay_plans,
     calendar,
-    deposits,
+    charge_timing,
     free_rent,
     installments,
     invoice_builder,
@@ -700,6 +700,7 @@ CHANNEL_REFUSED = provider_sentence(
 OPERATOR_EMPTY_LABEL = "Choose an operator\u2026"
 #: The Terms card's label of the refundable fee type's price (decision 2).
 DEPOSIT_LABEL = "Deposit"
+DEPOSIT_REQUIRED = "Enter the deposit's amount to collect it on a date or in installments."
 
 
 def _channel_cards(
@@ -805,8 +806,8 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         # PLAN-015d §3 (3): when the deposit is collected.
         self.fields["deposit_when"] = _QuietChoiceField(
             label="When",
-            choices=deposits.DEPOSIT_WHEN_CHOICES,
-            initial=deposits.DepositWhen.WITH_INVOICE,
+            choices=charge_timing.WHEN_CHOICES,
+            initial=charge_timing.When.WITH_INVOICE,
             required=False,
         )
         on_date = {SHOWN_WHEN: "id_deposit_when=on_date"}
@@ -828,7 +829,7 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         )
         self.fields["deposit_cadence"] = _QuietChoiceField(
             label="Every",
-            choices=deposits.DEPOSIT_CADENCES,
+            choices=charge_timing.CADENCES,
             initial=InstallmentCadence.MONTHLY,
             required=False,
             widget=forms.Select(plan),
@@ -946,30 +947,36 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
         """The sum of the prices typed so far (the move-in charges, the deposit included)."""
         return _setup_total(self, self.fee_types)
 
-    def deposit_timing(self) -> deposits.DepositTiming:
+    def deposit_timing(self) -> charge_timing.ChargeTiming:
         """The deposit's timing of a valid form (PLAN-015d §3 (3))."""
         data = self.cleaned_data
-        return deposits.DepositTiming(
-            when=data.get("deposit_when") or deposits.DepositWhen.WITH_INVOICE,
+        return charge_timing.ChargeTiming(
+            when=data.get("deposit_when") or charge_timing.When.WITH_INVOICE,
             due_on=data.get("deposit_on"),
             count=int(data.get("deposit_count") or 0),
             first_due=data.get("deposit_first_due"),
             cadence=data.get("deposit_cadence") or InstallmentCadence.MONTHLY,
         )
 
+    def timings(self) -> dict[Any, charge_timing.ChargeTiming]:
+        """Per fee type id, the row's timing of a valid form (the deposit's only)."""
+        if self.deposit_type is None:
+            return {}
+        return {self.deposit_type.pk: self.deposit_timing()}
+
     def _deposit_off_invoice(self) -> bool:
         return str(self["deposit_when"].value() or "") in (
-            deposits.DepositWhen.ON_DATE,
-            deposits.DepositWhen.INSTALLMENTS,
+            charge_timing.When.ON_DATE,
+            charge_timing.When.INSTALLMENTS,
         )
 
     def _clean_deposit(self, data: dict[str, Any], started: date | None) -> None:
         """The deposit's timing (PLAN-015d §3 (3)): a date not in the past for "Due on a
-        date"; 2 to 12 installments from a first date, not before the start date nor today,
-        for "In installments"; either needs the deposit's amount."""
-        when = data.get("deposit_when") or deposits.DepositWhen.WITH_INVOICE
+        date"; 2 to 12 installments from a first date not before today (PLAN-015j §10: before
+        the start date is accepted), for "In installments"; either needs the deposit's amount."""
+        when = data.get("deposit_when") or charge_timing.When.WITH_INVOICE
         data["deposit_when"] = when
-        if when == deposits.DepositWhen.WITH_INVOICE:
+        if when == charge_timing.When.WITH_INVOICE:
             return
         price = (
             data.get(f"{_setup_name(self.deposit_type)}_price")
@@ -977,22 +984,20 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             else None
         )
         if price is None:
-            self.add_error("deposit_when", deposits.DEPOSIT_REQUIRED)
+            self.add_error("deposit_when", DEPOSIT_REQUIRED)
             return
-        if when == deposits.DepositWhen.ON_DATE:
+        if when == charge_timing.When.ON_DATE:
             due = data.get("deposit_on")
             if due is None:
                 self.add_error("deposit_on", "Enter the date the deposit is due.")
             elif due < self.today:
-                self.add_error("deposit_on", deposits.DUE_BEFORE_TODAY)
+                self.add_error("deposit_on", charge_timing.DUE_BEFORE_TODAY)
             return
         if data.get("deposit_count") is None:
             self.add_error("deposit_count", installments.COUNT_RANGE)
         first = data.get("deposit_first_due")
         if first is None:
             self.add_error("deposit_first_due", installments.FIRST_REQUIRED)
-        elif started is not None and first < started:
-            self.add_error("deposit_first_due", deposits.FIRST_BEFORE_START)
         elif first < self.today:
             self.add_error("deposit_first_due", installments.FIRST_IN_PAST)
         if not data.get("deposit_cadence"):
@@ -1031,7 +1036,7 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
                 # "On a date" marks it so (the reminders, the portal and the LEASE card).
                 timing = self.deposit_timing()
                 due = timing.due_date or due
-                dated = timing.when == deposits.DepositWhen.ON_DATE
+                dated = timing.when == charge_timing.When.ON_DATE
             if due is None:  # refused by clean()
                 continue
             items.append(

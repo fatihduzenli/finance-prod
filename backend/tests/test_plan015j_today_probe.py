@@ -30,6 +30,7 @@ from ledger.models import (
     RentCharge,
 )
 from ledger.services import (
+    charge_timing,
     deposits,
     installments,
     leases,
@@ -41,6 +42,7 @@ from ledger.services import (
     reminders,
     start_date,
 )
+from ledger.services.rent_run import PaymentOutcome
 from payments.fake import FakeProvider
 from payments.models import Job, JobKind, JobStatus
 from tests import test_new_lease_page as new_lease
@@ -48,7 +50,6 @@ from tests.job_helpers import run_queued_jobs
 from tests.test_new_lease_page import (
     connect,
     create_data,
-    create_path,
     deposit_type,
     page,
     post_create,
@@ -112,7 +113,7 @@ def send_move_in(client: Client, lease: Lease) -> InvoiceDraft:
     return draft
 
 
-def wire(charge: OneOffCharge, amount: str) -> one_off_charges.PaymentOutcome:
+def wire(charge: OneOffCharge, amount: str) -> PaymentOutcome:
     """Staff's manual payment on a one-off charge (the service behind the charge's Add
     payment form)."""
     return one_off_charges.record_payment(
@@ -335,17 +336,19 @@ def test_q3_a_dated_deposit_before_the_start_is_a_receivable_and_gets_reminders(
 # --- 4. A deposit "in installments" starting before the start date ----------------------------
 
 
-def test_q4_a_first_installment_before_the_start_is_refused_by_the_form(
+def test_q4_a_first_installment_before_the_start_is_accepted_by_the_form(
     admin: Client, today: date
 ) -> None:
+    """Re-pinned (Opus, PLAN-015j §10): the rule FIRST_BEFORE_START is removed; a first
+    installment before the lease's start (and not before today) is accepted."""
     store = vacant_store()
     operator = new_lease.an_operator_with("Early Plan", email="early@example.com")
-    price = f"setup_{deposit_type().code}_price"
+    code = deposit_type().code
     data = create_data(
         store,
         operator,
         **{
-            price: "3000.00",
+            f"setup_{code}_price": "3000.00",
             "deposit_when": "installments",
             "deposit_count": "3",
             "deposit_first_due": "2026-11-10",
@@ -354,25 +357,30 @@ def test_q4_a_first_installment_before_the_start_is_refused_by_the_form(
     )
     response = post_create(admin, store, data)
     assert response.status_code == 302
-    assert not Lease.objects.filter(store=store).exists()
-    assert not InstallmentPlan.objects.exists()
-    assert deposits.FIRST_BEFORE_START == (
-        "The first installment cannot be before the lease's start date."
-    )
-    assert html.escape(deposits.FIRST_BEFORE_START) in page(admin, create_path(store))
+    lease = Lease.objects.get(store=store)
+    plan = InstallmentPlan.objects.get(one_off_charge=the_deposit(lease))
+    assert (plan.first_due, plan.count) == (date(2026, 11, 10), 3)
+    assert [row.due_date for row in installments.installments_of(plan)] == [
+        date(2026, 11, 10),
+        date(2026, 12, 10),
+        date(2027, 1, 10),
+    ]
+    assert not hasattr(deposits, "FIRST_BEFORE_START")
 
 
-def test_q4_the_service_refuses_it_too_with_nothing_saved(today: date) -> None:
+def test_q4_the_service_accepts_it_too(today: date) -> None:
+    """Re-pinned (Opus, PLAN-015j §10): the service no longer refuses a first installment
+    before the start; the plan is made in the same transaction as the lease."""
     from ledger.forms import LeaseCreateForm
 
     store = vacant_store()
     operator = new_lease.an_operator_with("Early Service", email="service@example.com")
-    price = f"setup_{deposit_type().code}_price"
+    code = deposit_type().code
     data = create_data(
         store,
         operator,
         **{
-            price: "3000.00",
+            f"setup_{code}_price": "3000.00",
             "deposit_when": "installments",
             "deposit_count": "3",
             "deposit_first_due": "2026-11-15",
@@ -382,25 +390,21 @@ def test_q4_the_service_refuses_it_too_with_nothing_saved(today: date) -> None:
     data["store"] = str(store.pk)
     form = LeaseCreateForm(data, today=TODAY)
     assert form.is_valid(), form.errors
-    timing = dataclasses.replace(form.deposit_timing(), first_due=date(2026, 11, 10))
-    with pytest.raises(one_off_charges.SetupRefused) as raised:
-        deposits.create_lease_with_deposit(
-            form.cleaned_data,
-            rent=form.cleaned_data["rent"],
-            creation_key=form.cleaned_data["creation_key"],
-            items=form.setup_items(),
-            actor=None,
-            timing=timing,
-            billing=form.billing_values(),
-            today=TODAY,
-        )
-    assert (raised.value.field, raised.value.message) == (
-        "deposit_first_due",
-        deposits.FIRST_BEFORE_START,
+    timing = dataclasses.replace(form.timings()[deposit_type().pk], first_due=date(2026, 11, 10))
+    lease, created, charges = charge_timing.create_lease(
+        form.cleaned_data,
+        rent=form.cleaned_data["rent"],
+        creation_key=form.cleaned_data["creation_key"],
+        items=form.setup_items(),
+        actor=None,
+        timings={deposit_type().pk: timing},
+        billing=form.billing_values(),
+        today=TODAY,
     )
-    assert raised.value.fee_type == deposit_type()
-    assert not Lease.objects.filter(store=store).exists()
-    assert not OneOffCharge.objects.exists()
+    assert created and lease.store_id == store.pk
+    [deposit] = [charge for charge in charges if charge.fee_type == deposit_type()]
+    plan = InstallmentPlan.objects.get(one_off_charge=deposit)
+    assert (plan.first_due, plan.origin) == (date(2026, 11, 10), "deposit")
 
 
 # --- 5. A deposit plan collected by the processor's bank debit on a prospective lease ----------

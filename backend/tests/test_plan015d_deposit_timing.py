@@ -206,9 +206,9 @@ def test_in_installments_makes_a_deposit_plan_off_the_move_in_invoice(
     assert deposits.card_text(lease) == "$3,000.00 · 0 of 3 installments paid"
 
 
-def test_a_first_installment_before_the_start_date_is_refused_with_nothing_saved(
-    admin: Client, today: date
-) -> None:
+def test_a_first_installment_before_the_start_date_is_accepted(admin: Client, today: date) -> None:
+    """Re-pinned (Opus, PLAN-015j §10): before the start date and not before today is
+    accepted; the plan starts on that date."""
     lease = save(
         admin,
         deposit_when="installments",
@@ -216,8 +216,9 @@ def test_a_first_installment_before_the_start_date_is_refused_with_nothing_saved
         deposit_first_due="2026-11-10",
         deposit_cadence="monthly",
     )
-    assert lease is None
-    assert not InstallmentPlan.objects.exists()
+    assert lease is not None
+    plan = InstallmentPlan.objects.get(one_off_charge=the_deposit(lease))
+    assert (plan.origin, plan.first_due) == (InstallmentOrigin.DEPOSIT, date(2026, 11, 10))
 
 
 @pytest.mark.parametrize(

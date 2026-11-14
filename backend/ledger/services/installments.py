@@ -463,6 +463,32 @@ def settlement_preview(total: Decimal, count: int, first_on: date, cadence: str)
     return sentence
 
 
+#: :func:`payments_preview`'s words of a cadence other than monthly (monthly says none).
+PAYMENT_CADENCE_WORDS = {
+    InstallmentCadence.WEEKLY: "every week",
+    InstallmentCadence.BIWEEKLY: "every two weeks",
+}
+
+
+def payments_preview(total: Decimal, count: int, first_on: date, cadence: str) -> str:
+    """The New lease page's sentence under a row "In installments" (PLAN-015j §4, pure):
+    ``3 payments of $500.00: Dec 1, 2026 … Feb 1, 2027`` (monthly), ``3 payments of $50.00
+    every week: Nov 2, 2026 … Nov 16, 2026``, with ``, the last $333.34`` when the last
+    payment carries the remainder. The amounts and dates are :func:`settlement_lines`'s (the
+    plan's own, :func:`preview`). Raises ``ValueError`` as :func:`settlement_lines`."""
+    lines = settlement_lines(total, count, first_on, cadence)
+    share, last = lines[0].amount, lines[-1].amount
+    words = PAYMENT_CADENCE_WORDS.get(InstallmentCadence(cadence))
+    when = f" {words}" if words else ""
+    sentence = (
+        f"{count} payments of {format_amount(share)}{when}: "
+        f"{day_text(lines[0].due)} … {day_text(lines[-1].due)}"
+    )
+    if last != share:
+        sentence += f", the last {format_amount(last)}"
+    return sentence
+
+
 # --- Reads -------------------------------------------------------------------------------
 
 
@@ -570,13 +596,14 @@ def collection_of(parent: Parent) -> str:
     return InstallmentCollection.MANUAL
 
 
-def deposit_collection(deposit: OneOffCharge) -> str:
-    """How a deposit plan's installments are collected (PLAN-015d §3 (3)): as the lease's
-    channel collects rent — the processor's bank debit when the lease's account can take it
-    (``autopay_due``), else recorded by staff (``manual``)."""
-    lease = deposit.lease
+def lease_channel_collection(charge: OneOffCharge) -> str:
+    """How the installments of a New lease plan are collected (PLAN-015d §3 (3), PLAN-015j
+    §9.4; the deposit's and every other move-in charge's): as the lease's channel collects
+    rent — the processor's bank debit when the lease's account can take it (``autopay_due``),
+    else recorded by staff (``manual``)."""
+    lease = charge.lease
     if lease is not None and lease.payment_channel == PaymentChannel.PROVIDER_ACH:
-        billing = leases.billing_lease(deposit)
+        billing = leases.billing_lease(charge)
         if not _collection_refusal(InstallmentCollection.AUTOPAY_DUE, billing):
             return InstallmentCollection.AUTOPAY_DUE
     return InstallmentCollection.MANUAL
@@ -1020,8 +1047,9 @@ def create_plan(
     """Create the plan and its installments (D9, D10; see the module docstring). Every
     rule is checked again under the parent's row lock; a refusal writes nothing.
     ``collection`` overrides the parent's (:func:`collection_of`; Schedule settlement's
-    ``autopay_due`` on a manual charge, PLAN-012f-b D16), its provider prerequisites
-    checked as the parent's would be; ``origin`` is stored on the plan."""
+    ``autopay_due`` on a manual charge, PLAN-012f-b D16; a New lease plan's
+    :func:`lease_channel_collection`, PLAN-015j), its provider prerequisites checked as the
+    parent's would be; ``origin`` is stored on the plan."""
     day = today or timezone.localdate()
     if not INSTALLMENTS_MIN <= count <= INSTALLMENTS_MAX:
         return Outcome(False, COUNT_RANGE, "count")
@@ -1034,13 +1062,6 @@ def create_plan(
             locked = _lock(parent)
             reason = split_refusal(locked, day, origin=origin)
             operator = operator_of(locked)
-            if (
-                not reason
-                and collection is None
-                and origin == InstallmentOrigin.DEPOSIT
-                and isinstance(locked, OneOffCharge)
-            ):
-                collection = deposit_collection(locked)
             if not reason and collection is not None and operator is not None:
                 reason = _collection_refusal(collection, leases.billing_lease(locked))
             if reason:
