@@ -8,6 +8,7 @@ is separate.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -24,12 +25,13 @@ from ledger.models import (
     CalendarEntry,
     ContactEntry,
 )
-from ledger.services import calendar
+from ledger.services import calendar, detail_cards
 from mail.memory import MemoryMailSender
 from payments.models import JobEntity
 from tests.auth_helpers import make_user
 from tests.test_collections import mail_set_up, operator
 from tests.test_ledger_models import saved
+from tests.test_operator_views import client_for
 
 pytestmark = pytest.mark.django_db
 
@@ -193,3 +195,83 @@ def test_the_rebuilt_subjects_equal_the_sent_ones(memory: MemoryMailSender) -> N
     assert calendar.entry_subject(item) == "Reminder: Two spaces and a tab"
     long = CalendarEntry(kind="reminder", on=DAY, title="x" * 400)
     assert len(calendar.entry_subject(long)) == 300
+
+
+# --- Task 2: the Activity words --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("after", "words"),
+    [
+        (
+            {"outcome": "sent", "on": "2026-10-20", "to": "ana@example.com"},
+            "Reminder e-mail sent to ana@example.com",
+        ),
+        ({"outcome": "sent", "on": "2026-10-20"}, "Reminder e-mail sent"),
+        ({"outcome": "held", "reason": "not_set_up"}, "Reminder e-mail held (mail not set up)"),
+        (
+            {"outcome": "held", "reason": "sandbox"},
+            "Reminder e-mail held (address not on the allowlist)",
+        ),
+        ({"outcome": "held", "on": "2026-10-20"}, "Reminder e-mail held"),
+        ({"outcome": "held", "reason": "unknown"}, "Reminder e-mail held"),
+        ({"outcome": "failed", "error": "ConnectTimeout"}, "Reminder e-mail failed"),
+        ({"outcome": "no_address"}, "Reminder e-mail not sent (no address)"),
+        ({"outcome": "exploded"}, "Reminder e-mail"),
+        ({}, "Reminder e-mail"),
+        (None, "Reminder e-mail"),
+        (["sent"], "Reminder e-mail"),
+        ("sent", "Reminder e-mail"),
+    ],
+)
+def test_each_reminder_outcome_has_its_words(after: Any, words: str) -> None:
+    assert detail_cards.morning_email_words("calendar_entry", after) == words
+
+
+def test_a_promise_e_mail_reads_promise() -> None:
+    sent = {"outcome": "sent", "to": "ana@example.com"}
+    assert (
+        detail_cards.morning_email_words("contact_entry", sent)
+        == "Promise e-mail sent to ana@example.com"
+    )
+    assert (
+        detail_cards.morning_email_words("contact_entry", {"outcome": "held", "reason": "sandbox"})
+        == "Promise e-mail held (address not on the allowlist)"
+    )
+    assert detail_cards.morning_email_words("contact_entry", None) == "Promise e-mail"
+
+
+def test_another_action_keeps_its_words() -> None:
+    assert detail_cards.action_words("one_off_charge.payment_recorded") == (
+        "Charge payment recorded"
+    )
+    found = detail_cards.activity([("one_off_charge", "abc")])
+    assert found.rows == []
+
+
+def test_the_calendar_entry_activity_card_words_the_outcome(settings: Any) -> None:
+    settings.MAIL_ENABLED = False
+    item = entry(author())
+    send(item)
+    client, _ = client_for(Role.BILLING)
+    page = client.get(f"/calendar/{item.pk}/").content.decode()
+    card = page[page.index('id="activity-card"') :]
+    assert "Reminder e-mail held (mail not set up)" in card
+    assert "Calendar morning email" not in page
+
+
+def test_older_and_broken_rows_render_on_the_activity_card() -> None:
+    item = entry(author())
+    staff_row(item, {"outcome": "sent", "on": "2026-10-19"})
+    staff_row(item, None)
+    staff_row(item, ["held"])
+    staff_row(item, {"outcome": "mystery"})
+    client, _ = client_for(Role.BILLING)
+    response = client.get(f"/calendar/{item.pk}/")
+    assert response.status_code == 200
+    card = response.content.decode()
+    card = card[card.index('id="activity-card"') :]
+    actions = re.findall(r'<strong class="activity-action">([^<]*)</strong>', card)
+    assert sorted(actions) == sorted(
+        ["Reminder e-mail sent", "Reminder e-mail", "Reminder e-mail", "Reminder e-mail"]
+    )

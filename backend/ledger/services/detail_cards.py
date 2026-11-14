@@ -8,7 +8,9 @@ itself and the rows the page has already read, such as a charge's invoices and p
 first, at most :data:`ACTIVITY_SIZE`, with one query, and whether older rows exist (the card then
 links the store page's History tab). Each row carries its time, the action in words
 (:func:`action_words`: "Charge created", "Invoice sent", "Payment recorded"), by whom and the
-row's note when its ``after`` has one, masked as on the audit page.
+row's note when its ``after`` has one, masked as on the audit page. A reminder or promise-to-pay
+e-mail's row (``calendar.morning_email``) is worded from its stored outcome instead
+(:func:`morning_email_words`, PLAN-015k).
 
 :func:`invoice_rows` is the Invoices card: the charge's invoices
 (:func:`ledger.services.rent_run.charge_invoices`) with their line count and the invoice
@@ -37,6 +39,7 @@ from django.contrib.auth.models import User
 from django.db.models import Count, F, OuterRef, Q, Subquery
 from django.urls import reverse
 
+import mail
 from finance.dates import day_text
 from ledger.models import (
     ZERO,
@@ -114,6 +117,44 @@ def action_words(action: str) -> str:
     return f"{noun} {words}".strip() if words else noun
 
 
+#: The audit action of a reminder or promise-to-pay e-mail to its author (PLAN-015k).
+MORNING_EMAIL_ACTION = "calendar.morning_email"
+#: The entity type of a promise to pay's e-mail; a calendar entry's is ``calendar_entry``.
+PROMISE_ENTITY = "contact_entry"
+REMINDER_EMAIL = "Reminder e-mail"
+PROMISE_EMAIL = "Promise e-mail"
+#: The held reasons as the Activity line words them; a row without one reads "held".
+_HELD_WORDS: dict[str, str] = {
+    mail.NOT_SET_UP: "held (mail not set up)",
+    mail.SANDBOX: "held (address not on the allowlist)",
+}
+
+
+def morning_email_words(entity_type: str, after: object) -> str:
+    """The Activity line of a ``calendar.morning_email`` row, from its stored outcome
+    (PLAN-015k §3): "Reminder e-mail sent to ana@example.com", "Reminder e-mail held (mail not
+    set up)", "Reminder e-mail failed", "Reminder e-mail not sent (no address)"; "Promise
+    e-mail …" for a promise to pay. A row written before the address was stored reads "sent"
+    or "held" alone; a payload that is not an object, or an unknown outcome, reads the first
+    words alone."""
+    first = PROMISE_EMAIL if entity_type == PROMISE_ENTITY else REMINDER_EMAIL
+    if not isinstance(after, dict):
+        return first
+    outcome = after.get("outcome")
+    if outcome == mail.SENT:
+        to = after.get("to")
+        return f"{first} sent to {to}" if isinstance(to, str) and to else f"{first} sent"
+    if outcome == mail.HELD:
+        reason = after.get("reason")
+        words = _HELD_WORDS.get(reason, "held") if isinstance(reason, str) else "held"
+        return f"{first} {words}"
+    if outcome == "failed":
+        return f"{first} failed"
+    if outcome == "no_address":
+        return f"{first} not sent (no address)"
+    return first
+
+
 def _note(after: object) -> str:
     if not isinstance(after, dict):
         return ""
@@ -144,7 +185,11 @@ def activity(records: Iterable[tuple[str, object]]) -> Activity:
         [
             ActivityRow(
                 at=row.at,
-                action=action_words(row.action),
+                action=(
+                    morning_email_words(row.entity_type, row.after)
+                    if row.action == MORNING_EMAIL_ACTION
+                    else action_words(row.action)
+                ),
                 user=row.actor,
                 note=_note(row.after),
             )
