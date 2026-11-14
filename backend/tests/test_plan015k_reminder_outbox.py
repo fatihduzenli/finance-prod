@@ -35,6 +35,7 @@ from ledger.services import calendar, detail_cards, outbox_list
 from mail.memory import MemoryMailSender
 from payments.models import JobEntity
 from tests.auth_helpers import make_user
+from tests.test_card_number_guard import luhn_complete
 from tests.test_collections import mail_set_up, operator, rent_charge
 from tests.test_ledger_models import saved
 from tests.test_operator_views import client_for
@@ -201,6 +202,65 @@ def test_the_rebuilt_subjects_equal_the_sent_ones(memory: MemoryMailSender) -> N
     assert calendar.entry_subject(item) == "Reminder: Two spaces and a tab"
     long = CalendarEntry(kind="reminder", on=DAY, title="x" * 400)
     assert len(calendar.entry_subject(long)) == 300
+
+
+#: An address whose local part is a 16-digit run that passes the Luhn check (built here, not a
+#: real card number): the audit payload's payment-data guard refuses it.
+GUARDED_ADDRESS = f"{luhn_complete('123456789012345')}@example.com"
+
+
+def test_an_address_the_guard_refuses_still_writes_the_row_of_the_send(
+    memory: MemoryMailSender,
+) -> None:
+    owner = author()
+    type(owner).objects.filter(pk=owner.pk).update(email=GUARDED_ADDRESS)
+    owner.refresh_from_db()
+    item = entry(owner)
+    assert calendar.send_morning_email(JobEntity.CALENDAR_ENTRY, item.pk, DAY) == (True, "Sent.")
+    assert [m.to for m in memory.sent] == [GUARDED_ADDRESS]
+    rows = list(AuditLog.objects.filter(action=ACTION, entity_id=str(item.pk)))
+    assert len(rows) == 1
+    assert rows[0].after == {
+        "outcome": "sent",
+        "on": "2026-10-20",
+        "subject": "Reminder: Call the landlord",
+    }
+    cells = row_html(outbox(), f"staff-{rows[0].pk}")
+    assert GUARDED_ADDRESS in cells and "(current address)" in cells
+
+
+def test_a_failed_send_to_a_refused_address_keeps_the_error(memory: MemoryMailSender) -> None:
+    owner = author()
+    type(owner).objects.filter(pk=owner.pk).update(email=GUARDED_ADDRESS)
+    owner.refresh_from_db()
+    memory.fail_with = "ConnectTimeout"
+    row = send(entry(owner))
+    assert row.after == {
+        "outcome": "failed",
+        "error": "ConnectTimeout",
+        "subject": "Reminder: Call the landlord",
+    }
+
+
+def test_a_refused_subject_is_left_out_and_the_rest_kept() -> None:
+    digits = luhn_complete("123456789012345")
+    after: dict[str, object] = {
+        "outcome": "held",
+        "on": "2026-10-20",
+        "to": "a@example.com",
+        "reason": "sandbox",
+    }
+    assert calendar._storable({**after, "subject": f"Reminder: {digits}"}) == after
+    both: dict[str, object] = {**after, "to": GUARDED_ADDRESS, "subject": f"Reminder: {digits}"}
+    assert calendar._storable(both) == {
+        "outcome": "held",
+        "on": "2026-10-20",
+        "reason": "sandbox",
+    }
+    assert calendar._storable({**after, "subject": "Reminder: keys"}) == {
+        **after,
+        "subject": "Reminder: keys",
+    }
 
 
 # --- Task 2: the Activity words --------------------------------------------------------------
@@ -460,6 +520,12 @@ def test_the_keys_query_is_one_union_and_the_rows_are_read_for_the_page_only(
     union = [q["sql"] for q in captured if "UNION" in q["sql"].upper()]
     assert len(union) == 2  # the count and the page's keys
     assert all("LIMIT" in sql.upper() or "COUNT" in sql.upper() for sql in union)
+
+
+def test_the_staff_query_is_narrowed_by_the_indexed_entity_type() -> None:
+    where = str(outbox_list.staff_emails().query).split(" WHERE ", 1)[1]
+    assert '"entity_type" IN (calendar_entry, contact_entry)' in where
+    assert '"action" = calendar.morning_email' in where
 
 
 @pytest.fixture

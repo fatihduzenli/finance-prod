@@ -87,7 +87,9 @@ the reminder's timing (PLAN-015h), "Send now" for these rows, the CSV exports, t
 - **UNION paging** across a model and the audit table: wrong order or count would mislead; pinned
   by the mixed-page tests on both databases.
 - **Shared code:** `detail_cards.action_words` serves every Activity card; only this action's
-  branch is added. The audit table is large: the query filters on the indexed action.
+  branch is added. The audit table is large: the query is narrowed by the indexed entity type
+  (`calendar_entry`, `contact_entry`: the prefix of the `(entity_type, entity_id, at)` index),
+  the action filter kept; `action` has no index.
 - Not irreversible; no secret touched; no dependency added.
 
 ## 7. Acceptance criteria

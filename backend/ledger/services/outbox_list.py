@@ -41,6 +41,7 @@ from ledger.models import (
 from ledger.services import calendar, messaging
 from ledger.services.detail_cards import MORNING_EMAIL_ACTION, PROMISE_ENTITY
 from mail.base import is_address
+from payments.models import JobEntity
 
 PAGE_SIZE = 50
 #: The source column of the union: an engine message or a staff e-mail's audit row.
@@ -54,6 +55,9 @@ STAFF_REASONS: tuple[str, ...] = (mail.NOT_SET_UP, mail.SANDBOX)
 #: Digits of an audit row's key in the union: wide enough for any ``bigint``, so the keys
 #: of one time compare as numbers do.
 _KEY_WIDTH = 20
+#: The entity types a staff e-mail's audit row is written with (the ``calendar_email`` job's):
+#: the audit table's ``(entity_type, entity_id, at)`` index narrows the scan by them.
+STAFF_ENTITIES: tuple[str, ...] = (JobEntity.CALENDAR_ENTRY.value, JobEntity.CONTACT_ENTRY.value)
 REMINDER_TEMPLATE = "Reminder e-mail"
 PROMISE_TEMPLATE = "Promise to pay e-mail"
 
@@ -90,7 +94,9 @@ def staff_emails(
     """The audit rows of the staff e-mails the filters select (none when a filter names a
     status or reason no staff e-mail can have)."""
     found = AuditLog.objects.filter(
-        action=MORNING_EMAIL_ACTION, after__outcome__in=list(STAFF_STATUSES)
+        entity_type__in=list(STAFF_ENTITIES),
+        action=MORNING_EMAIL_ACTION,
+        after__outcome__in=list(STAFF_STATUSES),
     )
     if status and status not in STAFF_STATUSES:
         return found.none()
