@@ -268,7 +268,7 @@ def test_the_styles_the_select_and_its_phone_line() -> None:
         assert gone not in css
     # Laptop: name, price, When, usual, More in one row.
     assert (
-        ".movein-row { display: grid; grid-template-columns: minmax(0, 1fr) 8.5rem 12.5rem 7rem "
+        ".movein-row { display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem 11.5rem 6.5rem "
         "auto;"
     ) in css
 
