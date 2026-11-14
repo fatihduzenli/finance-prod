@@ -1935,9 +1935,11 @@ p.detail-more-notes { padding-left: 0; }
   .help-topics a { padding: 12px; }
   .help-footer { text-align: left; }
   /* New lease's Move-in charges (PLAN-015j §4): the When select drops under the price on its own
-     full-width line; the chosen When's fields one a row. */
+     full-width line; the chosen When's fields one a row, directly under the select (PLAN-015k
+     §9): "usual" and "More" are placed after them. */
   .movein-when-select { grid-column: 1 / -1; }
   .movein-when .field { flex: 1 1 100%; }
+  .movein-usual, .movein-more { order: 1; }
 }
 
 /* --- New lease (docs/qa/PLAN-014b item 1; the owner's new-lease-dark-laptop.png) ------------------
