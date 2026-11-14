@@ -13,8 +13,8 @@ import html
 import re
 import uuid
 from datetime import date
-from pathlib import Path
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
