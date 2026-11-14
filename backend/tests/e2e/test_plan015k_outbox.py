@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, ViewportSize, expect
 from pytest_django.live_server_helper import LiveServer
 
 from ledger.models import AuditLog, CalendarEntry
@@ -54,7 +54,7 @@ def test_a_held_reminder_is_a_read_only_outbox_row_and_the_activity_says_held(
     live_server: LiveServer,
     browser: Browser,
     settings: object,
-    viewport: dict,
+    viewport: ViewportSize,
     theme: str,
     tag: str,
 ) -> None:
