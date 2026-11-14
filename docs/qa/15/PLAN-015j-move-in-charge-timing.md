@@ -3,7 +3,7 @@
 **Owner's request (2026-11-13), two items from the review of step 5 on staging. Gate class: full
 (billing).** Plan by Fable; implementation by Opus; gate and sign-off by Fable. Record:
 `docs/qa/15/QA-015.md`. Branch `015j/move-in-when` from main 463dc66. One PR.
-**Status: draft. Nothing is built until the owner answers §9.**
+**Status: accepted. The owner answered §9 on 2026-11-13 and added requirement 7 (§10).**
 
 ## 1. Objective
 
@@ -174,20 +174,46 @@ processor adapter; models and migrations (none); the charge page's own Split.
 9. Every §6 case exists and passes on sqlite and PostgreSQL; the full gate is green; coverage of
    the changed files does not drop; the secret scan is clean.
 
-## 9. Open questions for the owner (answers needed before the build)
+## 9. The owner's decisions (2026-11-13)
 
-1. **Where the deposit is typed.** Recommended: only in step 5, as an ordinary row; the Terms card
-   loses its Deposit field. The alternative, two inputs kept equal by script, breaks without script
-   and doubles the field for a screen reader.
-2. **"More → Due date".** Recommended: remove it; "Due on a date" replaces it. Today that field
-   stores a date on a charge that is still billed with the first invoice.
-3. **Cadence.** The request names the number of payments and the first date only. The deposit plan
-   today also offers "Every": monthly, every two weeks, weekly. Recommended: keep it on every row,
-   monthly by default.
-4. **How installments of a non-deposit charge are collected.** Recommended: as the deposit's, by
-   the lease's channel (bank debit when the account is linked, else recorded by staff).
-5. **A non-deposit charge "Due on a date".** It gets no invoice of its own: reminders follow its
-   date, and staff record the payment or add it to an invoice. Accept, or should the app make a
-   one-charge invoice for it on its date (a larger change, not in this plan)?
-6. **Change start date.** Its "move the deposit schedule" tick keeps moving the deposit only; other
-   dated charges and plans stay on their dates. Accept for this PR?
+1. **The deposit is typed in step 5 only**, as an ordinary row; the Terms card loses its Deposit
+   field. Edit lease and every other reader keep working from the same stored value (the deposit
+   charge's price; nothing about its storage changes).
+2. **"More → Due date" is removed.** A lease that already stores a due date there keeps it, and the
+   lease page shows it as "due <date>" (the words of "Due on a date"): a setup charge that is owed
+   and whose stored due date is not the lease's start date reads so, with no data rewritten.
+3. **Cadence stays on every row:** monthly (default), every two weeks, weekly.
+4. **Installments of every charge are collected by the deposit's rule:** bank debit when the
+   lease's account is linked, otherwise recorded by staff.
+5. **A non-deposit charge "Due on a date" has no invoice of its own** in this PR. The page says so
+   beside the choice, on non-deposit rows: "Not on the first invoice. Record the payment or add it
+   to an invoice when it is due." Backlog item B10: create a one-charge invoice automatically on
+   the due date.
+6. **Changing the start date never moves a move-in charge by itself.** The "Move the deposit
+   schedule too" tick is off by default (it is today: an unticked box; pinned by a test) and the
+   deposit moves only when staff tick it. Other dated charges and plans stay on their dates; staff
+   change them by hand. No backlog item. Fable's reading, stated to the owner: a charge billed
+   "With the first invoice" has no date of its own and goes where that invoice goes, as today.
+
+## 10. Requirement 7 (owner, 2026-11-13): collecting before the lease starts
+
+- **Dates are free of the start date.** "Due on a date" and an installment plan's first date may be
+  any date from today on, also before the lease's start. The rule `deposits.FIRST_BEFORE_START`
+  (form and service, PLAN-015d) is removed; its 015d tests are re-pinned to "accepted". No other
+  validation refers to the start date.
+- **A Prospective lease's move-in charges are invoiced, debited and paid as an active lease's.**
+  No new status rule is added anywhere in this PR; the probe of today's behaviour
+  (`tests/test_plan015j_today_probe.py`, kept as regression tests) pins: the first invoice sent
+  before the start; a payment recorded on a setup charge before the start; reminders on a dated
+  charge; a plan's bank debit when the account is linked.
+- **Activation is independent.** `activate_due` and "Activate now" do not read the move-in charges
+  and bill none of them again (pinned: the counts of rent and setup charges before and after).
+- **Postponing the start after a charge is paid or partly paid** leaves the charge, its due date
+  and its payments as they are (pinned for a dated charge, for a plan with one installment paid,
+  and for a charge on a paid first invoice).
+
+Added to §6: every case above on a prospective lease; a date of today and a date before the start
+for both "Due on a date" and the first installment, on a deposit and a non-deposit row.
+Added to §8: 10. A first installment date and a due date before the lease's start are accepted.
+11. The probe file's tests pass unchanged before and after the build, except the two that pinned
+`FIRST_BEFORE_START`, which are re-pinned to acceptance.
