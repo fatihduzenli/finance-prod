@@ -3,7 +3,7 @@
 {% block title %}Outbox{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><h1>Outbox</h1><p class="page-sub" id="list-counts">{{ page.paginator.count }} message{{ page.paginator.count|pluralize }}</p></div><div class="page-actions">{% if held_for_settings %}<form method="post" action="{% url 'ledger:outbox:send_held_for_settings' %}" id="outbox-send-held-for-settings" class="js-single-submit" onsubmit="return window.confirm('Send all held for settings: {{ release.text }}?');">{% csrf_token %}<input type="hidden" name="count" value="{{ held_for_settings }}"><button class="btn" type="submit">Send all held for settings ({{ held_for_settings }})</button></form>{% endif %}<a class="btn" id="outbox-preview" href="{% url 'ledger:outbox:preview' %}">Preview next 30 days</a></div></div>{% endblock %}
 {% block content %}
-  {% comment %}Admin › Outbox (docs/qa/PLAN-014 D5): every message, newest first, 50 a page; filters by status and by the days queued. A row opens its stored subject and body (a combined message's lists every charge); a row combined into another links to it and reads its outcome. "Send now" sends a held message again once mail is set up (and, on the sandbox, its address is on the allowlist); the service refuses otherwise with a sentence. "Send all held for settings" (owner, 2026-11-02) is shown while messages are held for a blank company name or support e-mail: its confirmation says what it will do (held messages → e-mails, superseded) and the form posts their number back; they go grouped per lease as at the daily job. PLAN-015 Batch 2: the Status cell is a {% chip %} (views.outbox.status_cell: the tone and the status's word) over the rest of the status text (the held reason, the error, the fold's day; a combined row's link to its message).{% endcomment %}
+  {% comment %}Admin › Outbox (docs/qa/PLAN-014 D5): every message, newest first, 50 a page; filters by status and by the days queued. A row opens its stored subject and body (a combined message's lists every charge); a row combined into another links to it and reads its outcome. PLAN-015k: a reminder or promise-to-pay e-mail sent to staff (an audit row, not a message; services.outbox_list) is a read-only row, staff-&lt;audit id&gt;, with its subject and no body, and never "Send now". "Send now" sends a held message again once mail is set up (and, on the sandbox, its address is on the allowlist); the service refuses otherwise with a sentence. "Send all held for settings" (owner, 2026-11-02) is shown while messages are held for a blank company name or support e-mail: its confirmation says what it will do (held messages → e-mails, superseded) and the form posts their number back; they go grouped per lease as at the daily job. PLAN-015 Batch 2: the Status cell is a {% chip %} (views.outbox.status_cell: the tone and the status's word) over the rest of the status text (the held reason, the error, the fold's day; a combined row's link to its message).{% endcomment %}
   <div class="card filter-card">{% filters active=active_filters %}
       <span class="filter-field"><label for="status">Status</label>
       <select name="status" id="status">
@@ -21,13 +21,26 @@
       <input type="date" name="to" id="to" value="{{ selected.to|date:'Y-m-d' }}"></span>
   {% endfilters %}</div>
   <div id="results">
-  {% if not mail_set_up %}<p class="side-note warning" id="outbox-not-set-up">Mail is not set up in this environment: every message is held here.</p>{% endif %}
+  {% if not mail_set_up %}<p class="side-note warning" id="outbox-not-set-up">Mail is not set up in this environment: every message is held here. Reminder e-mails to staff are listed and cannot be sent later.</p>{% endif %}
   <div class="card table-card list-card">
   {% responsive_table %}
   <table id="outbox">
     <thead><tr><th>When</th><th>Store</th><th>Operator</th><th>Template</th><th>Rule</th><th>Status</th><th>To</th><th>Scheduled for</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
     <tbody>
-      {% for message, status, to, storeless in rows %}
+      {% for message, status, to, storeless, staff in rows %}
+        {% if staff %}
+        <tr id="staff-{{ staff.pk }}" data-role="staff-email">
+          <td>{{ staff.at|moment }}</td>
+          <td>—</td>
+          <td>{% if staff.operator %}{{ staff.operator.display_name }}{% else %}—{% endif %}</td>
+          <td>{{ staff.template }}<span class="cell-subline">{{ staff.subject|default:"—" }}</span></td>
+          <td>—</td>
+          <td data-role="status">{% with tone=status.0 label=status.1 rest=status.2 %}{% chip tone label %}{% if rest %}<span class="cell-subline">{{ rest }}</span>{% endif %}{% endwith %}</td>
+          <td>{% if to %}{{ to }}{% if staff.current_address %} <span class="muted">(current address)</span>{% endif %}{% else %}—{% endif %}</td>
+          <td>—</td>
+          <td></td>
+        </tr>
+        {% else %}
         <tr id="message-{{ message.pk }}">
           <td>{{ message.queued_at|moment }}</td>
           <td>{% if message.lease %}<a href="{% url 'ledger:stores:detail' pk=message.lease.store_id %}">{% if message.lease.store.store_number is not None %}#{{ message.lease.store.store_number }} {% endif %}{{ message.lease.store.external_label }}</a>{% elif storeless %}—{% else %}<span class="warning">No store</span>{% endif %}</td>
@@ -39,6 +52,7 @@
           <td>{% if message.scheduled_for %}{{ message.scheduled_for|moment }}{% else %}—{% endif %}</td>
           <td>{% if message.status == "held" %}<form method="post" action="{% url 'ledger:outbox:send_now' pk=message.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-sm" type="submit">Send now</button></form>{% endif %}</td>
         </tr>
+        {% endif %}
       {% empty %}
         <tr><td colspan="9" class="muted empty">No messages yet.</td></tr>
       {% endfor %}

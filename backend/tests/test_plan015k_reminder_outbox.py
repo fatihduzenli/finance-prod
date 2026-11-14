@@ -15,6 +15,8 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 import mail
@@ -24,12 +26,16 @@ from ledger.models import (
     AuditLog,
     CalendarEntry,
     ContactEntry,
+    MessageStatus,
+    MessageTemplate,
+    OutboundMessage,
+    RentCharge,
 )
-from ledger.services import calendar, detail_cards
+from ledger.services import calendar, detail_cards, outbox_list
 from mail.memory import MemoryMailSender
 from payments.models import JobEntity
 from tests.auth_helpers import make_user
-from tests.test_collections import mail_set_up, operator
+from tests.test_collections import mail_set_up, operator, rent_charge
 from tests.test_ledger_models import saved
 from tests.test_operator_views import client_for
 
@@ -275,3 +281,284 @@ def test_older_and_broken_rows_render_on_the_activity_card() -> None:
     assert sorted(actions) == sorted(
         ["Reminder e-mail sent", "Reminder e-mail", "Reminder e-mail", "Reminder e-mail"]
     )
+
+
+# --- Task 3: the Outbox ----------------------------------------------------------------------
+
+
+def outbox(query: str = "") -> str:
+    client, _ = client_for(Role.ADMIN)
+    response = client.get(OUTBOX + query)
+    assert response.status_code == 200
+    return response.content.decode()
+
+
+def row_ids(page: str) -> list[str]:
+    table = page[page.index('id="outbox"') :]
+    return re.findall(r'<tr id="((?:message|staff)-[^"]+)"', table)
+
+
+def row_html(page: str, row_id: str) -> str:
+    start = page.index(f'<tr id="{row_id}"')
+    return page[start : page.index("</tr>", start)]
+
+
+_occurrence = iter(range(1, 100_000))
+
+
+ENGINE_OWNER = "engine.owner@example.com"
+
+
+def engine_message(status: str = MessageStatus.SENT, held_reason: str = "") -> OutboundMessage:
+    """One engine message at the clock's time, about the test's one engine charge."""
+    charge = RentCharge.objects.filter(lease__operator__email=ENGINE_OWNER).first()
+    if charge is None:
+        charge = rent_charge(owner=operator(ENGINE_OWNER))
+    assert charge.lease.operator is not None
+    return OutboundMessage.objects.create(
+        operator=charge.lease.operator,
+        lease=charge.lease,
+        template=MessageTemplate.objects.get(code="overdue_day5"),
+        kind="ladder",
+        rule="C",
+        occurrence=next(_occurrence),
+        charge_entity_type="rent_charge",
+        charge_entity_id=charge.pk,
+        to_address=ENGINE_OWNER,
+        rendered_subject="Payment overdue",
+        rendered_body="Engine body.",
+        status=status,
+        held_reason=held_reason,
+    )
+
+
+def test_a_held_reminder_is_a_read_only_row_with_the_author_and_reason(
+    settings: Any, clock: Any
+) -> None:
+    settings.MAIL_ENABLED = False
+    clock(at(DAY, 9))
+    row = send(entry(author()))
+    page = outbox()
+    assert NOTE in page
+    cells = row_html(page, f"staff-{row.pk}")
+    assert "Reminder e-mail" in cells and "Reminder: Call the landlord" in cells
+    assert "reminder-author@example.com" in cells and "(current address)" not in cells
+    assert "<span>Held</span>" in cells and "not sent (mail not set up)" in cells
+    assert "Send now" not in cells and "<form" not in cells and BODY not in page
+    assert "1 message" in page
+
+
+def test_a_promise_e_mail_names_its_operator(memory: MemoryMailSender, clock: Any) -> None:
+    clock(at(DAY, 9))
+    row = send(promise(author("promise-author")))
+    cells = row_html(outbox(), f"staff-{row.pk}")
+    assert "Promise to pay e-mail" in cells and "Promising Shop" in cells
+    assert "Promise to pay due today: Promising Shop" in cells
+    assert "<span>Sent</span>" in cells and "promise-author@example.com" in cells
+
+
+def test_a_failed_reminder_shows_its_error(memory: MemoryMailSender) -> None:
+    memory.fail_with = "ConnectTimeout"
+    row = send(entry(author()))
+    cells = row_html(outbox(), f"staff-{row.pk}")
+    assert "<span>Failed</span>" in cells and "ConnectTimeout" in cells
+
+
+def test_an_older_row_rebuilds_the_subject_and_marks_the_current_address() -> None:
+    item = entry(author())
+    row = staff_row(item, {"outcome": "held", "on": "2026-10-20"})
+    cells = row_html(outbox(), f"staff-{row.pk}")
+    assert "Reminder: Call the landlord" in cells
+    assert "reminder-author@example.com" in cells and "(current address)" in cells
+    assert "<span>Held</span>" in cells and 'cell-subline">not sent' not in cells
+
+
+def test_a_deleted_entrys_older_row_shows_dashes() -> None:
+    item = entry(author())
+    row = staff_row(item, {"outcome": "sent", "on": "2026-10-20"})
+    item.delete()
+    cells = row_html(outbox(), f"staff-{row.pk}")
+    assert '<span class="cell-subline">—</span>' in cells
+    assert re.findall(r"<td[^>]*>([^<]*)</td>", cells).count("—") >= 4  # store, rule, to, scheduled
+
+
+def test_no_address_and_broken_rows_are_not_listed() -> None:
+    item = entry(author())
+    staff_row(item, {"outcome": "no_address"})
+    staff_row(item, None)
+    staff_row(item, ["sent"])
+    staff_row(item, {"outcome": "unknown"})
+    staff_row(item, "sent")
+    page = outbox()
+    assert row_ids(page) == [] and "No messages yet." in page and "0 messages" in page
+
+
+def test_the_list_is_newest_first_across_both_sources(clock: Any) -> None:
+    item = entry(author())
+    clock(at(DAY, 9))
+    first = engine_message()
+    clock(at(DAY, 10))
+    second = staff_row(item, {"outcome": "sent", "to": "a@example.com"})
+    clock(at(DAY, 11))
+    third = engine_message(MessageStatus.HELD, "not_set_up")
+    clock(at(DAY, 12))
+    fourth = staff_row(item, {"outcome": "held", "reason": "sandbox"})
+    assert row_ids(outbox()) == [
+        f"staff-{fourth.pk}",
+        f"message-{third.pk}",
+        f"staff-{second.pk}",
+        f"message-{first.pk}",
+    ]
+
+
+def mixed(count: int, clock: Any) -> list[str]:
+    """``count`` rows, alternately engine messages and staff e-mails, a minute apart; their
+    row ids newest first."""
+    item = entry(author(f"mixed-{uuid.uuid4().hex[:8]}"))
+    ids: list[str] = []
+    for n in range(count):
+        clock(at(DAY, 8) + timedelta(minutes=n))
+        if n % 2:
+            ids.append(f"staff-{staff_row(item, {'outcome': 'sent', 'to': 'a@example.com'}).pk}")
+        else:
+            ids.append(f"message-{engine_message().pk}")
+    return ids[::-1]
+
+
+def test_page_two_of_a_mixed_list_holds_the_right_fifty(clock: Any) -> None:
+    expected = mixed(120, clock)
+    assert row_ids(outbox()) == expected[:50]
+    page = outbox("?page=2")
+    assert row_ids(page) == expected[50:100]
+    assert "120 messages" in page
+    assert row_ids(outbox("?page=3")) == expected[100:]
+    assert row_ids(outbox("?page=99999999999999999999")) == expected[100:]
+
+
+def test_the_page_reads_a_fixed_number_of_queries(clock: Any) -> None:
+    def queries() -> int:
+        client, _ = client_for(Role.ADMIN)
+        client.get(OUTBOX)  # the session's first read
+        with CaptureQueriesContext(connection) as captured:
+            assert client.get(OUTBOX).status_code == 200
+        return len(captured)
+
+    mixed(5, clock)
+    few = queries()
+    mixed(115, clock)
+    assert OutboundMessage.objects.count() + AuditLog.objects.filter(action=ACTION).count() == 120
+    assert queries() == few
+
+
+def test_the_keys_query_is_one_union_and_the_rows_are_read_for_the_page_only(
+    clock: Any,
+) -> None:
+    mixed(120, clock)
+    with CaptureQueriesContext(connection) as captured:
+        shown, found = outbox_list.page("2")
+    assert len(found) == 50 and shown.paginator.count == 120
+    union = [q["sql"] for q in captured if "UNION" in q["sql"].upper()]
+    assert len(union) == 2  # the count and the page's keys
+    assert all("LIMIT" in sql.upper() or "COUNT" in sql.upper() for sql in union)
+
+
+@pytest.fixture
+def both(clock: Any) -> dict[str, str]:
+    """Engine and staff rows of each status and reason, on two days."""
+    item = entry(author())
+    found: dict[str, str] = {}
+    clock(at(DAY, 9))
+    found["m-sent"] = f"message-{engine_message().pk}"
+    found["s-sent"] = f"staff-{staff_row(item, {'outcome': 'sent', 'to': 'a@example.com'}).pk}"
+    found["m-held-ns"] = f"message-{engine_message(MessageStatus.HELD, 'not_set_up').pk}"
+    found["s-held-ns"] = f"staff-{staff_row(item, {'outcome': 'held', 'reason': 'not_set_up'}).pk}"
+    clock(at(DAY + timedelta(days=1), 9))
+    found["m-held-sb"] = f"message-{engine_message(MessageStatus.HELD, 'sandbox').pk}"
+    found["s-held-sb"] = f"staff-{staff_row(item, {'outcome': 'held', 'reason': 'sandbox'}).pk}"
+    found["s-held-old"] = f"staff-{staff_row(item, {'outcome': 'held'}).pk}"
+    found["m-failed"] = f"message-{engine_message(MessageStatus.FAILED).pk}"
+    found["s-failed"] = f"staff-{staff_row(item, {'outcome': 'failed', 'error': 'Boom'}).pk}"
+    found["m-queued"] = f"message-{engine_message(MessageStatus.QUEUED).pk}"
+    found["m-held-ho"] = f"message-{engine_message(MessageStatus.HELD, 'handled_personally').pk}"
+    return found
+
+
+def listed(query: str, both: dict[str, str]) -> set[str]:
+    names = {value: key for key, value in both.items()}
+    return {names[row] for row in row_ids(outbox(query))}
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("?status=sent", {"m-sent", "s-sent"}),
+        ("?status=failed", {"m-failed", "s-failed"}),
+        (
+            "?status=held",
+            {"m-held-ns", "s-held-ns", "m-held-sb", "s-held-sb", "s-held-old", "m-held-ho"},
+        ),
+        ("?status=queued", {"m-queued"}),
+        ("?status=combined", set()),
+        ("?reason=not_set_up", {"m-held-ns", "s-held-ns"}),
+        ("?reason=sandbox", {"m-held-sb", "s-held-sb"}),
+        ("?reason=handled_personally", {"m-held-ho"}),
+        ("?from=2026-10-20&to=2026-10-20", {"m-sent", "s-sent", "m-held-ns", "s-held-ns"}),
+        (
+            "?from=2026-10-21",
+            {
+                "m-held-sb",
+                "s-held-sb",
+                "s-held-old",
+                "m-failed",
+                "s-failed",
+                "m-queued",
+                "m-held-ho",
+            },
+        ),
+        ("?to=2026-10-19", set()),
+        ("?status=held&reason=sandbox&from=2026-10-21&to=2026-10-21", {"m-held-sb", "s-held-sb"}),
+        ("?status=sent&from=2026-10-21", set()),
+        ("?status=held&reason=not_set_up&to=2026-10-20", {"m-held-ns", "s-held-ns"}),
+    ],
+)
+def test_each_filter_selects_rows_of_both_sources(
+    query: str, expected: set[str], both: dict[str, str]
+) -> None:
+    assert listed(query, both) == expected
+
+
+def test_the_header_counts_both_sources(both: dict[str, str]) -> None:
+    assert f"{len(both)} messages" in outbox()
+    assert "2 messages" in outbox("?status=sent")
+    assert "1 message<" in outbox("?status=queued")
+
+
+def test_send_now_with_an_audit_key_is_404(settings: Any) -> None:
+    settings.MAIL_ENABLED = False
+    row = send(entry(author()))
+    client, _ = client_for(Role.ADMIN)
+    assert client.post(f"{OUTBOX}{row.pk}/send-now/").status_code == 404
+    assert client.post(f"{OUTBOX}staff-{row.pk}/send-now/").status_code == 404
+
+
+def test_the_note_is_shown_only_while_mail_is_not_set_up(memory: MemoryMailSender) -> None:
+    assert 'id="outbox-not-set-up"' not in outbox()
+
+
+def test_the_audit_page_shows_the_address_and_subject_as_plain_text(
+    settings: Any, clock: Any
+) -> None:
+    settings.MAIL_ENABLED = False
+    clock(at(DAY, 9))
+    item = entry(author(), title="<b>Rent</b> & keys")
+    send(item)
+    client, _ = client_for(Role.ADMIN)
+    response = client.get("/audit/?action=calendar.morning_email&from=2026-10-20&to=2026-10-20")
+    assert response.status_code == 200
+    page = response.content.decode()
+    after = page[page.index('class="audit-after"') :]
+    after = after[: after.index("</td>")]
+    # The audit page's masking leaves an address and a sentence as they are.
+    assert "<strong>to</strong>: <span" in after and "reminder-author@example.com" in after
+    assert "Reminder: &lt;b&gt;Rent&lt;/b&gt; &amp; keys" in after and "<b>Rent" not in after
+    assert "<strong>reason</strong>: <span" in after and "not_set_up" in after
