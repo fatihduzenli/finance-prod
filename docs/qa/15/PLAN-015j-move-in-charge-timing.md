@@ -252,3 +252,48 @@ Added to §3 In: `services/payments_entry.py`. Added to §5: task 6 (A), after t
 page tasks. Added to §8: 12. The store page's Record a payment lists a prospective lease's open
 charges when the store has no current lease. 13. `git diff main -- backend/ledger/services/
 lease_end.py backend/ledger/services/transfer.py` is empty.
+
+## 12. Addition to §11 A (owner, 2026-11-13): the successor's line on the store page
+
+When a store has a current lease **and** a Prospective successor, the store page keeps the current
+lease (as §11 A) and shows one line for the successor: "Upcoming lease: <operator>, starts Dec 1,
+2026 · Record a payment". "Record a payment" opens the store-page payment entry for **that** lease
+(`…/payments/new/?lease=<pk>`; the entry accepts the parameter only for the store's upcoming
+prospective lease, else it is ignored and the current lease is used), listing that lease's open
+charges. Shown to the billing role and above; a viewer sees the line without the link. Not shown
+when the successor has no operator. Built in the page half (task 3b: `services/workspace.py`, the
+store header template, `views/payments` entry for the parameter). Tests: the line and its link
+with both leases; no line without a successor; the entry with `?lease=` of another store's lease,
+of an ended lease, of the current lease and of a malformed id (ignored, current lease used); a
+payment recorded for the successor lands on the successor's charge only. Added to §8: 14.
+
+## 13. Fable's review of the service and form half (e506175..3a32d47), 2026-11-14
+
+Accepted: Opus's open points 1–4 (the reworded start-date sentence on the row's When; "every two
+weeks" / "every week" in the payments sentence, nothing for monthly; the two generalised date
+messages; an invalid When refused on a priced row and ignored on an unpriced one); the dead
+deposit-origin branch removed from `installments.create_plan` (its only caller passes the
+collection).
+
+Findings for the page session:
+
+```
+[MAJOR] backend/ledger/views/stores.py:493,508 — §11 A opened more than "Record a payment".
+Failure scenario: a store whose only lease is prospective → "Schedule a payment" and "Charge now"
+on the store page now open the invoice builder for that lease; before, they sent staff back to
+Charges. The owner decided the payment entry only.
+Required change: those two views read `lease_end.current_lease` as on main (unchanged behaviour,
+pinned by a test each); only the payment entry (stores.py:399 and its POST) uses the widened rule.
+
+[MAJOR] backend/ledger/services/charge_timing.py lease_words — "due <date>" for a charge that
+rides an invoice.
+Failure scenario: a lease saved with every charge "With the first invoice", then "Activate now"
+or Change start date moves `started_on`: each charge's stored due date is no longer the start, so
+the charges list reads "due Nov 15, 2026" for charges that are lines of the first invoice.
+Required change: the "stored due date is not the start date" words apply only to a charge on no
+invoice and no draft not yet sent (as the `dated` words do); a charge on an invoice keeps the
+row's usual words. Tests for both scenarios.
+```
+
+The second finding narrows §9.2: an older "More → Due date" charge that is a line of its first
+invoice shows what it shows today; told to the owner.
