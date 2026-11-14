@@ -862,8 +862,20 @@ def _entry_message(entry: CalendarEntry, address: str) -> mail.Message:
     if entry.body:
         text += f"{entry.body}\n\n"
     text += f"Open it: {link}\n"
+    return mail.Message(to=address, subject=entry_subject(entry), text=text)
+
+
+def entry_subject(entry: CalendarEntry) -> str:
+    """The reminder e-mail's subject ("Reminder: Call the landlord"), one line, at most the
+    subject limit; the Outbox rebuilds an older row's subject with it (PLAN-015k)."""
     subject = " ".join(f"{entry.get_kind_display()}: {entry.title}".split())
-    return mail.Message(to=address, subject=subject[:SUBJECT_MAX_LENGTH], text=text)
+    return subject[:SUBJECT_MAX_LENGTH]
+
+
+def promise_subject(promise: ContactEntry) -> str:
+    """The promise-to-pay e-mail's subject, as :func:`entry_subject` for a promise."""
+    subject = " ".join(f"Promise to pay due today: {promise.operator.display_name}".split())
+    return subject[:SUBJECT_MAX_LENGTH]
 
 
 def _promise_message(promise: ContactEntry, address: str) -> mail.Message:
@@ -876,8 +888,7 @@ def _promise_message(promise: ContactEntry, address: str) -> mail.Message:
         f"{by}.\n\n{promise.body}\n\n"
         f"Notes & follow-ups: {settings.APP_BASE_URL.rstrip('/')}{path}#contacts\n"
     )
-    subject = " ".join(f"Promise to pay due today: {operator.display_name}".split())
-    return mail.Message(to=address, subject=subject[:SUBJECT_MAX_LENGTH], text=text)
+    return mail.Message(to=address, subject=promise_subject(promise), text=text)
 
 
 def _morning_item(
@@ -904,8 +915,10 @@ def _morning_item(
 
 def send_morning_email(entity_type: str, entity_id: uuid.UUID, on: date) -> tuple[bool, str]:
     """The ``calendar_email`` job: one morning e-mail to the item's author, if the item
-    still asks for it on ``on``. Audited as ``calendar.morning_email`` with the outcome,
-    never the address or the text."""
+    still asks for it on ``on``. Audited as ``calendar.morning_email`` with the outcome and,
+    once a message was made (PLAN-015k), the address it went or would have gone to (``to``)
+    and its subject; a held one adds the receipt's reason (``reason``). The body is never
+    stored; a row with no address carries the outcome alone."""
     exists = (
         CalendarEntry.objects.filter(pk=entity_id).exists()
         if entity_type == JobEntity.CALENDAR_ENTRY
@@ -936,15 +949,28 @@ def send_morning_email(entity_type: str, entity_id: uuid.UUID, on: date) -> tupl
             entity_type,
             entity_id,
             None,
-            {"outcome": "failed", "error": error.cause},
+            {
+                "outcome": "failed",
+                "error": error.cause,
+                "to": message.to,
+                "subject": message.subject,
+            },
         )
         return False, MORNING_FAILED.format(cause=error.cause)
+    after: dict[str, object] = {
+        "outcome": receipt.disposition,
+        "on": on.isoformat(),
+        "to": message.to,
+        "subject": message.subject,
+    }
+    if receipt.disposition == mail.HELD and receipt.reason:
+        after["reason"] = receipt.reason
     _audit(
         None,
         "calendar.morning_email",
         entity_type,
         entity_id,
         None,
-        {"outcome": receipt.disposition, "on": on.isoformat()},
+        after,
     )
     return True, MORNING_SENT[receipt.disposition]
