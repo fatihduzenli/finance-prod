@@ -429,16 +429,14 @@ def charges_page(client: Client, lease: Lease) -> str:
 
 
 def test_the_charges_list_shows_each_setup_charges_words(admin: Client, today: date) -> None:
-    lease = save(
-        admin,
-        **{
-            f"{FEE}_when": "on_date",
-            f"{FEE}_on": "2026-12-15",
-            f"{DEP}_when": "installments",
-            f"{DEP}_count": "3",
-            f"{DEP}_first_due": "2026-12-01",
-        },
-    )
+    timing: dict[str, Any] = {
+        f"{FEE}_when": "on_date",
+        f"{FEE}_on": "2026-12-15",
+        f"{DEP}_when": "installments",
+        f"{DEP}_count": "3",
+        f"{DEP}_first_due": "2026-12-01",
+    }
+    lease = save(admin, **timing)
     text = charges_page(admin, lease)
     assert '· <span class="charge-timing">due Dec 15, 2026</span>' in text
     assert '· <span class="charge-timing">0 of 3 installments paid</span>' in text
@@ -462,7 +460,7 @@ def lease_with_planned_charges(admin: Client, number: int, count: int) -> Lease:
     from Dec 1, 2026)."""
     from ledger.models import FeeType
 
-    fields: dict[str, str] = {f"{DEP}_price": "", f"{FEE}_price": ""}
+    fields: dict[str, Any] = {f"{DEP}_price": "", f"{FEE}_price": ""}
     for index in range(count):
         code = f"qc_{number}_{index}"
         FeeType.objects.create(
