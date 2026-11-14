@@ -7,11 +7,13 @@ the select sits under the price and the page does not scroll sideways
 
 from __future__ import annotations
 
+import os
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, expect
+from playwright.sync_api import Browser, Page, expect
 from pytest_django.live_server_helper import LiveServer
 
 from ledger.models import Lease
@@ -19,6 +21,15 @@ from ledger.services import installments
 from tests.e2e.test_new_lease import LAPTOP, PHONE, a_world, fill_the_reference, signed_in
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
+
+
+def shot(page: Page, name: str, selector: str) -> None:
+    """With ``QA_SHOTS_DIR`` set, the element ``selector`` as ``name``.png (Fable's QA shots)."""
+    folder = os.environ.get("QA_SHOTS_DIR")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        page.locator(selector).screenshot(path=str(Path(folder) / f"{name}.png"))
+
 
 #: (price, count, first date, cadence): with and without a remainder, counts 2 to 12, the three
 #: cadences, a first date on the 31st, a year boundary, a leap February.
@@ -108,6 +119,8 @@ def test_price_when_installments_summary_and_the_saved_words(
         ]
     )
     expect(page.locator("#setup-total")).to_have_text("$300.00")
+    shot(page, "015j-rows-laptop-light", "#setup-card")
+    shot(page, "015j-summary-laptop-light", "#lease-summary")
     page.locator("#save-lease").click()
     page.wait_for_load_state()
     lease = Lease.objects.get(store=store)
@@ -115,6 +128,7 @@ def test_price_when_installments_summary_and_the_saved_words(
     timing = page.locator(".charge-timing")
     expect(timing).to_have_count(2)
     assert sorted(timing.all_inner_texts()) == ["0 of 3 installments paid", "due Dec 15, 2026"]
+    shot(page, "015j-charges-laptop-light", "main")
     assert lease.started_on == date(2026, 11, 15)
     context.close()
 
@@ -143,4 +157,6 @@ def test_on_a_phone_the_select_is_under_the_price(
     assert select["y"] >= price["y"] + price["height"]
     assert abs(select["width"] - row["width"]) <= 1  # its own full-width line
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.select_option("#id_setup_security_deposit_when", "on_date")
+    shot(page, "015j-rows-phone-dark", "#setup-card")
     context.close()
