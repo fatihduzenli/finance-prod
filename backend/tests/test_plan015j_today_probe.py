@@ -6,7 +6,6 @@ page tests' ``today``); the lease starts 2026-11-15 unless a test says otherwise
 from __future__ import annotations
 
 import dataclasses
-import html
 import uuid
 from collections.abc import Iterator
 from datetime import date
@@ -51,7 +50,6 @@ from tests.test_new_lease_page import (
     connect,
     create_data,
     deposit_type,
-    page,
     post_create,
     shared_world,
     vacant_store,
@@ -227,13 +225,15 @@ def test_q1_activate_now_adds_no_second_rent_or_setup_charge(admin: Client, toda
 # --- 2. A manual payment on a setup charge before the start date -----------------------------
 
 
-def test_q2_the_store_page_payment_entry_refuses_a_prospective_lease(
+def test_q2_the_store_page_payment_entry_pays_a_prospective_lease(
     admin: Client, today: date
 ) -> None:
+    """Re-pinned (Opus, PLAN-015j §11 A): it refused with NO_LEASE; the store page's entry
+    now pays the store's upcoming prospective lease when it has no current lease."""
     lease = save(admin)
     assert lease is not None
     fee = the_sign_fee(lease)
-    assert payments_entry.current_lease(lease.store, TODAY) is None
+    assert payments_entry.current_lease(lease.store, TODAY) == lease
     outcome = payments_entry.record_entry(
         lease.store,
         payments_entry.EntryInput(
@@ -248,16 +248,14 @@ def test_q2_the_store_page_payment_entry_refuses_a_prospective_lease(
         actor=billing_user(),
         today=TODAY,
     )
-    assert (outcome.ok, outcome.message) == (False, payments_entry.NO_LEASE)
-    assert payments_entry.NO_LEASE == (
-        "This store has no current lease: there is nothing to pay. Nothing was recorded."
-    )
-    assert not Payment.objects.exists()
-    # The page itself sends staff back to the Charges tab with the same sentence.
+    assert outcome.ok, outcome.message
+    assert [payment.one_off_charge_id for payment in outcome.payments] == [fee.pk]
+    assert charge_state(fee)[2:] == ("paid", D("500.00"), D("0.00"))
+    # The page itself opens with the lease's open charges (it sent staff back before).
     billing = client_for(Role.BILLING, "billing-probe-store")[0]
     response = billing.get(f"/stores/{lease.store_id}/payments/new/")
-    assert response.status_code == 302
-    assert html.escape(payments_entry.NO_LEASE) in page(billing, response["Location"])
+    assert response.status_code == 200
+    assert f'name="alloc_{the_deposit(lease).pk}"' in response.content.decode()
 
 
 @pytest.mark.parametrize("which", ["sign_fee_on_draft", "dated_deposit"])

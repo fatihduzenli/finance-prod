@@ -28,7 +28,8 @@ the lease's row lock:
 - the audit row ``payment_entry.recorded`` on the lease (the group, the lines, the credit
   kept and applied, the entry's key), beside each service's and each credit's own rows.
 
-Refused, with nothing written (one sentence): no current lease; a method other than
+Refused, with nothing written (one sentence): no current lease (nor, when there is none,
+an upcoming prospective lease, PLAN-015j §11 A); a method other than
 Zelle, wire, check or other; an amount of zero, negative, not in cents or too large; a date in
 the future; a note missing or holding a card or account number (the reference too); an
 allocation or credit application for a charge that is not an open charge of the lease
@@ -74,6 +75,7 @@ from ledger.services import (
     one_off_charges,
     receivables,
     rent_run,
+    workspace,
 )
 from ledger.validators import validate_no_payment_data, visible_text
 from ledger.wording import format_amount
@@ -235,8 +237,13 @@ def open_charges(lease: Lease, today: date) -> list[OpenCharge]:
 
 
 def current_lease(store: Store, today: date) -> Lease | None:
-    """The lease a store page payment is for: the store's current lease."""
-    return lease_end.current_lease(store, today)
+    """The lease a store page payment is for: the store's current lease
+    (:func:`ledger.services.lease_end.current_lease`) and, only when it has none, its upcoming
+    prospective lease not ended (:func:`ledger.services.workspace.upcoming_lease`, the
+    earliest start first; PLAN-015j §11 A: a prospective lease's move-in charges are paid as an
+    active lease's). End lease and the transfer wizard keep reading
+    ``lease_end.current_lease``."""
+    return lease_end.current_lease(store, today) or workspace.upcoming_lease(store)
 
 
 # --- Recording --------------------------------------------------------------------------
