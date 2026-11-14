@@ -706,12 +706,13 @@ def test_the_lease_words_of_a_setup_charge(admin: Client, today: date) -> None:
     deposit = charge(lease, "security_deposit")
     assert charge_timing.lease_words(fee) == "due Dec 15, 2026"
     assert charge_timing.lease_words(deposit) == ""  # with the first invoice
-    # §9.2: an older "More → Due date" kept a due date that is not the start: "due <date>",
-    # with no data rewritten, even on the first invoice.
+    # Re-pinned (Opus, PLAN-015j §13, the second MAJOR finding): an older "More → Due date"
+    # kept a due date that is not the start; a line of the first invoice (here its draft)
+    # keeps the row's usual words (it read "due Nov 20, 2026").
     OneOffCharge.objects.filter(pk=deposit.pk).update(due_date=date(2026, 11, 20))
     deposit.refresh_from_db()
     assert deposit.pk in draft_charge_ids(lease)
-    assert charge_timing.lease_words(deposit) == "due Nov 20, 2026"
+    assert charge_timing.lease_words(deposit) == ""
     # Paid: no words.
     Payment.objects.create(
         one_off_charge=fee,

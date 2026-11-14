@@ -193,11 +193,14 @@ def lease_words(charge: OneOffCharge) -> str:
     ``""`` when nothing (the row's usual words apply):
 
     - on a plan (not cancelled): "1 of 3 installments paid";
-    - owed and on no plan, set "Due on a date" (``dated``) and on no invoice or draft, or whose
-      stored due date is not its lease's start date (an older "More → Due date"): "due Dec 15,
-      2026".
+    - owed, on no plan and on no invoice nor draft not yet sent
+      (:func:`ledger.services.deposits.riding_invoice`), set "Due on a date" (``dated``) or
+      whose stored due date is not its lease's start date (an older "More → Due date"): "due
+      Dec 15, 2026".
 
-    A charge "With the first invoice" (due on the start date) has no words of its own."""
+    A charge on an invoice or a draft (the first invoice's lines) has no words of its own,
+    whatever its due date: "Activate now" or Change start date moves the start, not the
+    charge's stored due date (§13)."""
     if charge.category != OneOffCategory.SETUP:
         return ""
     plan = (
@@ -212,9 +215,9 @@ def lease_words(charge: OneOffCharge) -> str:
         return ""
     if charge.balance <= 0:
         return ""
+    if deposits.riding_invoice(charge):
+        return ""
     start = charge.lease.started_on if charge.lease is not None else None
-    dated_alone = charge.dated and not deposits.riding_invoice(charge)
-    moved = start is not None and charge.due_date != start
-    if dated_alone or moved:
+    if charge.dated or (start is not None and charge.due_date != start):
         return DUE_ON.format(day=day_text(charge.due_date))
     return ""

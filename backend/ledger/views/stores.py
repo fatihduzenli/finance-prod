@@ -486,11 +486,12 @@ def store_schedule_payment(request: HttpRequest, pk: str) -> HttpResponse:
     """``ledger:stores:schedule_payment`` (billing; PLAN-012e-2 D4): "Schedule a payment"
     moved into the invoice builder; this route redirects to the store's New invoice page
     with Schedule for a date chosen. A store with no current lease goes to its Charges tab
-    as before."""
+    as before (the store's current lease, ``lease_end.current_lease``: a store whose only lease
+    is prospective goes there too, PLAN-015j §13)."""
     if not meets(_role(request), Role.BILLING):
         return forbidden(request)
     store = _load(pk)
-    lease = payments_entry.current_lease(store, timezone.localdate())
+    lease = lease_end.current_lease(store, timezone.localdate())
     if lease is None:
         return _no_lease(request, store)
     return redirect(builder_url(store, lease.pk, invoice_builder.CollectChoice.SCHEDULE))
@@ -501,11 +502,12 @@ def store_schedule_payment(request: HttpRequest, pk: str) -> HttpResponse:
 def store_charge_now_pick(request: HttpRequest, pk: str) -> HttpResponse:
     """``ledger:stores:charge_now_pick`` (admin; PLAN-012e-2 D4): "Charge now" moved into
     the invoice builder; this route redirects to the store's New invoice page with Charge
-    now chosen. A charge's own Charge now stays on its page."""
+    now chosen for the store's current lease (``lease_end.current_lease``; a prospective lease
+    is not chosen, PLAN-015j §13). A charge's own Charge now stays on its page."""
     if not meets(_role(request), Role.ADMIN):
         return forbidden(request)
     store = _load(pk)
-    lease = payments_entry.current_lease(store, timezone.localdate())
+    lease = lease_end.current_lease(store, timezone.localdate())
     return redirect(
         builder_url(
             store, lease.pk if lease is not None else None, invoice_builder.CollectChoice.CHARGE_NOW
