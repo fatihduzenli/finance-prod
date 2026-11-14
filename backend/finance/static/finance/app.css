@@ -1934,6 +1934,10 @@ p.detail-more-notes { padding-left: 0; }
   .help-topic { padding: 18px 16px; }
   .help-topics a { padding: 12px; }
   .help-footer { text-align: left; }
+  /* New lease's Move-in charges (PLAN-015j §4): the When select drops under the price on its own
+     full-width line; the chosen When's fields one a row. */
+  .movein-when-select { grid-column: 1 / -1; }
+  .movein-when .field { flex: 1 1 100%; }
 }
 
 /* --- New lease (docs/qa/PLAN-014b item 1; the owner's new-lease-dark-laptop.png) ------------------
@@ -1945,7 +1949,10 @@ p.detail-more-notes { padding-left: 0; }
    a track and knob) and the teal .prorate-line; (3) .debit-row: Debit day and "Twice a month"
    side by side, .channel-tiles three a row (the builder's .collect-tile); (4) .billing-grid two
    columns, Bank account as the .radio-segmented track (.account-segments); (5) .movein-row: the
-   name, the price (or the deposit's mirrored .movein-mirror), the grey usual price, and "More";
+   name, the price, the When select (.movein-when-select, the page's pill select; muted while
+   disabled, an unpriced row), the grey usual price, and "More"; under them on their own line
+   .movein-when: the chosen When's fields side by side and the muted payments sentence
+   (PLAN-015j §4), the line gone while none of them shows;
    .step-link: a teal text button ("+ New operator", "Copy from operator", "+ Add item"). The
    Summary (.lease-summary-card): the small capitals label, rows of label and value, a rule, the
    bold First invoice, the full-width "Create lease", Cancel and the muted line. Phone: one
@@ -2005,18 +2012,30 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--link); outl
 .radio-segmented > div[hidden] { display: none; }
 .radio-segmented > div > label:has(input:disabled) { cursor: not-allowed; opacity: 0.7; }
 .movein-rows { border-top: 1px solid var(--border-soft); }
-.movein-row { display: grid; grid-template-columns: minmax(0, 1fr) 10rem 8rem auto; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); }
+.movein-row { display: grid; grid-template-columns: minmax(0, 1fr) 8.5rem 12.5rem 7rem auto; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); }
 .movein-row[hidden] { display: none; }
 .movein-name { margin: 0; color: var(--text); font-size: var(--fs-md); font-weight: 500; }
 .movein-price input { width: 100%; text-align: right; font-variant-numeric: tabular-nums; }
-.movein-mirror { display: block; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.movein-when-select select { width: 100%; }
+.movein-when-select select:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
 .movein-usual { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .movein-errors { grid-column: 1 / -1; }
-.movein-more { grid-column: 4; grid-row: 1; justify-self: end; }
+.movein-more { grid-column: 5; grid-row: 1; justify-self: end; }
 .movein-more[open] { grid-column: 1 / -1; grid-row: auto; justify-self: stretch; }
 .movein-more summary { color: var(--link); font-size: var(--fs-sm); cursor: pointer; }
 .movein-more-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 var(--space-3); }
 .movein-more-fields input { width: 100%; }
+.movein-when { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 var(--space-3); grid-column: 1 / -1; }
+.movein-when:not(:has(> .field:not([hidden]), > .movein-preview:not([hidden]))) { display: none; }
+.movein-when .field { flex: 0 1 auto; min-width: 0; margin: 0 0 var(--space-2); }
+.movein-when .field > label { margin-top: var(--space-1); }
+.movein-when input { width: 11rem; }
+.movein-when select { min-width: 10rem; }
+.movein-preview { flex: 1 1 100%; margin: 0 0 var(--space-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.movein-preview[hidden] { display: none; }
+.lease-summary-timed { margin: var(--space-2) 0 0; padding: 0; list-style: none; color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.lease-summary-timed li { padding: 2px 0; overflow-wrap: anywhere; }
+.lease-summary-timed[hidden] { display: none; }
 .add-item { margin: var(--space-3) 0 0; }
 .summary-card .summary-label { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 .lease-summary-rows { display: block; margin: 0; font-size: var(--fs-base); }

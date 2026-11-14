@@ -9,8 +9,11 @@ otherwise."""
 
 from __future__ import annotations
 
+import html
+import re
 import uuid
 from datetime import date
+from pathlib import Path
 from decimal import Decimal
 from typing import Any
 
@@ -30,7 +33,7 @@ from ledger.services import (
 )
 from tests import test_new_lease_page as new_lease
 from tests.receivables_helpers import a_lease
-from tests.test_new_lease_page import create_data, post_create, vacant_store
+from tests.test_new_lease_page import create_data, create_path, page, post_create, vacant_store
 from tests.test_operator_views import client_for
 from tests.test_plan015j_today_probe import send_move_in
 
@@ -43,6 +46,10 @@ TODAY = new_lease.TODAY  # 2026-11-03
 START = date(2026, 11, 15)
 DEP = "setup_security_deposit"
 FEE = "setup_sign_fee"
+BACKEND = Path(__file__).resolve().parent.parent
+APP_CSS = BACKEND / "finance" / "static" / "finance" / "app.css"
+SCRIPT = BACKEND / "ledger" / "static" / "ledger" / "new_lease.js"
+PHONE_OPEN = "@media (max-width: 719.98px) {"
 
 
 def billing() -> tuple[Client, Any]:
@@ -159,3 +166,112 @@ def test_an_older_due_date_on_no_invoice_reads_due(admin: Client, today: date) -
     assert charge_timing.lease_words(fee) == "due Nov 20, 2026"
     deposit = OneOffCharge.objects.get(lease=lease, fee_type__code="security_deposit")
     assert charge_timing.lease_words(deposit) == ""  # due on the start: no words
+
+
+# --- Task 3: the page --------------------------------------------------------------------------
+
+
+def row_of(text: str, code: str) -> str:
+    """The Move-in charges row ``setup-<code>`` of the page, through its When line."""
+    start = text.index(f'<div class="movein-row" id="setup-{code}"')
+    return text[start : text.index("</div>\n      </div>", start)]
+
+
+def phone_block(css: str) -> str:
+    """The body of app.css's one phone block (``@media (max-width: 719.98px)``)."""
+    start = css.index(PHONE_OPEN) + len(PHONE_OPEN)
+    depth, at = 1, start
+    while depth:
+        depth += {"{": 1, "}": -1}.get(css[at], 0)
+        at += 1
+    return css[start : at - 1]
+
+
+def test_each_row_has_name_price_when_usual_and_more_in_that_order(
+    admin: Client, today: date
+) -> None:
+    text = page(admin, create_path(vacant_store()))
+    for code, name in (("security_deposit", "Security deposit"), ("sign_fee", "Sign fee")):
+        row = row_of(text, code)
+        order = [
+            row.index('class="movein-name"'),
+            row.index('class="movein-price"'),
+            row.index('class="movein-when-select"'),
+            row.index('class="movein-usual'),
+            row.index('class="movein-more"'),
+            row.index(f'id="setup-{code}-when"'),
+        ]
+        assert order == sorted(order)
+        select = re.search(r'<select name="setup_' + code + r'_when"[^>]*>', row)
+        assert select is not None
+        # No visible label; the accessible name; rendered enabled (the script disables it).
+        assert f'aria-label="When: {name}"' in select.group(0)
+        assert "disabled" not in select.group(0)
+        assert f'for="id_setup_{code}_when"' not in row
+        when_line = row[row.index(f'id="setup-{code}-when"') :]
+        assert 'name="setup_' + code + '_when"' not in when_line
+
+
+def test_the_sub_fields_show_for_their_choice_while_the_row_is_priced(
+    admin: Client, today: date
+) -> None:
+    row = row_of(page(admin, create_path(vacant_store())), "sign_fee")
+    priced = "id_setup_sign_fee_price"
+    assert f'data-shown-when="id_setup_sign_fee_when=on_date&amp;{priced}"' in row
+    for part in ("count", "first_due", "cadence"):
+        found = re.search(r'<(?:input|select)[^>]*name="setup_sign_fee_' + part + '"[^>]*>', row)
+        assert found is not None
+        assert f'data-shown-when="id_setup_sign_fee_when=installments&amp;{priced}"' in (
+            found.group(0)
+        )
+    # The payments sentence is always in the row, empty and hidden until it has words.
+    assert (
+        '<p class="muted movein-preview" aria-live="polite" hidden id="setup-sign_fee-preview"></p>'
+    ) in row
+    # §9.5: the hint under "Due on a date" on a non-deposit row only.
+    hint = html.escape(charge_timing.NOT_ON_INVOICE)
+    assert hint in row
+    deposit = row_of(page(admin, create_path(vacant_store(438, "Other"))), "security_deposit")
+    assert hint not in deposit
+
+
+def test_the_summary_list_off_the_first_invoice_is_always_there(admin: Client, today: date) -> None:
+    text = page(admin, create_path(vacant_store()))
+    assert (
+        '<ul class="lease-summary-timed" id="summary-timed" '
+        'aria-label="Not on the first invoice" hidden></ul>'
+    ) in text
+
+
+def test_the_step_note_and_no_deposit_mirror(admin: Client, today: date) -> None:
+    text = page(admin, create_path(vacant_store()))
+    assert "One-time charges. Leave a price empty to skip it; choose when each is collected." in (
+        text
+    )
+    assert "billed with the first invoice" not in text
+    assert "deposit-mirror" not in text and "movein-mirror" not in text
+
+
+def test_the_styles_the_select_and_its_phone_line() -> None:
+    css = APP_CSS.read_text(encoding="utf-8")
+    assert css.count(PHONE_OPEN) == 1
+    block = phone_block(css)
+    assert ".movein-when-select { grid-column: 1 / -1; }" in block
+    assert ".movein-when .field { flex: 1 1 100%; }" in block
+    outside = css.replace(block, "")
+    assert "data-role" not in outside
+    assert ".movein-when-select { grid-column: 1 / -1; }" not in outside
+    # The old controls' styles are gone.
+    for gone in ("movein-mirror", "deposit-when", "deposit-plan-row"):
+        assert gone not in css
+    # Laptop: name, price, When, usual, More in one row.
+    assert (
+        ".movein-row { display: grid; grid-template-columns: minmax(0, 1fr) 8.5rem 12.5rem 7rem "
+        "auto;"
+    ) in css
+
+
+def test_the_script_has_no_mirror_and_exposes_the_preview() -> None:
+    script = SCRIPT.read_text(encoding="utf-8")
+    assert "deposit-mirror" not in script
+    assert "window.ledgerNewLease = { paymentsPreview: paymentsPreview };" in script

@@ -1,4 +1,4 @@
-{% comment %}The New lease page (docs/qa/PLAN-014b item 1, Fable's decisions 2 to 8; the owner's reference docs/design/new-lease-dark-laptop.png). Five numbered cards in the form's main column, each with its number, title and muted line (_step_head.html): (1) Operator: the search input #operator-search filtering the options of the operator select (ledger/new_lease.js, no endpoint; without the script the select alone), "+ New operator" opening the operator dialog (its no-script link the operator page with next), the chosen operator as #operator-card from the option's data-initials, data-phone-text, data-email, data-stores and data-store-count; (2) Terms: Start date and Monthly rent in one row, the "Prorate the first month" switch and the live line #prorate-line, then the Free rent row #free-rent-row (Days, 0 to 366, and Starts: from the move-in date or the 1st of the following month; PLAN-015d), the Summary's #summary-free-rent-row showing the first month's free rent; (3) Collection: Debit day (1st to 28th) with "Twice a month" beside it, then the three channel cards; (4) Billing details (_billing_step.html with step, shown once an operator is chosen); (5) Move-in charges: one row per checklist item, the deposit an ordinary row (PLAN-015j §9.1): its price, the grey usual price, cost and vendor behind "More", and its When (PLAN-015j §4: with the first invoice, due on a date, or in 2 to 12 installments from a first date, monthly, every two weeks or weekly; the date and plan fields shown by ledger/shown_when.js for their choice, the "payments" sentence under a row in installments on a re-render; a row off the first invoice is not a move-in line and the Summary lists it under the figures, #summary-timed); the rows of the other active fee types hidden behind "+ Add item" with the script (all shown without it; a row without a price charges nothing and ignores its When). Then the Documents card (unnumbered). The right column: the sticky Summary aside#lease-summary (form.summary, kept live by the script; its last line #summary-after reads "Starts <date>, activated on that day." for a start after data-today, PLAN-015b §9.1), "Create lease", Cancel and the muted line. Phone: one column, the Summary above the button. The operator dialog sits after the form (a form of its own).{% endcomment %}{% load money static %}
+{% comment %}The New lease page (docs/qa/PLAN-014b item 1, Fable's decisions 2 to 8; the owner's reference docs/design/new-lease-dark-laptop.png). Five numbered cards in the form's main column, each with its number, title and muted line (_step_head.html): (1) Operator: the search input #operator-search filtering the options of the operator select (ledger/new_lease.js, no endpoint; without the script the select alone), "+ New operator" opening the operator dialog (its no-script link the operator page with next), the chosen operator as #operator-card from the option's data-initials, data-phone-text, data-email, data-stores and data-store-count; (2) Terms: Start date and Monthly rent in one row, the "Prorate the first month" switch and the live line #prorate-line, then the Free rent row #free-rent-row (Days, 0 to 366, and Starts: from the move-in date or the 1st of the following month; PLAN-015d), the Summary's #summary-free-rent-row showing the first month's free rent; (3) Collection: Debit day (1st to 28th) with "Twice a month" beside it, then the three channel cards; (4) Billing details (_billing_step.html with step, shown once an operator is chosen); (5) Move-in charges: one row per checklist item, the deposit an ordinary row (PLAN-015j §9.1): its name, its price, its When select right of the price (PLAN-015j §4: with the first invoice, due on a date, or in 2 to 12 installments from a first date, monthly, every two weeks or weekly; no visible label, its accessible name "When: <fee name>"; rendered enabled, ledger/new_lease.js disables it while the price is empty), the grey usual price and cost and vendor behind "More"; under the row on its own line (.movein-when) the date, or the count, first date and cadence with the "payments" sentence (#setup-<code>-preview, aria-live, from the server on a re-render and live from the script), shown by ledger/shown_when.js for their choice while the row is priced; a row off the first invoice is not a move-in line and the Summary lists it under the figures, #summary-timed, live); the rows of the other active fee types hidden behind "+ Add item" with the script (all shown without it; a row without a price charges nothing and ignores its When). Then the Documents card (unnumbered). The right column: the sticky Summary aside#lease-summary (form.summary, kept live by the script; its last line #summary-after reads "Starts <date>, activated on that day." for a start after data-today, PLAN-015b §9.1), "Create lease", Cancel and the muted line. Phone: one column, the Summary above the button. The operator dialog sits after the form (a form of its own).{% endcomment %}{% load money static %}
 <form method="post" id="lease-form" class="js-single-submit new-lease-form" enctype="multipart/form-data">
   {% csrf_token %}
   {% for field in form.hidden_fields %}{{ field }}{% endfor %}
@@ -47,14 +47,16 @@
   </section>
   {% include "ledger/leases/_billing_step.html" with copy_from="id_operator" step=4 %}
   <section class="card form-card new-lease-step" id="setup-card" aria-labelledby="setup-title">
-    {% include "ledger/leases/_step_head.html" with number=5 heading_id="setup-title" title="Move-in charges" note="One-time charges billed with the first invoice. Leave a price empty to skip it." action="" %}
+    {% include "ledger/leases/_step_head.html" with number=5 heading_id="setup-title" title="Move-in charges" note="One-time charges. Leave a price empty to skip it; choose when each is collected." action="" %}
     <div class="movein-rows" id="setup-checklist">
       {% for row in form.setup_rows %}
       <div class="movein-row" id="setup-{{ row.fee_type.code }}"{% if row.extra %} data-extra{% endif %}>
         <label class="movein-name" for="{{ row.price.id_for_label }}">{{ row.fee_type.name }}</label>
         <span class="movein-price">{{ row.price }}</span>
+        <span class="movein-when-select">{{ row.when }}</span>
         <span class="movein-usual muted">{% if row.usual %}usual {{ row.usual }}{% endif %}</span>
         {% if row.price.errors %}<div class="movein-errors">{{ row.price.errors }}</div>{% endif %}
+        {% if row.when.errors %}<div class="movein-errors">{{ row.when.errors }}</div>{% endif %}
         <details class="movein-more"{% if row.cost.errors or row.vendor.errors %} open{% endif %}><summary>More<span class="visually-hidden">: {{ row.fee_type.name }}'s cost and vendor</span></summary>
           <div class="movein-more-fields">
             <div class="field{% if row.cost.errors %} has-error{% endif %}"><label for="{{ row.cost.id_for_label }}">Cost</label>{{ row.cost }}<span class="help muted">Empty means the cost is unknown.</span>{{ row.cost.errors }}</div>
@@ -62,12 +64,11 @@
           </div>
         </details>
         <div class="movein-when" id="setup-{{ row.fee_type.code }}-when">
-          {% include "ledger/stores/_form_field.html" with field=row.when no_mark=True %}
           {% include "ledger/stores/_form_field.html" with field=row.on no_mark=True %}
           {% include "ledger/stores/_form_field.html" with field=row.count no_mark=True %}
           {% include "ledger/stores/_form_field.html" with field=row.first_due no_mark=True %}
           {% include "ledger/stores/_form_field.html" with field=row.cadence no_mark=True %}
-          {% if row.preview %}<p class="muted movein-preview" id="setup-{{ row.fee_type.code }}-preview">{{ row.preview }}</p>{% endif %}
+          <p class="muted movein-preview" aria-live="polite"{% if not row.preview %} hidden{% endif %} id="setup-{{ row.fee_type.code }}-preview">{{ row.preview }}</p>
         </div>
       </div>
       {% empty %}
@@ -94,7 +95,7 @@
         <div><dt>Move-in charges</dt><dd id="setup-total">{{ summary.move_in }}</dd></div>
         <div class="lease-summary-total"><dt>First invoice</dt><dd id="summary-total">{{ summary.total }}</dd></div>
       </dl>
-      {% if summary.timed %}<ul class="lease-summary-timed" id="summary-timed">{% for line in summary.timed %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
+      <ul class="lease-summary-timed" id="summary-timed" aria-label="Not on the first invoice"{% if not summary.timed %} hidden{% endif %}>{% for line in summary.timed %}<li>{{ line }}</li>{% endfor %}</ul>
       <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-lease">Create lease</button></div>
       <p class="summary-cancel"><a class="btn btn-quiet" id="cancel-lease" href="{{ cancel_url }}">Cancel</a></p>
       <p class="muted summary-after" id="summary-after" data-default="{{ summary.default_after }}">{{ summary.after }}</p>

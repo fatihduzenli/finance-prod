@@ -218,7 +218,8 @@ def test_the_page_has_five_numbered_cards_the_header_and_the_summary(
         "Rent and start.",
         "When and how rent is collected.",
         "Who this store is billed to. Each store can use its own company, e-mail and bank account.",
-        "One-time charges billed with the first invoice. Leave a price empty to skip it.",
+        # Re-pinned (Opus, PLAN-015j task 3): each row chooses when it is collected.
+        "One-time charges. Leave a price empty to skip it; choose when each is collected.",
     ):
         assert note in html_text
     assert "New lease for #437 Test Store 5" in html_text

@@ -810,18 +810,22 @@ class LeaseCreateForm(BillingStepMixin, LeaseForm):
             self._timing_fields(fee_type)
 
     def _timing_fields(self, fee_type: FeeType) -> None:
-        """The row's When select and the fields of its choices (PLAN-015j §4), each shown by
-        ``ledger/shown_when.js`` for its choice; "Due on a date" on a row that is not the
-        deposit says the charge has no invoice of its own (§9.5)."""
+        """The row's When select (no visible label; its accessible name "When: <fee name>")
+        and the fields of its choices (PLAN-015j §4), each shown by ``ledger/shown_when.js``
+        for its choice while the row's price holds a value (the page's script disables the
+        select of an unpriced row); "Due on a date" on a row that is not the deposit says the
+        charge has no invoice of its own (§9.5)."""
         name = _setup_name(fee_type)
         when = f"id_{name}_when"
-        on_date = {SHOWN_WHEN: f"{when}=on_date"}
-        plan = {SHOWN_WHEN: f"{when}=installments"}
+        priced = f"id_{name}_price"
+        on_date = {SHOWN_WHEN: f"{when}=on_date&{priced}"}
+        plan = {SHOWN_WHEN: f"{when}=installments&{priced}"}
         self.fields[f"{name}_when"] = _QuietChoiceField(
             label="When",
             choices=charge_timing.WHEN_CHOICES,
             initial=charge_timing.When.WITH_INVOICE,
             required=False,
+            widget=forms.Select({"aria-label": f"When: {fee_type.name}"}),
         )
         self.fields[f"{name}_on"] = forms.DateField(
             label="Due on",
